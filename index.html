@@ -32,18 +32,27 @@ a{color:var(--acc)}.hide{display:none}.mut{color:var(--mut)}pre{white-space:pre-
 <body>
 <header><b>Clipper CRM</b>
 <nav id="nav"></nav>
-<span style="margin-left:auto" class="mut" id="clock"></span></header>
+<span style="margin-left:auto" class="mut" id="sync"></span><span class="mut" id="clock"></span></header>
 <main id="main"></main>
 <script>
 const STATUSES=['New','Sample Sent','Replied','Interested','Client','No Response','Not Interested'];
 const TPL=['{n} podcast full episode','{n} podcast interview','how to start a {n} podcast','{n} podcast new episode'];
 const DEF={settings:{key:'',goal:5000,daily:100,minSubs:1000,maxSubs:150000,maxDays:60,followDays:3,templates:3,
+ syncUrl:'',syncPw:'',
  dm:"Saw your episode on {niche} — made this clip because it was too good not to share. No strings, just thought you'd like it. Full episode: {episode}"},
  niches:['real estate','personal finance','fitness','entrepreneurship','mental health','true crime','faith christian','sports betting','parenting','health longevity'],
  leads:[],payments:[],clients:[],team:[]};
 let S;try{S=JSON.parse(localStorage.getItem('clipperCRM'))}catch(e){}
 S=Object.assign({},DEF,S||{});S.settings=Object.assign({},DEF.settings,S.settings);
-const save=()=>localStorage.setItem('clipperCRM',JSON.stringify(S));
+let syncT,syncMsg='';
+function setSync(m){syncMsg=m;const e=document.getElementById('sync');if(e)e.textContent=m}
+function save(){localStorage.setItem('clipperCRM',JSON.stringify(S));clearTimeout(syncT);if(S.settings.syncUrl&&S.settings.syncPw)syncT=setTimeout(()=>syncCall('push'),2500)}
+async function syncCall(action){const g=S.settings;if(!g.syncUrl||!g.syncPw){setSync('Sync not set up');return null}
+ setSync(action=='push'?'Syncing…':'Pulling…');
+ const st={leads:S.leads,payments:S.payments,team:S.team,clients:S.clients,settings:{goal:g.goal,daily:g.daily}};
+ try{const r=await fetch(g.syncUrl,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({secret:g.syncPw,action,state:action=='push'?st:undefined})});
+  const j=await r.json();if(!j.ok)throw new Error(j.error);setSync(action=='push'?'Synced ✓ '+new Date().toLocaleTimeString():'Pulled ✓');return j}
+ catch(e){setSync('Sync failed: '+e.message);return null}}
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const iso=d=>{const x=d||new Date();return x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0')};
@@ -151,14 +160,18 @@ function moneyV(){const s=stats();
  $('#main').onclick=e=>{if(e.target.dataset.dp){S.payments.splice(e.target.dataset.dp,1);save();moneyV()}if(e.target.dataset.dt){S.team.splice(e.target.dataset.dt,1);save();moneyV()}}}
 function settings(){const g=S.settings,f=(k,l,t='number')=>`<div><label>${l}</label><input data-k="${k}" type="${t}" value="${esc(g[k])}"></div>`;
  $('#main').innerHTML=`<div class="card"><div class="grid">${f('key','YouTube API key','password')}${f('goal','Monthly goal ($)')}${f('daily','Daily outreach goal')}${f('minSubs','Min subscribers')}${f('maxSubs','Max subscribers')}${f('maxDays','Max days since last upload')}${f('followDays','Follow-up days')}${f('templates','Queries per niche (1-4)')}</div>
+ <h4>Google Sheet sync (so your bot sees your numbers)</h4><div class="grid">${f('syncUrl','Web app URL (…/exec)','text')}${f('syncPw','Sync password','password')}</div>
+ <div class="row"><button class="b p" id="sn">Sync now</button><button class="b" id="pl">Pull from Sheet (replaces local data)</button></div>
  <label>DM template ({name} {niche} {episode})</label><textarea data-k="dm">${esc(g.dm)}</textarea></div>
  <div class="card"><b>Backup</b><p class=mut>Your data lives in this browser only. Export regularly (or before clearing browser data) and import on another device.</p>
  <div class="row"><button class="b p" id="ex">Export JSON</button><input type="file" id="im" accept=".json"></div></div>`;
  $('#main').oninput=e=>{const k=e.target.dataset.k;if(!k)return;g[k]=e.target.type=='number'?+e.target.value:e.target.value;save()};
+ $('#sn').onclick=()=>syncCall('push');
+ $('#pl').onclick=async()=>{if(!confirm('Replace local leads/payments with the Sheet data?'))return;const j=await syncCall('pull');if(j){Object.assign(S,j.state);localStorage.setItem('clipperCRM',JSON.stringify(S));render()}};
  $('#ex').onclick=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(S,null,1)],{type:'application/json'}));a.download='clipper-crm-'+today()+'.json';a.click()};
  $('#im').onchange=async e=>{try{S=Object.assign({},DEF,JSON.parse(await e.target.files[0].text()));save();alert('Imported.');render()}catch(x){alert('Bad file')}}}
 setInterval(()=>$('#clock').textContent=new Date().toLocaleString([],{weekday:'short',hour:'numeric',minute:'2-digit'}),1000);
-render();
+render();setSync(S.settings.syncUrl?'Sync on':'');
 </script>
 </body>
 </html>

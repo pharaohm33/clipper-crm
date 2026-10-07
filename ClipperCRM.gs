@@ -32,6 +32,7 @@ function onOpen() {
     .addSeparator()
     .addItem('Mark selected Leads rows as Sample Sent', 'markSelectedSent')
     .addItem('Refresh Search Helper links', 'buildSearchHelper')
+    .addItem('Set website sync password', 'setSyncPassword')
     .addItem('Run setup again (safe, keeps data)', 'setupCRM')
     .addToUi();
 }
@@ -529,4 +530,93 @@ function markSelectedSent() {
   if (sh.getName() !== SHEETS.leads) { SpreadsheetApp.getUi().alert('Select rows on the Leads tab first.'); return; }
   var r = sh.getActiveRange();
   for (var i = 0; i < r.getNumRows(); i++) if (r.getRow() + i > 1) markSent_(sh, r.getRow() + i);
+}
+
+
+/* ---------------------------------------------------------------- website sync (web app) */
+/* Deploy: Deploy -> New deployment -> Web app -> Execute as: Me, Who has access: Anyone.
+   Then Clipper CRM -> Set website sync password, and paste the web app URL + password in the website's Settings. */
+
+function setSyncPassword() {
+  var ui = SpreadsheetApp.getUi();
+  var r = ui.prompt('Website sync password', 'Choose a password (8+ characters). You will paste the same one into the website.', ui.ButtonSet.OK_CANCEL);
+  if (r.getSelectedButton() !== ui.Button.OK) return;
+  var pw = r.getResponseText().trim();
+  if (pw.length < 8) { ui.alert('Too short — use 8+ characters.'); return; }
+  PropertiesService.getScriptProperties().setProperty('SYNC_SECRET', pw);
+  ui.alert('Saved.');
+}
+
+function json_(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }
+
+function doGet() { return json_({ ok: true, msg: 'Clipper CRM sync endpoint' }); }
+
+function doPost(e) {
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(20000);
+    var b = JSON.parse(e.postData.contents);
+    var secret = PropertiesService.getScriptProperties().getProperty('SYNC_SECRET');
+    if (!secret || b.secret !== secret) return json_({ ok: false, error: 'Wrong or unset password' });
+    if (b.action === 'pull') return json_({ ok: true, state: readState_() });
+    writeState_(b.state);
+    return json_({ ok: true, at: new Date().toISOString() });
+  } catch (err) {
+    return json_({ ok: false, error: String(err) });
+  } finally { try { lock.releaseLock(); } catch (x) {} }
+}
+
+function d_(s) { if (!s) return ''; var p = String(s).split('-'); return new Date(+p[0], +p[1] - 1, +p[2]); }
+function s_(d) { return d instanceof Date ? Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM-dd') : (d || ''); }
+
+function replaceRows_(sh, cols, rows) {
+  var max = sh.getMaxRows();
+  if (max > 1) sh.getRange(2, 1, max - 1, cols).clearContent();
+  if (!rows.length) return;
+  if (sh.getMaxRows() < rows.length + 1) sh.insertRowsAfter(sh.getMaxRows(), rows.length + 1 - sh.getMaxRows());
+  sh.getRange(2, 1, rows.length, cols).setValues(rows);
+}
+
+function writeState_(st) {
+  var ss = SpreadsheetApp.getActive();
+  var leads = ss.getSheetByName(SHEETS.leads);
+  var lr = (st.leads || []).map(function (l) {
+    return [d_(l.added), l.name, l.niche, l.url, l.subs || '', d_(l.last), l.episode, l.ig, l.x, l.tt, l.web,
+            l.status, d_(l.sent), d_(l.follow), l.notes || ''];
+  });
+  replaceRows_(leads, 15, lr);
+  var cid = ss.getSheetByName(SHEETS.leads);
+  var max = cid.getMaxRows();
+  if (max > 1) cid.getRange(2, L.cid, max - 1, 1).clearContent();
+  if (lr.length) cid.getRange(2, L.cid, lr.length, 1).setValues((st.leads || []).map(function (l) { return [l.id]; }));
+
+  replaceRows_(ss.getSheetByName(SHEETS.pay), 5, (st.payments || []).map(function (p) { return [d_(p.date), p.who, p.amount, 'Other', '']; }));
+  replaceRows_(ss.getSheetByName(SHEETS.team), 5, (st.team || []).map(function (t) { return [d_(t.date), t.who, '', t.clips, t.rate]; }));
+  (st.clients || []).forEach(function (n) { addClientIfMissing_(n, ''); });
+
+  var g = st.settings || {};
+  var set = ss.getSheetByName(SHEETS.settings);
+  if (g.goal) set.getRange('B3').setValue(g.goal);
+  if (g.daily) set.getRange('B4').setValue(g.daily);
+}
+
+function readState_() {
+  var ss = SpreadsheetApp.getActive();
+  var ls = ss.getSheetByName(SHEETS.leads), n = ls.getLastRow() - 1, leads = [];
+  if (n > 0) {
+    var cids = ls.getRange(2, L.cid, n, 1).getValues();
+    leads = ls.getRange(2, 1, n, 15).getValues().map(function (r, i) {
+      return { id: cids[i][0] || ('row' + (i + 2)), added: s_(r[0]), name: r[1], niche: r[2], url: r[3], subs: r[4] || 0, last: s_(r[5]),
+        episode: r[6], ig: r[7], x: r[8], tt: r[9], web: r[10], status: r[11] || 'New', sent: s_(r[12]), follow: s_(r[13]), notes: r[14] };
+    }).filter(function (l) { return l.name; });
+  }
+  var ps = ss.getSheetByName(SHEETS.pay), pn = ps.getLastRow() - 1;
+  var payments = pn > 0 ? ps.getRange(2, 1, pn, 3).getValues().filter(function (r) { return r[1] && r[2] !== ''; })
+    .map(function (r) { return { date: s_(r[0]), who: r[1], amount: Number(r[2]) }; }) : [];
+  var ts = ss.getSheetByName(SHEETS.team), tn = ts.getLastRow() - 1;
+  var team = tn > 0 ? ts.getRange(2, 1, tn, 5).getValues().filter(function (r) { return r[1] && r[3] !== ''; })
+    .map(function (r) { return { date: s_(r[0]), who: r[1], clips: Number(r[3]), rate: Number(r[4]) }; }) : [];
+  var cs = ss.getSheetByName(SHEETS.clients), cn = cs.getLastRow() - 1;
+  var clients = cn > 0 ? cs.getRange(2, 1, cn, 1).getValues().map(function (r) { return r[0]; }).filter(String) : [];
+  return { leads: leads, payments: payments, team: team, clients: clients };
 }
