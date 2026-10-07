@@ -70,7 +70,7 @@ function setupSettings_(ss) {
     ['Max Days Since Last Upload', 60, 'Only active podcasts'],
     ['Follow-Up Days', 3, 'Days after sample before follow-up is due'],
     ['Query Templates Per Niche', 3, '1-4. Each costs 100 API quota units (10,000/day free)'],
-    ['DM Template', 'Saw your episode on {niche} — made this clip because it was too good not to share. No strings, just thought you\'d like it. Full episode: {episode}',
+    ['DM Template', 'Hey! Just watched your latest episode on {niche} and loved it. I made a quick clip from it because it deserved more eyes. Totally free, just thought you\'d like to see it. Here\'s the full episode I pulled it from: {episode}',
      'Tokens: {name} {niche} {episode}. Attach the clip when you DM.']
   ];
   sh.getRange(1, 1, rows.length, 3).setValues(rows);
@@ -460,6 +460,12 @@ function processQuickAdd() {
 
 /* ---------------------------------------------------------------- daily outreach list */
 
+function spin_(t) {
+  var re = /\{([^{}]*\|[^{}]*)\}/, m;
+  while ((m = re.exec(t))) { var o = m[1].split('|'); t = t.replace(re, o[Math.floor(Math.random() * o.length)]); }
+  return t;
+}
+
 function buildTodayList() {
   var ss = SpreadsheetApp.getActive(), leads = ss.getSheetByName(SHEETS.leads), t = ss.getSheetByName(SHEETS.today);
   var goal = Number(setting_('Daily Outreach Goal')) || 100;
@@ -480,7 +486,7 @@ function buildTodayList() {
   var tpl = String(setting_('DM Template'));
   var rows = fresh.map(function (r) {
     var ig = r[L.ig - 1], other = r[L.x - 1] || r[L.tt - 1] || r[L.web - 1] || '';
-    var dm = tpl.replace(/\{name\}/g, r[L.name - 1]).replace(/\{niche\}/g, r[L.niche - 1]).replace(/\{episode\}/g, r[L.episode - 1]);
+    var dm = spin_(tpl).replace(/\s*[\u2014\u2013]\s*/g, ', ').replace(/\{name\}/g, r[L.name - 1]).replace(/\{niche\}/g, r[L.niche - 1]).replace(/\{episode\}/g, r[L.episode - 1]);
     return [r[L.name - 1], ig, other, r[L.episode - 1], dm, false, r[L.cid - 1]];
   });
   t.getRange(2, 1, rows.length, 7).setValues(rows);

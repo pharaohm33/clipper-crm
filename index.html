@@ -39,11 +39,12 @@ const STATUSES=['New','Sample Sent','Replied','Interested','Client','No Response
 const TPL=['{n} podcast full episode','{n} podcast interview','how to start a {n} podcast','{n} podcast new episode'];
 const DEF={settings:{key:'',goal:5000,daily:100,minSubs:1000,maxSubs:150000,maxDays:60,followDays:3,templates:3,
  syncUrl:'',syncPw:'',geminiKey:'',geminiModel:'gemini-2.5-flash',skipNoContact:1,
- dm:"Saw your episode on {niche} — made this clip because it was too good not to share. No strings, just thought you'd like it. Full episode: {episode}"},
+ dm:"{Hey|Hey there|Hi}! {Just watched|Just finished|Caught} your {latest|recent|newest} episode on {niche} and {loved it|really enjoyed it|thought it was great}. I {made|cut|put together} a quick clip from it because {it deserved more eyes|it was too good not to share|I think it could do well on Reels}. {Totally free|No strings attached|No cost at all}, just thought you'd like to see it. Here's the full episode I pulled it from: {episode}"},
  niches:['real estate','personal finance','fitness','entrepreneurship','mental health','true crime','faith christian','sports betting','parenting','health longevity'],
  leads:[],payments:[],clients:[],team:[]};
 let S;try{S=JSON.parse(localStorage.getItem('clipperCRM'))}catch(e){}
 S=Object.assign({},DEF,S||{});S.settings=Object.assign({},DEF.settings,S.settings);
+if(/[—–]/.test(S.settings.dm)||S.settings.dm.startsWith('Hey! Just watched your latest'))S.settings.dm=DEF.settings.dm;
 let syncT,syncMsg='';
 function setSync(m){syncMsg=m;const e=document.getElementById('sync');if(e)e.textContent=m}
 function save(){localStorage.setItem('clipperCRM',JSON.stringify(S));clearTimeout(syncT);if(S.settings.syncUrl&&S.settings.syncPw)syncT=setTimeout(()=>syncCall('push'),2500)}
@@ -62,7 +63,11 @@ const monthKey=()=>today().slice(0,7);
 let tab='dash';const TABS=[['dash','Dashboard'],['today','Today'],['leads','Leads'],['find','Find Podcasts'],['money','Money'],['settings','Settings']];
 function nav(){$('#nav').innerHTML=TABS.map(([k,l])=>`<button class="${k===tab?'on':''}" data-t="${k}">${l}</button>`).join('')}
 $('#nav').onclick=e=>{if(e.target.dataset.t){tab=e.target.dataset.t;render()}};
-function dm(l){return S.settings.dm.replace(/\{name\}/g,l.name).replace(/\{niche\}/g,l.niche).replace(/\{episode\}/g,l.episode)}
+function spin(t,seed){let h=0;for(const ch of seed)h=(Math.imul(31,h)+ch.charCodeAt(0))|0;
+ const r=()=>{h=(h+0x6D2B79F5)|0;let x=Math.imul(h^(h>>>15),1|h);x=(x+Math.imul(x^(x>>>7),61|x))^x;return((x^(x>>>14))>>>0)/4294967296};
+ const re=/\{([^{}]*\|[^{}]*)\}/;let p;while((p=re.exec(t))){const o=p[1].split('|');t=t.replace(re,()=>o[Math.floor(r()*o.length)])}return t}
+function dm(l){let t=spin(S.settings.dm,l.id+':'+(l.spin||0));t=t.replace(/\s*[—–]\s*/g,', ').replace(/-/g,' ');
+ return t.replace(/\{name\}/g,l.name).replace(/\{niche\}/g,String(l.niche||'').replace(/-/g,' ')).replace(/\{episode\}/g,l.episode)}
 const sentOn=d=>S.leads.filter(l=>l.sent===d).length;
 function stats(){
  const m=monthKey(),earned=S.payments.filter(p=>p.date.startsWith(m)).reduce((a,p)=>a+p.amount,0);
@@ -88,12 +93,25 @@ function dash(){const s=stats(),g=S.settings;const pct=Math.min(100,s.earned/g.g
  ${Object.entries(byInf).sort((a,b)=>b[1].all-a[1].all).map(([k,v])=>`<tr><td>${esc(k)}</td><td>${money(v.all)}</td><td>${money(v.mo)}</td></tr>`).join('')||'<tr><td colspan=3 class=mut>No payments yet — log them on the Money tab.</td></tr>'}</table></div></div>`}
 function todayV(){const want=Math.max(1,S.settings.daily-sentOn(today()));
  const list=S.leads.filter(l=>l.status=='New'&&(l.ig||l.x||l.tt)).sort((a,b)=>(a.ig?0:1)-(b.ig?0:1)||(a.subs||0)-(b.subs||0)).slice(0,want);
- $('#main').innerHTML=`<div class="card"><b>${sentOn(today())}/${S.settings.daily}</b> sent today · showing next ${list.length} fresh leads. Tick Sent after each DM.</div>
+ const skip=todayV.skip=todayV.skip||new Set(),q=list.filter(l=>!skip.has(l.id)),cur=q[0];
+ const ctUrl=l=>l.ig||l.x||l.tt||l.web;
+ $('#main').innerHTML=`<div class="card"><b>${sentOn(today())}/${S.settings.daily}</b> sent today · ${list.length} fresh leads queued. Open the profile, paste the DM, attach your clip, send.</div>
+ ${cur?`<div class="card" style="border-color:var(--acc)"><b>Next up: ${esc(cur.name)}</b> <span class=mut>${(cur.subs||0).toLocaleString()} subs · ${cur.ig?'Instagram':cur.x?'X':cur.tt?'TikTok':'link'}</span>
+ <p class="dm" style="max-width:none">${esc(dm(cur))}</p>
+ <div class="row"><button class="b p" data-open="${cur.id}">Open profile + copy DM</button>
+ <button class="b" data-ep="${cur.id}">Open episode</button><button class="b" data-next="${cur.id}">Sent, next</button><button class="b" data-shuf="${cur.id}">Reshuffle DM</button><button class="b" data-skip="${cur.id}">Skip</button></div>
+ <span class=mut>Opens in a new tab. If you're logged into Instagram there, it lands on their profile. Hit Message, paste, attach the clip.</span></div>`:''}
  <div class="card tw"><table><tr><th>Sent</th><th>Podcast</th><th>Contact</th><th>Episode</th><th>DM</th></tr>
  ${list.map(l=>`<tr><td><input type="checkbox" data-sent="${l.id}"></td><td>${esc(l.name)}<br><span class=mut>${(l.subs||0).toLocaleString()} subs</span></td>
  <td>${[l.ig&&`<a target=_blank rel=noopener href="${esc(l.ig)}">Instagram</a>`,l.x&&`<a target=_blank rel=noopener href="${esc(l.x)}">X</a>`,l.tt&&`<a target=_blank rel=noopener href="${esc(l.tt)}">TikTok</a>`,l.web&&`<a target=_blank rel=noopener href="${esc(l.web)}">Link</a>`].filter(Boolean).join(' · ')}</td>
  <td><a target=_blank rel=noopener href="${esc(l.episode)}">Episode</a></td><td class="dm">${esc(dm(l))}<br><button class="b" data-copy="${l.id}">Copy DM</button></td></tr>`).join('')||'<tr><td colspan=5 class=mut>No fresh leads with contact info. Go to Find Podcasts.</td></tr>'}</table></div>`;
- $('#main').onclick=e=>{const c=e.target.dataset.copy;if(c){const l=S.leads.find(x=>x.id==c);navigator.clipboard.writeText(dm(l));e.target.textContent='Copied ✓'}};
+ $('#main').onclick=e=>{const d=e.target.dataset,get=id=>S.leads.find(x=>x.id==id);
+  if(d.copy){navigator.clipboard.writeText(dm(get(d.copy)));e.target.textContent='Copied ✓'}
+  if(d.open){const l=get(d.open);navigator.clipboard.writeText(dm(l));window.open(ctUrl(l),'_blank','noopener');e.target.textContent='Opened + copied ✓'}
+  if(d.ep){window.open(get(d.ep).episode,'_blank','noopener')}
+  if(d.next){markSent(get(d.next));save();todayV()}
+  if(d.shuf){const l=get(d.shuf);l.spin=(l.spin||0)+1;save();todayV()}
+  if(d.skip){todayV.skip.add(d.skip);todayV()}};
  $('#main').onchange=e=>{const id=e.target.dataset.sent;if(id&&e.target.checked){markSent(S.leads.find(x=>x.id==id));save();e.target.closest('tr').style.opacity=.4;$('.card b').textContent=sentOn(today())+'/'+S.settings.daily}}}
 function markSent(l){l.status='Sample Sent';if(!l.sent)l.sent=today();l.follow=addDays(today(),+S.settings.followDays||3)}
 function leads(){const q=(leads.q||'').toLowerCase(),f=leads.f||'';
@@ -218,7 +236,7 @@ function settings(){const g=S.settings,f=(k,l,t='number')=>`<div><label>${l}</la
  $('#main').innerHTML=`<div class="card"><div class="grid">${f('key','YouTube API key','password')}${f('goal','Monthly goal ($)')}${f('daily','Daily outreach goal')}${f('minSubs','Min subscribers')}${f('maxSubs','Max subscribers')}${f('maxDays','Max days since last upload')}${f('followDays','Follow-up days')}${f('templates','Queries per niche (1-4)')}${f('geminiKey','Gemini API key (aistudio.google.com/apikey)','password')}${f('geminiModel','Gemini model','text')}<div><label>Skip podcasts with no contact info (1 = yes, 0 = no)</label><input data-k="skipNoContact" type="number" min="0" max="1" value="${esc(g.skipNoContact)}"></div></div>
  <h4>Google Sheet sync (so your bot sees your numbers)</h4><div class="grid">${f('syncUrl','Web app URL (…/exec)','text')}${f('syncPw','Sync password','password')}</div>
  <div class="row"><button class="b p" id="sn">Sync now</button><button class="b" id="pl">Pull from Sheet (replaces local data)</button></div>
- <label>DM template ({name} {niche} {episode})</label><textarea data-k="dm">${esc(g.dm)}</textarea></div>
+ <label>DM template: {name} {niche} {episode}. Spintax like {Hey|Hi|Hey there} picks one per lead. Dashes are removed automatically</label><textarea data-k="dm">${esc(g.dm)}</textarea></div>
  <div class="card"><b>Backup</b><p class=mut>Your data lives in this browser only. Export regularly (or before clearing browser data) and import on another device.</p>
  <div class="row"><button class="b p" id="ex">Export JSON</button><input type="file" id="im" accept=".json"></div></div>`;
  $('#main').oninput=e=>{const k=e.target.dataset.k;if(!k)return;g[k]=e.target.type=='number'?+e.target.value:e.target.value;save()};
