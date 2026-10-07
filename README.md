@@ -28,9 +28,9 @@ pip install playwright requests
 export CRM_SYNC_URL="https://script.google.com/macros/s/.../exec"   # your Apps Script web app
 export CRM_SYNC_PASSWORD="..."                                      # your sync password
 export YT_API_KEY="..."                                             # recommended: finds channels + episodes
-python tools/google_ai_to_crm.py --login                            # once: log into Google in the window
 python tools/google_ai_to_crm.py "real estate" "personal finance"   # add --dry-run to preview
 ```
 If Google shows a "verify you're human" check, solve it yourself in the window; the script waits.
+No Google login is needed (Google blocks sign-in inside automated browsers; the script works signed out).
 Runs use a separate Chrome profile (`~/.clipper_chrome_profile`). Keep runs small (a few niches) to avoid checks.
 Re-paste `ClipperCRM.gs` into Apps Script and redeploy (new version) to enable the append endpoint.

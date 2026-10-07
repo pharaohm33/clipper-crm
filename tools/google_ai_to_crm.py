@@ -15,7 +15,7 @@ Setup (once):
 Run:
   python tools/google_ai_to_crm.py "real estate" "personal finance"
   python tools/google_ai_to_crm.py --count 10 --dry-run "fitness"
-First run only:  python tools/google_ai_to_crm.py --login   (log into Google in the window, press Enter)
+No Google login needed (Google blocks sign-in in automated browsers). Runs signed out.
 """
 import argparse, difflib, json, os, random, re, sys, time
 from datetime import date
@@ -231,16 +231,15 @@ def main():
     ap.add_argument("niches", nargs="*")
     ap.add_argument("--count", type=int, default=10)
     ap.add_argument("--dry-run", action="store_true", help="parse and print, don't send to the CRM")
-    ap.add_argument("--login", action="store_true", help="open Google to log in once, then exit")
     ap.add_argument("--min-subs", type=int, default=1000)
     ap.add_argument("--max-subs", type=int, default=150000)
     a = ap.parse_args()
 
     from playwright.sync_api import sync_playwright
     url, pw, key = os.getenv("CRM_SYNC_URL"), os.getenv("CRM_SYNC_PASSWORD"), os.getenv("YT_API_KEY")
-    if not a.login and not a.dry_run and not (url and pw):
+    if not a.dry_run and not (url and pw):
         sys.exit("Set CRM_SYNC_URL and CRM_SYNC_PASSWORD (or use --dry-run).")
-    if not a.login and not a.niches:
+    if not a.niches:
         sys.exit("Give at least one niche, e.g.  python tools/google_ai_to_crm.py \"real estate\"")
     yt = YT(key) if key else None
     RUNS.mkdir(exist_ok=True)
@@ -248,11 +247,6 @@ def main():
     with sync_playwright() as p:
         ctx = p.chromium.launch_persistent_context(str(PROFILE), channel="chrome", headless=False, viewport={"width": 1200, "height": 900})
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
-        if a.login:
-            page.goto("https://accounts.google.com/")
-            input("Log into Google in the window, then press Enter here... ")
-            ctx.close()
-            return
         existing = set()
         if url and pw and not a.dry_run:
             for l in crm(url, pw, action="pull")["state"].get("leads", []):
