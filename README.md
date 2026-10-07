@@ -1,5 +1,7 @@
 # Clipper CRM
 
+**Web app (no install): https://pharaohm33.github.io/clipper-crm/** — runs in your browser, data saved locally (export a JSON backup from Settings). The Google Sheets version below has more power (Telegram bot integration, About-page social scraping).
+
 A Google Sheets CRM + Apps Script for podcast clippers: find podcasts on YouTube, pull their Instagram/X/TikTok/link-in-bio (no email), DM a free sample clip, and track money per influencer toward a monthly goal.
 
 **Nothing personal is stored in this repo.** Everyone enters their *own* YouTube API key in their *own* Sheet's `Settings` tab.

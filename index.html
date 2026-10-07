@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Clipper CRM</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--ink:#111827;--mut:#6b7280;--line:#e5e7eb;--acc:#e11d48;--ok:#16a34a;--hd:#111827}
+@media (prefers-color-scheme:dark){:root{--bg:#0b0f17;--card:#141a26;--ink:#e5e7eb;--mut:#94a3b8;--line:#243044;--hd:#1e293b}}
+*{box-sizing:border-box}body{margin:0;font:14px/1.45 system-ui,sans-serif;background:var(--bg);color:var(--ink)}
+header{background:var(--hd);color:#fff;padding:10px 16px;display:flex;gap:14px;align-items:center;flex-wrap:wrap;position:sticky;top:0;z-index:5}
+header b{font-size:16px}nav{display:flex;gap:4px;flex-wrap:wrap}
+nav button{background:none;border:0;color:#cbd5e1;padding:6px 10px;border-radius:6px;cursor:pointer;font:inherit}
+nav button.on{background:var(--acc);color:#fff}
+main{max-width:1200px;margin:0 auto;padding:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px}
+.stat small{color:var(--mut);display:block}.stat b{font-size:22px}
+.bar{height:8px;background:var(--line);border-radius:6px;overflow:hidden;margin-top:6px}.bar i{display:block;height:100%;background:var(--ok)}
+table{width:100%;border-collapse:collapse}th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+th{color:var(--mut);font-weight:600;font-size:12px;text-transform:uppercase}
+.tw{overflow-x:auto}
+input,select,textarea,button.b{font:inherit;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:6px;padding:6px 8px}
+textarea{width:100%;min-height:90px}button.b{cursor:pointer}button.p{background:var(--acc);color:#fff;border-color:var(--acc)}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}label{color:var(--mut);font-size:12px;display:block}
+a{color:var(--acc)}.hide{display:none}.mut{color:var(--mut)}pre{white-space:pre-wrap;max-height:200px;overflow:auto;background:var(--bg);padding:8px;border-radius:6px}
+.dm{max-width:420px;white-space:pre-wrap;font-size:12px}
+.sh{display:flex;gap:2px;align-items:flex-end;height:60px}.sh div{flex:1;background:var(--acc);border-radius:3px 3px 0 0;min-height:2px}
+</style>
+</head>
+<body>
+<header><b>Clipper CRM</b>
+<nav id="nav"></nav>
+<span style="margin-left:auto" class="mut" id="clock"></span></header>
+<main id="main"></main>
+<script>
+const STATUSES=['New','Sample Sent','Replied','Interested','Client','No Response','Not Interested'];
+const TPL=['{n} podcast full episode','{n} podcast interview','how to start a {n} podcast','{n} podcast new episode'];
+const DEF={settings:{key:'',goal:5000,daily:100,minSubs:1000,maxSubs:150000,maxDays:60,followDays:3,templates:3,
+ dm:"Saw your episode on {niche} — made this clip because it was too good not to share. No strings, just thought you'd like it. Full episode: {episode}"},
+ niches:['real estate','personal finance','fitness','entrepreneurship','mental health','true crime','faith christian','sports betting','parenting','health longevity'],
+ leads:[],payments:[],clients:[],team:[]};
+let S;try{S=JSON.parse(localStorage.getItem('clipperCRM'))}catch(e){}
+S=Object.assign({},DEF,S||{});S.settings=Object.assign({},DEF.settings,S.settings);
+const save=()=>localStorage.setItem('clipperCRM',JSON.stringify(S));
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const iso=d=>{const x=d||new Date();return x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0')};
+const today=()=>iso();const money=n=>'$'+Number(n||0).toLocaleString(undefined,{maximumFractionDigits:2});
+const addDays=(d,n)=>{const x=new Date(d+'T00:00');x.setDate(x.getDate()+n);return iso(x)};
+const monthKey=()=>today().slice(0,7);
+let tab='dash';const TABS=[['dash','Dashboard'],['today','Today'],['leads','Leads'],['find','Find Podcasts'],['money','Money'],['settings','Settings']];
+function nav(){$('#nav').innerHTML=TABS.map(([k,l])=>`<button class="${k===tab?'on':''}" data-t="${k}">${l}</button>`).join('')}
+$('#nav').onclick=e=>{if(e.target.dataset.t){tab=e.target.dataset.t;render()}};
+function dm(l){return S.settings.dm.replace(/\{name\}/g,l.name).replace(/\{niche\}/g,l.niche).replace(/\{episode\}/g,l.episode)}
+const sentOn=d=>S.leads.filter(l=>l.sent===d).length;
+function stats(){
+ const m=monthKey(),earned=S.payments.filter(p=>p.date.startsWith(m)).reduce((a,p)=>a+p.amount,0);
+ const owed=S.team.filter(t=>t.date.startsWith(m)).reduce((a,t)=>a+t.clips*t.rate,0);
+ const now=new Date(),dl=new Date(now.getFullYear(),now.getMonth()+1,0).getDate()-now.getDate()+1;
+ const sentAll=S.leads.filter(l=>l.sent).length,rep=S.leads.filter(l=>['Replied','Interested','Client'].includes(l.status)).length,cl=S.leads.filter(l=>l.status=='Client').length;
+ return{earned,owed,dl,remaining:Math.max(0,S.settings.goal-earned),sentToday:sentOn(today()),sentAll,rep,cl,
+  fresh:S.leads.filter(l=>l.status=='New').length,fu:S.leads.filter(l=>l.status=='Sample Sent'&&l.follow&&l.follow<=today()).length}}
+function render(){nav();({dash,today:todayV,leads,find,money:moneyV,settings})[tab]()}
+function dash(){const s=stats(),g=S.settings;const pct=Math.min(100,s.earned/g.goal*100);
+ const days=[...Array(14)].map((_,i)=>{const d=iso(new Date(Date.now()-(13-i)*864e5));return[d,sentOn(d)]});const mx=Math.max(g.daily,...days.map(x=>x[1]));
+ const byInf={};S.payments.forEach(p=>{(byInf[p.who]=byInf[p.who]||{all:0,mo:0}).all+=p.amount;if(p.date.startsWith(monthKey()))byInf[p.who].mo+=p.amount});
+ $('#main').innerHTML=`<div class="card"><b>${money(s.earned)}</b> of ${money(g.goal)} this month<div class="bar"><i style="width:${pct}%"></i></div>
+ <span class="mut">Need ${money(s.remaining/s.dl)}/day for ${s.dl} more days · Profit after team pay: ${money(s.earned-s.owed)}</span></div>
+ <div class="grid">
+ <div class="stat"><small>DMs today</small><b>${s.sentToday}/${g.daily}</b><div class="bar"><i style="width:${Math.min(100,s.sentToday/g.daily*100)}%;background:var(--acc)"></i></div></div>
+ <div class="stat"><small>Fresh leads</small><b>${s.fresh}</b></div><div class="stat"><small>Follow-ups due</small><b>${s.fu}</b></div>
+ <div class="stat"><small>Samples sent (all)</small><b>${s.sentAll}</b></div>
+ <div class="stat"><small>Reply rate</small><b>${s.sentAll?(s.rep/s.sentAll*100).toFixed(1):0}%</b></div>
+ <div class="stat"><small>Clients won</small><b>${s.cl}</b></div></div><br>
+ <div class="card"><b>Last 14 days outreach</b><div class="sh">${days.map(([d,n])=>`<div title="${d}: ${n}" style="height:${n/mx*100}%"></div>`).join('')}</div></div>
+ <div class="card"><b>Earnings per influencer</b><div class="tw"><table><tr><th>Influencer</th><th>All-time</th><th>This month</th></tr>
+ ${Object.entries(byInf).sort((a,b)=>b[1].all-a[1].all).map(([k,v])=>`<tr><td>${esc(k)}</td><td>${money(v.all)}</td><td>${money(v.mo)}</td></tr>`).join('')||'<tr><td colspan=3 class=mut>No payments yet — log them on the Money tab.</td></tr>'}</table></div></div>`}
+function todayV(){const want=Math.max(1,S.settings.daily-sentOn(today()));
+ const list=S.leads.filter(l=>l.status=='New'&&(l.ig||l.x||l.tt)).sort((a,b)=>(a.ig?0:1)-(b.ig?0:1)||(a.subs||0)-(b.subs||0)).slice(0,want);
+ $('#main').innerHTML=`<div class="card"><b>${sentOn(today())}/${S.settings.daily}</b> sent today · showing next ${list.length} fresh leads. Tick Sent after each DM.</div>
+ <div class="card tw"><table><tr><th>Sent</th><th>Podcast</th><th>Contact</th><th>Episode</th><th>DM</th></tr>
+ ${list.map(l=>`<tr><td><input type="checkbox" data-sent="${l.id}"></td><td>${esc(l.name)}<br><span class=mut>${(l.subs||0).toLocaleString()} subs</span></td>
+ <td>${[l.ig&&`<a target=_blank rel=noopener href="${esc(l.ig)}">Instagram</a>`,l.x&&`<a target=_blank rel=noopener href="${esc(l.x)}">X</a>`,l.tt&&`<a target=_blank rel=noopener href="${esc(l.tt)}">TikTok</a>`,l.web&&`<a target=_blank rel=noopener href="${esc(l.web)}">Link</a>`].filter(Boolean).join(' · ')}</td>
+ <td><a target=_blank rel=noopener href="${esc(l.episode)}">Episode</a></td><td class="dm">${esc(dm(l))}<br><button class="b" data-copy="${l.id}">Copy DM</button></td></tr>`).join('')||'<tr><td colspan=5 class=mut>No fresh leads with contact info. Go to Find Podcasts.</td></tr>'}</table></div>`;
+ $('#main').onclick=e=>{const c=e.target.dataset.copy;if(c){const l=S.leads.find(x=>x.id==c);navigator.clipboard.writeText(dm(l));e.target.textContent='Copied ✓'}};
+ $('#main').onchange=e=>{const id=e.target.dataset.sent;if(id&&e.target.checked){markSent(S.leads.find(x=>x.id==id));save();e.target.closest('tr').style.opacity=.4;$('.card b').textContent=sentOn(today())+'/'+S.settings.daily}}}
+function markSent(l){l.status='Sample Sent';if(!l.sent)l.sent=today();l.follow=addDays(today(),+S.settings.followDays||3)}
+function leads(){const q=(leads.q||'').toLowerCase(),f=leads.f||'';
+ const rows=S.leads.filter(l=>(!f||l.status==f)&&(!q||(l.name+l.niche).toLowerCase().includes(q)));
+ $('#main').innerHTML=`<div class="row"><input id="q" placeholder="Search" value="${esc(leads.q||'')}"><select id="f"><option value="">All statuses</option>${STATUSES.map(s=>`<option ${s==f?'selected':''}>${s}</option>`).join('')}</select><span class=mut>${rows.length} leads</span></div>
+ <div class="card tw"><table><tr><th>Podcast</th><th>Niche</th><th>Subs</th><th>Contact</th><th>Status</th><th>Sent / Follow-up</th><th>Notes</th></tr>
+ ${rows.slice(0,300).map(l=>`<tr><td><a target=_blank rel=noopener href="${esc(l.url)}">${esc(l.name)}</a></td><td>${esc(l.niche)}</td><td>${(l.subs||0).toLocaleString()}</td>
+ <td>${[l.ig&&`<a target=_blank rel=noopener href="${esc(l.ig)}">IG</a>`,l.x&&`<a target=_blank rel=noopener href="${esc(l.x)}">X</a>`,l.tt&&`<a target=_blank rel=noopener href="${esc(l.tt)}">TT</a>`,l.web&&`<a target=_blank rel=noopener href="${esc(l.web)}">Link</a>`].filter(Boolean).join(' · ')||'<span class=mut>none</span>'}</td>
+ <td><select data-st="${l.id}">${STATUSES.map(s=>`<option ${s==l.status?'selected':''}>${s}</option>`).join('')}</select></td><td>${l.sent||''}<br><span class=mut>${l.follow||''}</span></td>
+ <td><input data-nt="${l.id}" value="${esc(l.notes||'')}"></td></tr>`).join('')}</table></div>${rows.length>300?'<p class=mut>Showing first 300 — use search/filter.</p>':''}`;
+ $('#q').oninput=e=>{leads.q=e.target.value;leads()};$('#q').focus&&0;$('#f').onchange=e=>{leads.f=e.target.value;leads()};
+ $('#main').onchange=e=>{const t=e.target,l=S.leads.find(x=>x.id==(t.dataset.st||t.dataset.nt));if(!l)return;
+  if(t.dataset.st){l.status=t.value;if(t.value=='Sample Sent')markSent(l);if(t.value=='Client'&&!S.clients.includes(l.name))S.clients.push(l.name)}else l.notes=t.value;save()}}
+/* ---- YouTube ---- */
+async function yt(path,p){if(!S.settings.key)throw new Error('Add your YouTube API key in Settings first.');
+ const r=await fetch('https://www.googleapis.com/youtube/v3/'+path+'?'+new URLSearchParams({...p,key:S.settings.key}));const j=await r.json();if(j.error)throw new Error(j.error.message);return j}
+function socials(t){const o={ig:'',x:'',tt:'',web:''};let m;t=t||'';
+ const igBad=/^(p|reel|reels|explore|accounts|stories|tv|youtube|about|direct)$/i,xBad=/^(intent|share|i|home|search|hashtag|youtube|login|signup|settings|privacy|tos|explore)$/i;
+ const ig=/instagram\.com\/([A-Za-z0-9._]{2,30})/ig;while((m=ig.exec(t)))if(!igBad.test(m[1])){o.ig='https://instagram.com/'+m[1].replace(/\.$/,'');break}
+ const x=/(?:twitter|x)\.com\/([A-Za-z0-9_]{1,15})(?![A-Za-z0-9_])/ig;while((m=x.exec(t)))if(!xBad.test(m[1])){o.x='https://x.com/'+m[1];break}
+ if((m=/tiktok\.com\/@([A-Za-z0-9._]{2,30})/i.exec(t)))o.tt='https://tiktok.com/@'+m[1];
+ const bio=/https?:\/\/(?:www\.)?(?:linktr\.ee|beacons\.ai|stan\.store|bio\.link|linkin\.bio|lnk\.bio|campsite\.bio|solo\.to|carrd\.co)\/[^\s"'<>]+/i.exec(t);
+ const any=/https?:\/\/(?:www\.)?(?!(?:[a-z0-9.-]*)(?:youtube|youtu\.be|instagram|twitter|x\.com|tiktok|facebook|spotify|apple|google|amazon|patreon))[a-z0-9.-]+\.[a-z]{2,}[^\s"'<>]*/i.exec(t);
+ const b=bio||any;if(b)o.web=b[0].replace(/[),.]+$/,'');return o}
+async function addChannels(c,log,force){const g=S.settings,have=new Set(S.leads.map(l=>l.id));let added=0;
+ c=c.filter((x,i)=>!have.has(x.id)&&c.findIndex(y=>y.id==x.id)==i);
+ for(let i=0;i<c.length;i+=50){const grp=c.slice(i,i+50),by=Object.fromEntries(grp.map(x=>[x.id,x]));
+  const j=await yt('channels',{part:'snippet,statistics,contentDetails',id:grp.map(x=>x.id).join(','),maxResults:50});
+  for(const ch of j.items||[]){const k=by[ch.id],subs=ch.statistics.hiddenSubscriberCount?0:+ch.statistics.subscriberCount||0;
+   if(!force&&ch.statistics.hiddenSubscriberCount!==true&&(subs<g.minSubs||subs>g.maxSubs))continue;
+   let last='';try{const pi=await yt('playlistItems',{part:'contentDetails',playlistId:ch.contentDetails.relatedPlaylists.uploads,maxResults:1});
+    if(pi.items[0])last=pi.items[0].contentDetails.videoPublishedAt.slice(0,10)}catch(e){}
+   if(!force&&last&&(Date.now()-new Date(last))/864e5>g.maxDays)continue;
+   const s=socials(ch.snippet.description);
+   S.leads.push({id:ch.id,name:ch.snippet.title,niche:k.niche||'',url:'https://www.youtube.com/channel/'+ch.id,subs,last,episode:k.video?'https://www.youtube.com/watch?v='+k.video:'',
+    ig:s.ig,x:s.x,tt:s.tt,web:s.web,status:'New',added:today(),sent:'',follow:'',notes:''});added++}
+  save();log(`  checked ${Math.min(i+50,c.length)}/${c.length} channels…`)}return added}
+function find(){$('#main').innerHTML=`<div class="card"><b>Niches</b> <span class=mut>(one per line)</span><textarea id="ni">${esc(S.niches.join('\n'))}</textarea>
+ <div class="row"><button class="b p" id="run">Find podcasts</button><span class=mut>Each query costs 100 of your 10,000 free daily API units.</span></div></div>
+ <div class="card"><b>Quick add</b> <span class=mut>(paste YouTube video / channel / @handle links)</span><textarea id="qa"></textarea>
+ <div class="row"><button class="b p" id="qb">Add these</button></div></div><pre id="log">Ready.</pre>`;
+ const log=t=>{$('#log').textContent+='\n'+t;$('#log').scrollTop=1e9};
+ $('#ni').onchange=e=>{S.niches=e.target.value.split('\n').map(x=>x.trim()).filter(Boolean);save()};
+ $('#run').onclick=async()=>{S.niches=$('#ni').value.split('\n').map(x=>x.trim()).filter(Boolean);save();$('#log').textContent='';let tot=0;
+  try{for(const n of S.niches){log('Searching: '+n);const cand={};
+   for(let t=0;t<Math.min(4,S.settings.templates);t++){const j=await yt('search',{part:'snippet',type:'video',videoDuration:'long',maxResults:50,order:'relevance',q:TPL[t].replace('{n}',n)});
+    (j.items||[]).forEach(it=>{const id=it.snippet.channelId;if(!cand[id])cand[id]={id,video:it.id.videoId,niche:n}})}
+   const a=await addChannels(Object.values(cand),log);tot+=a;log(`  +${a} new leads`)}log(`Done. ${tot} new leads. Open the Today tab.`)}catch(e){log('Stopped: '+e.message)}};
+ $('#qb').onclick=async()=>{const urls=$('#qa').value.split('\n').map(x=>x.trim()).filter(Boolean),c=[];$('#log').textContent='';
+  try{for(const u of urls){let m;if((m=u.match(/youtube\.com\/channel\/(UC[\w-]{20,})/)))c.push({id:m[1]});
+   else if((m=u.match(/youtube\.com\/(@[\w.-]+)/))){const j=await yt('channels',{part:'id',forHandle:m[1]});if(j.items?.[0])c.push({id:j.items[0].id})}
+   else if((m=u.match(/[?&]v=([\w-]{11})/)||u.match(/youtu\.be\/([\w-]{11})/)||u.match(/youtube\.com\/(?:live|shorts|embed)\/([\w-]{11})/))){const v=await yt('videos',{part:'snippet',id:m[1]});if(v.items?.[0])c.push({id:v.items[0].snippet.channelId,video:m[1]})}
+   else log('Could not read: '+u)}
+   const a=await addChannels(c,log,true);log(`Added ${a} lead(s).`)}catch(e){log('Stopped: '+e.message)}}}
+function moneyV(){const s=stats();
+ $('#main').innerHTML=`<div class="card"><b>Log a payment</b><div class="row"><input id="pd" type="date" value="${today()}"><input id="pw" list="cl" placeholder="Influencer / podcast"><datalist id="cl">${S.clients.map(c=>`<option>${esc(c)}</option>`).join('')}</datalist>
+ <input id="pa" type="number" step="0.01" placeholder="Amount $"><button class="b p" id="pb">Add</button></div></div>
+ <div class="card tw"><b>Payments</b><table><tr><th>Date</th><th>Influencer</th><th>Amount</th><th></th></tr>${S.payments.slice().reverse().map((p,i)=>`<tr><td>${p.date}</td><td>${esc(p.who)}</td><td>${money(p.amount)}</td><td><button class="b" data-dp="${S.payments.length-1-i}">✕</button></td></tr>`).join('')}</table></div>
+ <div class="card"><b>Team pay</b> <span class=mut>(when you hire: clips × rate)</span><div class="row"><input id="td" type="date" value="${today()}"><input id="tn" placeholder="Clipper"><input id="tc" type="number" placeholder="Clips"><input id="tr" type="number" step="0.01" placeholder="$ per clip"><button class="b p" id="tb">Add</button></div>
+ <div class="tw"><table><tr><th>Date</th><th>Clipper</th><th>Clips</th><th>Rate</th><th>Owed</th><th></th></tr>${S.team.map((t,i)=>`<tr><td>${t.date}</td><td>${esc(t.who)}</td><td>${t.clips}</td><td>${money(t.rate)}</td><td>${money(t.clips*t.rate)}</td><td><button class="b" data-dt="${i}">✕</button></td></tr>`).join('')}</table></div>
+ <p class=mut>Owed this month: ${money(s.owed)}</p></div>`;
+ $('#pb').onclick=()=>{const a=+$('#pa').value,w=$('#pw').value.trim();if(!a||!w)return;S.payments.push({date:$('#pd').value,who:w,amount:a});if(!S.clients.includes(w))S.clients.push(w);save();moneyV()};
+ $('#tb').onclick=()=>{const c=+$('#tc').value,r=+$('#tr').value;if(!c||!r)return;S.team.push({date:$('#td').value,who:$('#tn').value,clips:c,rate:r});save();moneyV()};
+ $('#main').onclick=e=>{if(e.target.dataset.dp){S.payments.splice(e.target.dataset.dp,1);save();moneyV()}if(e.target.dataset.dt){S.team.splice(e.target.dataset.dt,1);save();moneyV()}}}
+function settings(){const g=S.settings,f=(k,l,t='number')=>`<div><label>${l}</label><input data-k="${k}" type="${t}" value="${esc(g[k])}"></div>`;
+ $('#main').innerHTML=`<div class="card"><div class="grid">${f('key','YouTube API key','password')}${f('goal','Monthly goal ($)')}${f('daily','Daily outreach goal')}${f('minSubs','Min subscribers')}${f('maxSubs','Max subscribers')}${f('maxDays','Max days since last upload')}${f('followDays','Follow-up days')}${f('templates','Queries per niche (1-4)')}</div>
+ <label>DM template ({name} {niche} {episode})</label><textarea data-k="dm">${esc(g.dm)}</textarea></div>
+ <div class="card"><b>Backup</b><p class=mut>Your data lives in this browser only. Export regularly (or before clearing browser data) and import on another device.</p>
+ <div class="row"><button class="b p" id="ex">Export JSON</button><input type="file" id="im" accept=".json"></div></div>`;
+ $('#main').oninput=e=>{const k=e.target.dataset.k;if(!k)return;g[k]=e.target.type=='number'?+e.target.value:e.target.value;save()};
+ $('#ex').onclick=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(S,null,1)],{type:'application/json'}));a.download='clipper-crm-'+today()+'.json';a.click()};
+ $('#im').onchange=async e=>{try{S=Object.assign({},DEF,JSON.parse(await e.target.files[0].text()));save();alert('Imported.');render()}catch(x){alert('Bad file')}}}
+setInterval(()=>$('#clock').textContent=new Date().toLocaleString([],{weekday:'short',hour:'numeric',minute:'2-digit'}),1000);
+render();
+</script>
+</body>
+</html>
