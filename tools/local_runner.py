@@ -20,6 +20,8 @@ PORT = int(os.getenv("RUNNER_PORT", "8765"))
 APP_URL = os.getenv("CLIPPER_URL", "http://127.0.0.1:5001").rstrip("/")
 GRAB = os.getenv("GRAB_SCRIPT", str(HERE / "grab_sample.sh"))
 SAMPLES = os.getenv("SAMPLES_DIR", str(Path.home() / "Downloads" / "clip-samples"))
+OUT_FOLDER = os.getenv("SAMPLES_FOLDER", "Podcast Outreach")
+REVEAL_CMD = os.getenv("REVEAL_CMD", "open -R").split()
 ALLOWED = {"https://pharaohm33.github.io"}
 STATE = {"running": False, "log": [], "proc": None}
 LOCK = threading.Lock()
@@ -89,11 +91,25 @@ YT_RE = re.compile(r"^https://((www|m)\.)?(youtube\.com|youtu\.be)/\S+$")
 TIME_RE = re.compile(r"^\d{1,2}(:\d{2}){1,2}$")
 
 
+def sample_templates():
+    code, d = app_call("/api/clip-templates", timeout=5)
+    if code != 200:
+        return None
+    out = []
+    for t in d.get("templates", []):
+        f = t.get("folder") or ""
+        if f == OUT_FOLDER or f.startswith(OUT_FOLDER + "/"):
+            vp = t.get("video_path") or ""
+            out.append({"slug": t.get("slug"), "name": t.get("name"), "folder": f, "video_path": vp,
+                        "dir": str(Path(vp).parent) if vp else "", "duration": t.get("duration")})
+    return out
+
+
 def log(msg):
     STATE["log"].append(msg)
 
 
-def run_send(url, start, end, name):
+def run_send(url, start, end, name, folder=None):
     """Download a slice of a YouTube video, then save it as a NEW template in the clipper (no clips are generated:
     you change the rules there and press Generate yourself)."""
     try:
@@ -113,7 +129,7 @@ def run_send(url, start, end, name):
                 log(f"[runner] the clipper app is off ({APP_URL}). The clip source is saved here, start the app and click again:\n   {video}")
                 return
             if st["state"] == "on":
-                code, resp = app_call("/api/clip-templates/create", {"name": name, "path": video, "folder": "Outreach samples"}, timeout=30)
+                code, resp = app_call("/api/clip-templates/create", {"name": name, "path": video, "folder": folder or OUT_FOLDER}, timeout=30)
                 if code == 200 and resp.get("success"):
                     break
                 if code != 409:
@@ -144,7 +160,9 @@ def run_send(url, start, end, name):
         if st.get("error"):
             log(f"[runner] the clipper reported an error: {st['error']}")
             return
-        log(f"[runner] DONE. Template \"{name}\" is in the clipper (folder: Outreach samples). Open it, adjust the rules, then press Generate.")
+        slug = st.get("template_slug") or ""
+        log("RESULT " + json.dumps({"slug": slug, "name": name, "video": video, "dir": str(Path(video).parent), "folder": folder or OUT_FOLDER}))
+        log(f"[runner] DONE. Template \"{name}\" is in the clipper (folder: {folder or OUT_FOLDER}). Open it, adjust the rules, then press Generate.")
     except Exception as e:
         log(f"[runner] failed: {e}")
     finally:
@@ -187,6 +205,9 @@ class H(BaseHTTPRequestHandler):
             self._send(200, {"ok": True, "running": STATE["running"], "lines": len(STATE["log"]),
                              "configured": bool(os.getenv("CRM_SYNC_URL") and os.getenv("CRM_SYNC_PASSWORD")),
                              "yt": bool(os.getenv("YT_API_KEY"))})
+        elif u.path == "/clipper/templates":
+            t = sample_templates()
+            self._send(200 if t is not None else 503, {"templates": t or [], "folder": OUT_FOLDER, **({} if t is not None else {"error": "clipper is off"})})
         elif u.path == "/clipper/status":
             self._send(200, clipper_status())
         elif u.path == "/log":
@@ -208,16 +229,24 @@ class H(BaseHTTPRequestHandler):
             if p and STATE["running"]:
                 p.terminate()
             return self._send(200, {"ok": True})
+        if self.path == "/reveal":
+            p = str(body.get("path", ""))
+            known = {t["video_path"] for t in (sample_templates() or [])}
+            if not p or not os.path.isfile(p) or not (p in known or os.path.realpath(p).startswith(os.path.realpath(SAMPLES) + os.sep)):
+                return self._send(400, {"error": "that file is not one of your samples"})
+            subprocess.Popen([*REVEAL_CMD, p])
+            return self._send(200, {"ok": True})
         if self.path == "/clipper/send":
             url, start, end = str(body.get("url", "")).strip(), str(body.get("start", "")).strip(), str(body.get("end", "")).strip()
             name = clean(body.get("name") or "Outreach sample", 60) or "Outreach sample"
+            folder = clean(body.get("folder") or "", 80) or None
             if not YT_RE.match(url) or not TIME_RE.match(start) or not TIME_RE.match(end):
                 return self._send(400, {"error": "need a YouTube link and start/end like 12:00"})
             with LOCK:
                 if STATE["running"]:
                     return self._send(409, {"error": "a run is already in progress"})
                 STATE.update(running=True, log=[f"[runner] sending to clipper: {name}"])
-                threading.Thread(target=run_send, args=(url, start, end, name), daemon=True).start()
+                threading.Thread(target=run_send, args=(url, start, end, name, folder), daemon=True).start()
             return self._send(200, {"ok": True})
         if self.path != "/run":
             return self._send(404, {"error": "not found"})
