@@ -18,7 +18,7 @@ var SHEETS = {
 };
 var STATUSES = ['New', 'Sample Sent', 'Replied', 'Interested', 'Client', 'No Response', 'Not Interested', 'Removed'];
 var L = { added: 1, name: 2, niche: 3, url: 4, subs: 5, last: 6, episode: 7, ig: 8, x: 9, tt: 10, web: 11,
-          status: 12, sent: 13, follow: 14, notes: 15, dm: 16, cid: 17 };
+          status: 12, sent: 13, follow: 14, notes: 15, dm: 16, cid: 17, shorts: 18 };
 var QUERY_TEMPLATES = ['{n} podcast full episode', '{n} podcast interview', 'how to start a {n} podcast', '{n} podcast new episode'];
 var MAX_MS = 5 * 60 * 1000;
 
@@ -92,7 +92,7 @@ function setting_(label) {
 function setupLeads_(ss) {
   var sh = ss.getSheetByName(SHEETS.leads);
   header_(sh, ['Date Added', 'Podcast / Channel', 'Niche', 'YouTube Channel', 'Subscribers', 'Last Upload', 'Episode To Clip',
-    'Instagram', 'X / Twitter', 'TikTok', 'Website / Link-in-bio', 'Status', 'Sample Sent', 'Follow-Up Due', 'Notes', 'DM Draft', 'Channel ID']);
+    'Instagram', 'X / Twitter', 'TikTok', 'Website / Link-in-bio', 'Status', 'Sample Sent', 'Follow-Up Due', 'Notes', 'DM Draft', 'Channel ID', 'Shorts %']);
   sh.getRange('P2').setFormula('=ARRAYFORMULA(IF(B2:B="","",SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(DM_TEMPLATE,"{name}",B2:B),"{niche}",C2:C),"{episode}",G2:G)))');
   sh.getRange('A2:A').setNumberFormat('yyyy-mm-dd');
   sh.getRange('F2:F').setNumberFormat('yyyy-mm-dd');
@@ -106,9 +106,9 @@ function setupLeads_(ss) {
     return SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo(p[0]).setBackground(p[1]).setRanges([sh.getRange('L2:L2000')]).build();
   });
   sh.setConditionalFormatRules(rules);
-  [100, 220, 120, 200, 90, 90, 220, 190, 150, 150, 200, 110, 100, 100, 220, 380, 150].forEach(function (w, i) { sh.setColumnWidth(i + 1, w); });
+  [100, 220, 120, 200, 90, 90, 220, 190, 150, 150, 200, 110, 100, 100, 220, 380, 150, 80].forEach(function (w, i) { sh.setColumnWidth(i + 1, w); });
   sh.hideColumns(L.cid);
-  if (!sh.getFilter()) sh.getRange(1, 1, sh.getMaxRows(), 17).createFilter();
+  if (!sh.getFilter()) sh.getRange(1, 1, sh.getMaxRows(), 18).createFilter();
 }
 
 function setupClients_(ss) {
@@ -596,7 +596,9 @@ function writeState_(st) {
   var cid = ss.getSheetByName(SHEETS.leads);
   var max = cid.getMaxRows();
   if (max > 1) cid.getRange(2, L.cid, max - 1, 1).clearContent();
+  if (max > 1) cid.getRange(2, L.shorts, max - 1, 1).clearContent();
   if (lr.length) cid.getRange(2, L.cid, lr.length, 1).setValues((st.leads || []).map(function (l) { return [l.id]; }));
+  if (lr.length) cid.getRange(2, L.shorts, lr.length, 1).setValues((st.leads || []).map(function (l) { return [l.shortsPct == null ? '' : l.shortsPct]; }));
 
   replaceRows_(ss.getSheetByName(SHEETS.pay), 5, (st.payments || []).map(function (p) { return [d_(p.date), p.who, p.amount, 'Other', '']; }));
   replaceRows_(ss.getSheetByName(SHEETS.team), 5, (st.team || []).map(function (t) { return [d_(t.date), t.who, '', t.clips, t.rate]; }));
@@ -612,10 +614,10 @@ function readState_() {
   var ss = SpreadsheetApp.getActive();
   var ls = ss.getSheetByName(SHEETS.leads), n = ls.getLastRow() - 1, leads = [];
   if (n > 0) {
-    var cids = ls.getRange(2, L.cid, n, 1).getValues();
+    var cids = ls.getRange(2, L.cid, n, 1).getValues(), shp = ls.getRange(2, L.shorts, n, 1).getValues();
     leads = ls.getRange(2, 1, n, 15).getValues().map(function (r, i) {
       return { id: cids[i][0] || ('row' + (i + 2)), added: s_(r[0]), name: r[1], niche: r[2], url: r[3], subs: r[4] || 0, last: s_(r[5]),
-        episode: r[6], ig: r[7], x: r[8], tt: r[9], web: r[10], status: r[11] || 'New', sent: s_(r[12]), follow: s_(r[13]), notes: r[14] };
+        episode: r[6], shortsPct: shp[i][0] === '' ? null : Number(shp[i][0]), ig: r[7], x: r[8], tt: r[9], web: r[10], status: r[11] || 'New', sent: s_(r[12]), follow: s_(r[13]), notes: r[14] };
     }).filter(function (l) { return l.name; });
   }
   var ps = ss.getSheetByName(SHEETS.pay), pn = ps.getLastRow() - 1;
@@ -644,5 +646,6 @@ function appendLeads_(leads) {
             l.status || 'New', d_(l.sent), d_(l.follow), l.notes || ''];
   }));
   sh.getRange(last + 1, L.cid, fresh.length, 1).setValues(fresh.map(function (l) { return [l.id]; }));
+  sh.getRange(last + 1, L.shorts, fresh.length, 1).setValues(fresh.map(function (l) { return [l.shortsPct == null ? '' : l.shortsPct]; }));
   return fresh.length;
 }

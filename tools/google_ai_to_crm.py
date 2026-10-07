@@ -48,7 +48,7 @@ def load_env():
 
 
 def build_prompt(niche, count, focus=""):
-    return (f"List {count} small {niche} podcasts{' ' + focus if focus else ''} on YouTube (1k to 150k subscribers). For each one give the YouTube "
+    return (f"List {count} small {niche} podcasts{' ' + focus if focus else ''} on YouTube (1k to 150k subscribers) that mostly post full length episodes and few or no YouTube Shorts. For each one give the YouTube "
             "channel link, a recent full length episode title with its direct YouTube watch link, and the show's "
             "Instagram handle. Format it as a table.")
 
@@ -176,57 +176,63 @@ class YT:
         return None
 
     def pick_episode(self, ch, want_title=""):
-        pl = self.get("playlistItems", part="contentDetails", playlistId=ch["contentDetails"]["relatedPlaylists"]["uploads"], maxResults=15)
+        """Returns (video_id, title, shorts_pct, sample_size) from the channel's last 30 uploads."""
+        pl = self.get("playlistItems", part="contentDetails", playlistId=ch["contentDetails"]["relatedPlaylists"]["uploads"], maxResults=30)
         ids = [i["contentDetails"]["videoId"] for i in pl.get("items", [])]
         if not ids:
-            return "", ""
+            return "", "", None, 0
         vids = self.get("videos", part="contentDetails,snippet", id=",".join(ids))["items"]
         def secs(d):
             m = re.match(r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?", d)
             return int(m.group(1) or 0) * 3600 + int(m.group(2) or 0) * 60 + int(m.group(3) or 0)
+        shorts = sum(1 for v in vids if secs(v["contentDetails"]["duration"]) <= 180
+                     or re.search(r"#shorts?\b", v["snippet"]["title"] + " " + (v["snippet"].get("description") or "")[:300], re.I))
+        pct = round(100 * shorts / len(vids)) if vids else None
         longs = [v for v in vids if 1200 <= secs(v["contentDetails"]["duration"]) <= 14400] or vids
         if want_title:
             best = max(longs, key=lambda v: difflib.SequenceMatcher(None, want_title.lower(), v["snippet"]["title"].lower()).ratio())
             if difflib.SequenceMatcher(None, want_title.lower(), best["snippet"]["title"].lower()).ratio() > 0.6:
-                return best["id"], best["snippet"]["title"]
-        return longs[0]["id"], longs[0]["snippet"]["title"]
+                return best["id"], best["snippet"]["title"], pct, len(vids)
+        return longs[0]["id"], longs[0]["snippet"]["title"], pct, len(vids)
 
-
-def to_leads(items, niche, yt):
-    leads = []
+def to_leads(items, niche, yt, max_shorts=100):
+    leads, too_shorty = [], 0
     for it in items:
         vid = (re.search(r"(?:v=|youtu\.be/)([\w-]{11})", it["episode_url"]) or [None, ""])[1]
         lead = {"id": "", "name": it["name"], "niche": niche, "url": it["channel"], "subs": 0, "last": "",
-                "episode": it["episode_url"], "epTitle": it["episode_title"], "ig": f"https://instagram.com/{it['ig']}" if it["ig"] else "",
+                "episode": it["episode_url"], "epTitle": it["episode_title"], "shortsPct": None,
+                "ig": f"https://instagram.com/{it['ig']}" if it["ig"] else "",
                 "x": it["x"], "tt": it["tt"], "web": "", "status": "New", "added": date.today().isoformat(),
                 "sent": "", "follow": "", "notes": "From Google AI, verify Instagram"}
+        skip = False
         if yt:
             try:
                 ch = yt.channel(it["channel"], vid)
-                if ch:
-                    lead.update(id=ch["id"], name=ch["snippet"]["title"], url="https://www.youtube.com/channel/" + ch["id"],
-                                subs=int(ch["statistics"].get("subscriberCount", 0) or 0))
-                    if not lead["episode"]:
-                        v, t = yt.pick_episode(ch, it["episode_title"])
-                        if v:
-                            lead["episode"], lead["epTitle"] = "https://www.youtube.com/watch?v=" + v, t
-                else:
+                if not ch:
                     sr = yt.get("search", part="snippet", type="channel", q=it["name"] + " podcast", maxResults=1)
                     if sr.get("items"):
                         ch = yt.get("channels", part="snippet,statistics,contentDetails", id=sr["items"][0]["snippet"]["channelId"])["items"][0]
-                        lead.update(id=ch["id"], url="https://www.youtube.com/channel/" + ch["id"], subs=int(ch["statistics"].get("subscriberCount", 0) or 0))
-                if ch and not lead["episode"]:
-                    v, t = yt.pick_episode(ch, it["episode_title"])
-                    if v:
+                if ch:
+                    lead.update(id=ch["id"], name=ch["snippet"]["title"], url="https://www.youtube.com/channel/" + ch["id"],
+                                subs=int(ch["statistics"].get("subscriberCount", 0) or 0))
+                    v, t, pct, total = yt.pick_episode(ch, it["episode_title"])
+                    lead["shortsPct"] = pct
+                    if pct is not None and total >= 5 and pct > max_shorts:
+                        skip = True
+                    if v and not lead["episode"]:
                         lead["episode"], lead["epTitle"] = "https://www.youtube.com/watch?v=" + v, t
             except Exception as e:
                 print(f"  YouTube lookup failed for {it['name']}: {e}")
+        if skip:
+            too_shorty += 1
+            continue
         if not lead["id"]:
             lead["id"] = "m:" + (it["ig"] or it["channel"] or it["name"]).lower()
         if lead["episode"] or lead["ig"]:
             leads.append(lead)
+    if too_shorty:
+        print(f"  skipped {too_shorty} with more than {max_shorts}% Shorts")
     return leads
-
 
 def crm(url, pw, **payload):
     r = requests.post(url, data=json.dumps({"secret": pw, **payload}), headers={"Content-Type": "text/plain"}, timeout=60)
@@ -242,6 +248,7 @@ def main():
     ap.add_argument("--count", type=int, default=10)
     ap.add_argument("--focus", default="", help='comma separated angles to vary results, e.g. "in Texas,in Florida,for first time buyers"')
     ap.add_argument("--dry-run", action="store_true", help="parse and print, don't send to the CRM")
+    ap.add_argument("--max-shorts", type=int, default=20, help="skip channels whose recent uploads are more than this %% Shorts (needs YT_API_KEY)")
     ap.add_argument("--min-subs", type=int, default=1000)
     ap.add_argument("--max-subs", type=int, default=150000)
     a = ap.parse_args()
@@ -279,7 +286,7 @@ def main():
             if not items:
                 print("  no table found. Raw answer saved in tools/runs/ (paste it into the website's Paste box).")
                 continue
-            leads = to_leads(items, niche, yt)
+            leads = to_leads(items, niche, yt, a.max_shorts)
             fresh = []
             for l in leads:
                 igk = "ig:" + l["ig"].rstrip("/").split("/")[-1].lower() if l["ig"] else ""
@@ -294,7 +301,7 @@ def main():
                 fresh.append(l)
             print(f"  parsed {len(items)}, new {len(fresh)}")
             for l in fresh:
-                print(f"   - {l['name']} | IG {l['ig'] or '-'} | {l['episode'] or 'no episode'}")
+                print(f"   - {l['name']} | IG {l['ig'] or '-'} | {l['shortsPct'] if l['shortsPct'] is not None else '?'}% Shorts | {l['episode'] or 'no episode'}")
             if fresh and not a.dry_run:
                 print(f"  added {crm(url, pw, action='append', leads=fresh).get('added')} to the CRM")
             total += len(fresh)
