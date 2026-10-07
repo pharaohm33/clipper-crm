@@ -37,8 +37,8 @@ EXTRACT_JS = """() => {
 }"""
 
 
-def build_prompt(niche, count):
-    return (f"List {count} small {niche} podcasts on YouTube (1k to 150k subscribers). For each one give the YouTube "
+def build_prompt(niche, count, focus=""):
+    return (f"List {count} small {niche} podcasts{' ' + focus if focus else ''} on YouTube (1k to 150k subscribers). For each one give the YouTube "
             "channel link, a recent full length episode title with its direct YouTube watch link, and the show's "
             "Instagram handle. Format it as a table.")
 
@@ -230,6 +230,7 @@ def main():
     ap = argparse.ArgumentParser(description="Google AI Mode -> Clipper CRM")
     ap.add_argument("niches", nargs="*")
     ap.add_argument("--count", type=int, default=10)
+    ap.add_argument("--focus", default="", help='comma separated angles to vary results, e.g. "in Texas,in Florida,for first time buyers"')
     ap.add_argument("--dry-run", action="store_true", help="parse and print, don't send to the CRM")
     ap.add_argument("--min-subs", type=int, default=1000)
     ap.add_argument("--max-subs", type=int, default=150000)
@@ -251,16 +252,18 @@ def main():
         if url and pw and not a.dry_run:
             for l in crm(url, pw, action="pull")["state"].get("leads", []):
                 existing.add(l["id"])
+                existing.add("n:" + str(l.get("name", "")).strip().lower())
                 if l.get("ig"):
                     existing.add("ig:" + l["ig"].rstrip("/").split("/")[-1].lower())
         total = 0
-        for n, niche in enumerate(a.niches):
-            print(f"[{niche}] asking Google AI...")
-            data = ask_google_ai(page, build_prompt(niche, a.count))
+        jobs = [(n_, f_) for n_ in a.niches for f_ in ([x.strip() for x in a.focus.split(",") if x.strip()] or [""])]
+        for n, (niche, focus) in enumerate(jobs):
+            print(f"[{niche} {focus}] asking Google AI...".replace(" ]", "]"))
+            data = ask_google_ai(page, build_prompt(niche, a.count, focus))
             if not data:
                 print("  no response from Google AI for this prompt; skipping")
                 continue
-            (RUNS / f"{date.today()}_{re.sub(r'[^a-z0-9]+', '_', niche.lower())}.json").write_text(json.dumps(data, indent=1))
+            (RUNS / f"{date.today()}_{re.sub(r'[^a-z0-9]+', '_', (niche + ' ' + focus).lower())}.json").write_text(json.dumps(data, indent=1))
             items = parse_tables(data)
             if not items:
                 print("  no table found. Raw answer saved in tools/runs/ (paste it into the website's Paste box).")
@@ -269,11 +272,12 @@ def main():
             fresh = []
             for l in leads:
                 igk = "ig:" + l["ig"].rstrip("/").split("/")[-1].lower() if l["ig"] else ""
-                if l["id"] in existing or (igk and igk in existing):
+                if l["id"] in existing or ("n:" + l["name"].strip().lower()) in existing or (igk and igk in existing):
                     continue
                 if l["subs"] and not (a.min_subs <= l["subs"] <= a.max_subs):
                     continue
                 existing.add(l["id"])
+                existing.add("n:" + l["name"].strip().lower())
                 if igk:
                     existing.add(igk)
                 fresh.append(l)
@@ -283,7 +287,7 @@ def main():
             if fresh and not a.dry_run:
                 print(f"  added {crm(url, pw, action='append', leads=fresh).get('added')} to the CRM")
             total += len(fresh)
-            if n < len(a.niches) - 1:
+            if n < len(jobs) - 1:
                 time.sleep(random.uniform(20, 40))
         print(f"Done. {total} new leads.")
         ctx.close()

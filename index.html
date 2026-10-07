@@ -35,7 +35,7 @@ a{color:var(--acc)}.hide{display:none}.mut{color:var(--mut)}pre{white-space:pre-
 <span style="margin-left:auto" class="mut" id="sync"></span><span class="mut" id="clock"></span></header>
 <main id="main"></main>
 <script>
-const STATUSES=['New','Sample Sent','Replied','Interested','Client','No Response','Not Interested'];
+const STATUSES=['New','Sample Sent','Replied','Interested','Client','No Response','Not Interested','Removed'];
 const TPL=['{n} podcast full episode','{n} podcast interview','how to start a {n} podcast','{n} podcast new episode'];
 const DEF={settings:{key:'',goal:5000,daily:100,minSubs:1000,maxSubs:150000,maxDays:60,followDays:3,templates:3,
  syncUrl:'',syncPw:'',geminiKey:'',geminiModel:'gemini-2.5-flash',skipNoContact:1,igOnly:0,useGeminiParse:0,
@@ -99,10 +99,10 @@ function todayV(){const want=Math.max(1,S.settings.daily-sentOn(today()));
  ${cur?`<div class="card" style="border-color:var(--acc)"><b>Next up: ${esc(cur.name)}</b> <span class=mut>${(cur.subs||0).toLocaleString()} subs · ${cur.ig?'Instagram':cur.x?'X':cur.tt?'TikTok':'link'}</span>
  ${cur.epTitle?`<div class=mut>Episode: ${esc(cur.epTitle)}</div>`:''}${cur.notes&&/Clip idea/.test(cur.notes)?`<div class=mut>${esc(cur.notes.split(' | ').filter(x=>/Clip idea/.test(x))[0])}</div>`:''}<p class="dm" style="max-width:none">${esc(dm(cur))}</p>
  <div class="row"><button class="b p" data-open="${cur.id}">Open profile + copy DM</button>
- ${cur.ig&&cur.x?`<button class="b" data-openu="${esc(cur.x)}" data-id="${cur.id}">Open X + copy</button>`:''}${cur.ig&&cur.tt?`<button class="b" data-openu="${esc(cur.tt)}" data-id="${cur.id}">Open TikTok + copy</button>`:''}<button class="b" data-ep="${cur.id}">Open episode</button><button class="b" data-next="${cur.id}">Sent, next</button><button class="b" data-shuf="${cur.id}">Reshuffle DM</button><button class="b" data-skip="${cur.id}">Skip</button></div>
+ ${cur.ig&&cur.x?`<button class="b" data-openu="${esc(cur.x)}" data-id="${cur.id}">Open X + copy</button>`:''}${cur.ig&&cur.tt?`<button class="b" data-openu="${esc(cur.tt)}" data-id="${cur.id}">Open TikTok + copy</button>`:''}<button class="b" data-ep="${cur.id}">Open episode</button><button class="b" data-next="${cur.id}">Sent, next</button><button class="b" data-shuf="${cur.id}">Reshuffle DM</button><button class="b" data-skip="${cur.id}">Skip</button><button class="b" data-rm="${cur.id}" title="Remove for good, never added back">Remove</button></div>
  <span class=mut>Opens in a new tab. If you're logged into Instagram there, it lands on their profile. Hit Message, paste, attach the clip.</span></div>`:''}
  <div class="card tw"><table><tr><th>Sent</th><th>Podcast</th><th>Contact</th><th>Episode</th><th>DM</th></tr>
- ${list.map(l=>`<tr><td><input type="checkbox" data-sent="${l.id}"></td><td>${esc(l.name)}<br><span class=mut>${(l.subs||0).toLocaleString()} subs</span></td>
+ ${list.map(l=>`<tr><td><input type="checkbox" data-sent="${l.id}"> <button class="b" data-rm="${l.id}" title="Remove for good">✕</button></td><td>${esc(l.name)}<br><span class=mut>${(l.subs||0).toLocaleString()} subs</span></td>
  <td>${[l.ig&&`<a target=_blank rel=noopener href="${esc(l.ig)}">Instagram</a>`,l.x&&`<a target=_blank rel=noopener href="${esc(l.x)}">X</a>`,l.tt&&`<a target=_blank rel=noopener href="${esc(l.tt)}">TikTok</a>`,l.web&&`<a target=_blank rel=noopener href="${esc(l.web)}">Link</a>`].filter(Boolean).join(' · ')}</td>
  <td>${l.episode?`<a target=_blank rel=noopener href="${esc(l.episode)}">${esc((l.epTitle||'Episode').slice(0,45))}</a>`:'<span class=mut>none</span>'}</td><td class="dm">${esc(dm(l))}<br><button class="b" data-copy="${l.id}">Copy DM</button></td></tr>`).join('')||'<tr><td colspan=5 class=mut>No fresh leads with an Instagram. Use Find Podcasts, or Leads → Find missing Instagrams.</td></tr>'}</table></div>`;
  $('#main').onclick=e=>{const d=e.target.dataset,get=id=>S.leads.find(x=>x.id==id);
@@ -112,23 +112,24 @@ function todayV(){const want=Math.max(1,S.settings.daily-sentOn(today()));
   if(d.ep){window.open(get(d.ep).episode,'_blank','noopener')}
   if(d.next){markSent(get(d.next));save();todayV()}
   if(d.shuf){const l=get(d.shuf);l.spin=(l.spin||0)+1;save();todayV()}
+  if(d.rm){get(d.rm).status='Removed';save();todayV()}
   if(d.skip){todayV.skip.add(d.skip);todayV()}};
  $('#main').onchange=e=>{const id=e.target.dataset.sent;if(id&&e.target.checked){markSent(S.leads.find(x=>x.id==id));save();e.target.closest('tr').style.opacity=.4;$('.card b').textContent=sentOn(today())+'/'+S.settings.daily}}}
 function markSent(l){l.status='Sample Sent';if(!l.sent)l.sent=today();l.follow=addDays(today(),+S.settings.followDays||3)}
 function leads(){const q=(leads.q||'').toLowerCase(),f=leads.f||'';
- const rows=S.leads.filter(l=>(!f||l.status==f)&&(!q||(l.name+l.niche).toLowerCase().includes(q)));
+ const rows=S.leads.filter(l=>(f?l.status==f:l.status!='Removed')&&(!q||(l.name+l.niche).toLowerCase().includes(q)));
  $('#main').innerHTML=`<div class="row"><input id="q" placeholder="Search" value="${esc(leads.q||'')}"><select id="f"><option value="">All statuses</option>${STATUSES.map(s=>`<option ${s==f?'selected':''}>${s}</option>`).join('')}</select><span class=mut>${rows.length} leads</span><button class="b" id="cl">Remove no-contact leads</button><button class="b p" id="fi">Find missing Instagrams</button><button class="b p" id="fe">Fill missing episodes</button><button class="b" id="ri">Remove leads without Instagram</button></div>
  <div class="card tw"><table><tr><th>Podcast</th><th>Niche</th><th>Subs</th><th>Contact</th><th>Status</th><th>Sent / Follow-up</th><th>Notes</th></tr>
  ${rows.slice(0,300).map(l=>`<tr><td><a target=_blank rel=noopener href="${esc(l.url)}">${esc(l.name)}</a></td><td>${esc(l.niche)}${l.episode?` <a target=_blank rel=noopener href="${esc(l.episode)}">▶</a>`:''}</td><td>${(l.subs||0).toLocaleString()}</td>
  <td>${[l.ig&&`<a target=_blank rel=noopener href="${esc(l.ig)}">IG</a>`,l.x&&`<a target=_blank rel=noopener href="${esc(l.x)}">X</a>`,l.tt&&`<a target=_blank rel=noopener href="${esc(l.tt)}">TT</a>`,l.web&&`<a target=_blank rel=noopener href="${esc(l.web)}">Link</a>`].filter(Boolean).join(' · ')||'<span class=mut>none</span>'}</td>
  <td><select data-st="${l.id}">${STATUSES.map(s=>`<option ${s==l.status?'selected':''}>${s}</option>`).join('')}</select></td><td>${l.sent||''}<br><span class=mut>${l.follow||''}</span></td>
  <td><input data-nt="${l.id}" value="${esc(l.notes||'')}"></td></tr>`).join('')}</table></div>${rows.length>300?'<p class=mut>Showing first 300 — use search/filter.</p>':''}`;
- $('#cl').onclick=()=>{const bad=S.leads.filter(l=>l.status=='New'&&!(l.ig||l.x||l.tt||l.web));if(!bad.length)return alert('No no-contact leads to remove.');if(!confirm(`Remove ${bad.length} untouched leads with no contact info?`))return;const ids=new Set(bad.map(l=>l.id));S.leads=S.leads.filter(l=>!ids.has(l.id));save();leads()};
+ $('#cl').onclick=()=>{const bad=S.leads.filter(l=>l.status=='New'&&!(l.ig||l.x||l.tt||l.web));if(!bad.length)return alert('No no-contact leads to remove.');if(!confirm(`Remove ${bad.length} untouched leads with no contact info? They stay hidden so they never come back.`))return;const ids=new Set(bad.map(l=>l.id));S.leads.forEach(l=>{if(ids.has(l.id))l.status='Removed'});save();leads()};
  $('#fe').onclick=async()=>{const need=S.leads.filter(l=>!l.episode&&/^UC/.test(l.id));if(!need.length)return alert('Every lead with a YouTube channel already has an episode.');
   $('#fe').disabled=true;let n=0;for(const l of need){$('#fe').textContent=`Filling ${n+1}/${need.length}…`;try{const ep=await pickEpisode('UU'+l.id.slice(2));if(ep){l.episode='https://www.youtube.com/watch?v='+ep.id;l.epTitle=ep.title;l.last=l.last||ep.newest;n++}}catch(e){alert('Stopped: '+e.message);break}}save();leads()};
  $('#fi').onclick=async()=>{const need=S.leads.filter(l=>l.status=='New'&&!l.ig).slice(0,20);if(!need.length)return alert('Every fresh lead already has an Instagram.');
   $('#fi').disabled=true;$('#fi').textContent='Searching…';try{const n=await findInstagrams(need);alert(`Found ${n} Instagram handle(s) out of ${need.length}. They're flagged in Notes. Check them before DMing.`)}catch(e){alert('Stopped: '+e.message)}leads()};
- $('#ri').onclick=()=>{const bad=S.leads.filter(l=>l.status=='New'&&!l.ig);if(!bad.length)return alert('Nothing to remove.');if(!confirm(`Remove ${bad.length} untouched leads without an Instagram?`))return;const ids=new Set(bad.map(l=>l.id));S.leads=S.leads.filter(l=>!ids.has(l.id));save();leads()};
+ $('#ri').onclick=()=>{const bad=S.leads.filter(l=>l.status=='New'&&!l.ig);if(!bad.length)return alert('Nothing to remove.');if(!confirm(`Remove ${bad.length} untouched leads without an Instagram?`))return;const ids=new Set(bad.map(l=>l.id));S.leads.forEach(l=>{if(ids.has(l.id))l.status='Removed'});save();leads()};
  $('#q').oninput=e=>{leads.q=e.target.value;leads()};$('#q').focus&&0;$('#f').onchange=e=>{leads.f=e.target.value;leads()};
  $('#main').onchange=e=>{const t=e.target,l=S.leads.find(x=>x.id==(t.dataset.st||t.dataset.nt));if(!l)return;
   if(t.dataset.st){l.status=t.value;if(t.value=='Sample Sent')markSent(l);if(t.value=='Client'&&!S.clients.includes(l.name))S.clients.push(l.name)}else l.notes=t.value;save()}}
@@ -150,8 +151,9 @@ async function pickEpisode(uploads){const pl=await yt('playlistItems',{part:'con
  let pick=null;for(const id of ids){const x=byId[id];if(x){const d=isoSecs(x.contentDetails.duration);if(d>=1200&&d<=14400){pick=x;break}}}
  if(!pick){let best=0;for(const id of ids){const x=byId[id];const d=x?isoSecs(x.contentDetails.duration):0;if(d>best){best=d;pick=x}}}
  return{newest,id:pick?pick.id:ids[0],title:pick?pick.snippet.title:''}}
-let skipped=0;
-async function addChannels(c,log,force){const g=S.settings,have=new Set(S.leads.map(l=>l.id));let added=0;skipped=0;
+function seenKeys(){const ig=new Set(),nm=new Set();for(const l of S.leads){if(l.ig)ig.add(String(l.ig).replace(/\/$/,'').split('/').pop().toLowerCase());if(l.name)nm.add(String(l.name).trim().toLowerCase())}return{ig,nm}}
+let skipped=0,dups=0;
+async function addChannels(c,log,force){const g=S.settings,have=new Set(S.leads.map(l=>l.id));let added=0;skipped=0;dups=0;const sk=seenKeys();
  c=c.filter((x,i)=>!have.has(x.id)&&c.findIndex(y=>y.id==x.id)==i);
  for(let i=0;i<c.length;i+=50){const grp=c.slice(i,i+50),by=Object.fromEntries(grp.map(x=>[x.id,x]));
   const j=await yt('channels',{part:'snippet,statistics,contentDetails',id:grp.map(x=>x.id).join(','),maxResults:50});
@@ -160,6 +162,7 @@ async function addChannels(c,log,force){const g=S.settings,have=new Set(S.leads.
    let last='',lastVid='',epTitle='';try{const ep=await pickEpisode(ch.contentDetails.relatedPlaylists.uploads);if(ep){last=ep.newest;lastVid=ep.id;epTitle=ep.title}}catch(e){}
    if(!force&&last&&(Date.now()-new Date(last))/864e5>g.maxDays)continue;
    const s=socials(ch.snippet.description);
+   {const igk=(s.ig?s.ig.replace(/\/$/,'').split('/').pop():(k.aiIg||'')).toLowerCase(),nmk=ch.snippet.title.trim().toLowerCase();if(force!==true&&((igk&&sk.ig.has(igk))||sk.nm.has(nmk))){dups++;continue}if(igk)sk.ig.add(igk);sk.nm.add(nmk)}
    if(force!==true&&g.skipNoContact&&!(s.ig||s.x||s.tt||s.web||k.aiIg||k.aiX||k.aiTt||k.aiWeb)){skipped++;continue}
    if(force!==true&&g.igOnly&&!(s.ig||k.aiIg)&&!g.geminiKey){skipped++;continue}
    S.leads.push({id:ch.id,name:ch.snippet.title,niche:k.niche||'',url:'https://www.youtube.com/channel/'+ch.id,subs,last,episode:(k.video||lastVid)?'https://www.youtube.com/watch?v='+(k.video||lastVid):'',epTitle:k.video?(k.epTitle||''):epTitle,
@@ -167,7 +170,7 @@ async function addChannels(c,log,force){const g=S.settings,have=new Set(S.leads.
   save();log(`  checked ${Math.min(i+50,c.length)}/${c.length} channels…`)}return added}
 function episodePrompt(niche,count,extra,json){const base=`Use Google Search. Find ${count} real podcasts in the niche "${niche}" that post full length episodes on YouTube and are small enough to want clipping help (roughly 1k to 150k subscribers). For EACH show, pick ONE specific episode (published in the last 90 days, 20 minutes or longer, not a Short) that has a strong clippable moment, like a surprising story, a hot take or a practical tip. ${extra||''}`;
  return json?base+`\nReturn ONLY a JSON array. Each item: {"name":"podcast name","episode_title":"exact episode title","episode_url":"direct https://www.youtube.com/watch?v= link","clip_idea":"one line on the moment worth clipping, with a timestamp if known","youtube_url":"channel link","instagram_handle":"official show or host handle without @","x_url":"","tiktok_url":""}. Only include episodes you actually found in search results with a real watch link. Leave a field empty if unknown. Never guess or invent links or handles.`
- :`List ${count} small ${niche} podcasts on YouTube (1k to 150k subscribers). For each one give the YouTube channel link, a recent full length episode title with its direct YouTube watch link, and the show's Instagram handle. Format it as a table.`}
+ :`List ${count} small ${niche} podcasts${extra?' '+extra:''} on YouTube (1k to 150k subscribers). For each one give the YouTube channel link, a recent full length episode title with its direct YouTube watch link, and the show's Instagram handle. Format it as a table.`}
 async function geminiModels(){if(geminiModels.c)return geminiModels.c;const g=S.settings;
  const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200',{headers:{'x-goog-api-key':g.geminiKey}});const j=await r.json();if(j.error)throw new Error(j.error.message);
  const all=(j.models||[]).filter(m=>(m.supportedGenerationMethods||[]).includes('generateContent')&&/flash/i.test(m.name)&&!/lite|image|tts|live|audio|embed|thinking/i.test(m.name)).map(m=>m.name.replace('models/',''));
@@ -231,7 +234,7 @@ async function ingestPasted(text,niche,log){let items=null;
  for(const it of items){const ig=(it.instagram_handle||'').replace(/^@/,'').replace(/[^A-Za-z0-9._]/g,'');let rr=null;
   try{rr=await resolveAI(it)}catch(e){log('  YouTube lookup failed for '+it.name+': '+e.message)}
   if(rr)cands.push({...rr,niche,aiNote:it.clip_idea?'Clip idea: '+it.clip_idea:'',aiIg:ig,aiX:it.x_url||'',aiTt:it.tiktok_url||'',aiWeb:it.website||''});
-  else{const lid='m:'+(ig||it.name.toLowerCase());if(have.has(lid)||!(ig||it.x_url||it.tiktok_url||it.website))continue;have.add(lid);
+  else{const lid='m:'+(ig||it.name.toLowerCase());const sk2=seenKeys();if(have.has(lid)||(ig&&sk2.ig.has(ig.toLowerCase()))||sk2.nm.has(it.name.trim().toLowerCase())||!(ig||it.x_url||it.tiktok_url||it.website))continue;have.add(lid);
    S.leads.push({id:lid,name:it.name,niche,url:it.youtube_url||'',subs:0,last:'',episode:it.episode_url||'',epTitle:it.episode_title||'',ig:ig?'https://instagram.com/'+ig:'',x:it.x_url||'',tt:it.tiktok_url||'',web:it.website||'',status:'New',added:today(),sent:'',follow:'',notes:(it.episode_url?'':'No YouTube channel found, find an episode to clip')+(it.clip_idea?(it.episode_url?'':' | ')+'Clip idea: '+it.clip_idea:'')});direct++;log('  added without YouTube: '+it.name)}}
  const a=await addChannels(cands,log,'soft');save();return a+direct}
 async function findInstagrams(list){let found=0;
@@ -243,6 +246,7 @@ async function findInstagrams(list){let found=0;
 function find(){$('#main').innerHTML=`<div class="card" style="border-color:var(--acc)"><b>Find podcasts</b> <span class=mut>opens Google AI with the prompt already filled in</span>
  <div class="row"><input id="pgn" list="nl" placeholder="Niche, e.g. real estate investing"><datalist id="nl">${S.niches.map(n=>`<option>${esc(n)}</option>`).join('')}</datalist>
  <input id="pgc" type="number" value="15" style="width:80px" title="How many podcasts"><button class="b p" id="pgb">Find podcasts in Google AI</button></div>
+ <div class="row"><input id="pgf" style="flex:1;min-width:240px" placeholder="Optional focus so results differ, e.g. in Texas, for first time buyers, run by women"></div>
  <div class="row">${S.niches.map(n=>`<button class="b" data-ai="${esc(n)}">${esc(n)}</button>`).join('')}</div>
  <span class=mut>Step 2: copy Google's answer and paste it into the box below. The prompt is also copied to your clipboard as a backup.</span></div>
  <div class="card"><b>Niches</b> <span class=mut>(one per line)</span><textarea id="ni">${esc(S.niches.join('\n'))}</textarea>
@@ -269,8 +273,8 @@ function find(){$('#main').innerHTML=`<div class="card" style="border-color:var(
   try{for(const n of S.niches){log('Searching: '+n);const cand={};
    for(let t=0;t<Math.min(4,S.settings.templates);t++){const j=await yt('search',{part:'snippet',type:'video',videoDuration:'long',maxResults:50,order:'relevance',q:TPL[t].replace('{n}',n)});
     (j.items||[]).forEach(it=>{const id=it.snippet.channelId;if(!cand[id])cand[id]={id,video:it.id.videoId,niche:n}})}
-   const a=await addChannels(Object.values(cand),log);tot+=a;log(`  +${a} new leads (${skipped} skipped: no contact info)`)}log(`Done. ${tot} new leads. Open the Today tab.`)}catch(e){log('Stopped: '+e.message)}};
- const openAI=n=>{n=(n||'').trim();if(!n)return log('Type a niche first.');const p=episodePrompt(n,+$('#pgc').value||15,'',false);navigator.clipboard.writeText(p).catch(()=>{});
+   const a=await addChannels(Object.values(cand),log);tot+=a;log(`  +${a} new leads (${skipped} no contact info, ${dups} already seen)`)}log(`Done. ${tot} new leads. Open the Today tab.`)}catch(e){log('Stopped: '+e.message)}};
+ const openAI=n=>{n=(n||'').trim();if(!n)return log('Type a niche first.');const p=episodePrompt(n,+$('#pgc').value||15,($('#pgf').value||'').trim(),false);navigator.clipboard.writeText(p).catch(()=>{});
   window.open('https://www.google.com/search?udm=50&q='+encodeURIComponent(p),'_blank','noopener');$('#pn').value=n;$('#log').textContent='';log('Opened Google AI for "'+n+'". Copy its answer and paste it into "Paste AI results" below.')};
  $('#pgb').onclick=()=>openAI($('#pgn').value||S.niches[0]);
  $('#main').onclick=e=>{if(e.target.dataset.ai)openAI(e.target.dataset.ai)};
