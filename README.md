@@ -43,3 +43,10 @@ cp tools/.env.example tools/.env      # then fill in CRM_SYNC_URL, CRM_SYNC_PASS
 python3 tools/local_runner.py
 ```
 It listens only on `127.0.0.1` and only accepts requests from this site. Your keys stay in `tools/.env`.
+
+## Grab just a slice of a podcast video
+```bash
+tools/grab_sample.sh "https://www.youtube.com/watch?v=VIDEO_ID" 12:00 17:00
+```
+Downloads only that time range (default 10:00 to 15:00) into `~/Downloads/clip-samples`, so you can make a sample clip fast.
+Needs ffmpeg and yt-dlp. If it says all attempts failed, run `brew install yt-dlp`.
