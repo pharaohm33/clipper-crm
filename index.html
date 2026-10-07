@@ -240,16 +240,18 @@ async function findInstagrams(list){let found=0;
   let arr;try{arr=jsonList(await geminiCall(prompt,true))}catch(e){if(/key|Gemini failed/i.test(e.message))throw e;continue}
   for(const a of arr){const l=grp[a.i];const h=(a.instagram_handle||'').replace(/^@/,'').replace(/[^A-Za-z0-9._]/g,'');if(l&&h){l.ig='https://instagram.com/'+h;l.notes=(l.notes?l.notes+' | ':'')+'IG from Gemini, verify';found++}}}
  save();return found}
-function find(){$('#main').innerHTML=`<div class="card"><b>Niches</b> <span class=mut>(one per line)</span><textarea id="ni">${esc(S.niches.join('\n'))}</textarea>
- <div class="row"><button class="b p" id="run">Find podcasts</button><span class=mut>Each query costs 100 of your 10,000 free daily API units.</span></div></div>
+function find(){$('#main').innerHTML=`<div class="card" style="border-color:var(--acc)"><b>Find podcasts</b> <span class=mut>opens Google AI with the prompt already filled in</span>
+ <div class="row"><input id="pgn" list="nl" placeholder="Niche, e.g. real estate investing"><datalist id="nl">${S.niches.map(n=>`<option>${esc(n)}</option>`).join('')}</datalist>
+ <input id="pgc" type="number" value="15" style="width:80px" title="How many podcasts"><button class="b p" id="pgb">Find podcasts in Google AI</button></div>
+ <div class="row">${S.niches.map(n=>`<button class="b" data-ai="${esc(n)}">${esc(n)}</button>`).join('')}</div>
+ <span class=mut>Step 2: copy Google's answer and paste it into the box below. The prompt is also copied to your clipboard as a backup.</span></div>
+ <div class="card"><b>Niches</b> <span class=mut>(one per line)</span><textarea id="ni">${esc(S.niches.join('\n'))}</textarea>
+ <div class="row"><button class="b" id="run">Auto search on YouTube instead</button><span class=mut>Each query costs 100 of your 10,000 free daily API units.</span></div></div>
  <div class="card"><b>Quick add</b> <span class=mut>(paste YouTube video / channel / @handle links)</span><textarea id="qa"></textarea>
  <div class="row"><button class="b p" id="qb">Add these</button></div></div><div class="card"><b>Google AI search (Gemini + Google Search)</b> <span class=mut>— finds podcasts, then YouTube verifies them and pulls real links</span>
  <div class="row"><input id="gn" placeholder="Niche, e.g. real estate investing"><input id="gc" type="number" value="15" style="width:80px" title="How many podcasts">
  <button class="b p" id="gb">Ask Google AI</button></div><label>Extra instructions / dork ideas (optional)</label>
  <input id="gx" style="width:100%" placeholder='e.g. prefer shows that say "audio only" or have few Shorts; hosts active on Instagram'></div>
- <div class="card"><b>Prompt for Google AI Mode</b> <span class=mut>copy it, paste it into Google AI, then paste the answer below</span>
- <div class="row"><input id="pgn" placeholder="Niche"><input id="pgc" type="number" value="15" style="width:80px"><button class="b p" id="pgb">Copy prompt</button></div>
- <textarea id="pgt" style="min-height:110px" readonly placeholder="Your prompt appears here"></textarea></div>
  <div class="card"><b>Paste AI results</b> <span class=mut>— paste Google AI Mode / ChatGPT / any text listing podcasts; I'll pull out the podcasts and contact info</span>
  <textarea id="pt" style="min-height:140px" placeholder="Paste the whole AI answer here…"></textarea>
  <div class="row"><input id="pn" placeholder="Niche for these leads"><button class="b p" id="pb2">Parse &amp; add to CRM</button>
@@ -259,7 +261,7 @@ function find(){$('#main').innerHTML=`<div class="card"><b>Niches</b> <span clas
  <td><a target=_blank rel=noopener href="${q('site:youtube.com '+n+' podcast "how to start a podcast" OR "audio only"')}">new/audio-only</a></td>
  <td><a target=_blank rel=noopener href="${q('site:instagram.com "'+n+' podcast" "link in bio"')}">IG hosts</a></td>
  <td><a target=_blank rel=noopener href="${q('site:linktr.ee '+n+' podcast')}">linktree</a></td>
- <td><a target=_blank rel=noopener href="https://www.google.com/search?udm=50&q=${encodeURIComponent('List small '+n+' podcasts with 5k-100k YouTube subscribers and their host Instagram handles')}">Google AI mode</a></td></tr>`}).join('')}</table></div></div>
+ <td><a target=_blank rel=noopener href="https://www.google.com/search?udm=50&q=${encodeURIComponent(episodePrompt(n,15,'',false))}">Google AI mode</a></td></tr>`}).join('')}</table></div></div>
  <pre id="log">Ready.</pre>`;
  const log=t=>{$('#log').textContent+='\n'+t;$('#log').scrollTop=1e9};
  $('#ni').onchange=e=>{S.niches=e.target.value.split('\n').map(x=>x.trim()).filter(Boolean);save()};
@@ -268,7 +270,10 @@ function find(){$('#main').innerHTML=`<div class="card"><b>Niches</b> <span clas
    for(let t=0;t<Math.min(4,S.settings.templates);t++){const j=await yt('search',{part:'snippet',type:'video',videoDuration:'long',maxResults:50,order:'relevance',q:TPL[t].replace('{n}',n)});
     (j.items||[]).forEach(it=>{const id=it.snippet.channelId;if(!cand[id])cand[id]={id,video:it.id.videoId,niche:n}})}
    const a=await addChannels(Object.values(cand),log);tot+=a;log(`  +${a} new leads (${skipped} skipped: no contact info)`)}log(`Done. ${tot} new leads. Open the Today tab.`)}catch(e){log('Stopped: '+e.message)}};
- $('#pgb').onclick=()=>{const n=$('#pgn').value.trim()||S.niches[0]||'podcasts';const p=episodePrompt(n,+$('#pgc').value||15,'',false);$('#pgt').value=p;navigator.clipboard.writeText(p);$('#pgb').textContent='Copied ✓'};
+ const openAI=n=>{n=(n||'').trim();if(!n)return log('Type a niche first.');const p=episodePrompt(n,+$('#pgc').value||15,'',false);navigator.clipboard.writeText(p).catch(()=>{});
+  window.open('https://www.google.com/search?udm=50&q='+encodeURIComponent(p),'_blank','noopener');$('#pn').value=n;$('#log').textContent='';log('Opened Google AI for "'+n+'". Copy its answer and paste it into "Paste AI results" below.')};
+ $('#pgb').onclick=()=>openAI($('#pgn').value||S.niches[0]);
+ $('#main').onclick=e=>{if(e.target.dataset.ai)openAI(e.target.dataset.ai)};
  $('#pb2').onclick=async()=>{$('#log').textContent='';const t=$('#pt').value.trim();if(!t)return log('Paste some text first.');
   try{const a=await ingestPasted(t,$('#pn').value.trim(),log);log(`Done: ${a} lead(s) added.`);$('#pt').value=''}catch(e){log('Stopped: '+e.message)}};
  $('#gb').onclick=async()=>{$('#log').textContent='';const n=$('#gn').value.trim();if(!n)return log('Enter a niche.');
