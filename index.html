@@ -99,9 +99,9 @@ function dash(){const s=stats(),g=S.settings;const pct=Math.min(100,s.earned/g.g
  ${Object.entries(byInf).sort((a,b)=>b[1].all-a[1].all).map(([k,v])=>`<tr><td>${esc(k)}</td><td>${money(v.all)}</td><td>${money(v.mo)}</td></tr>`).join('')||'<tr><td colspan=3 class=mut>No payments yet — log them on the Money tab.</td></tr>'}</table></div></div>`}
 function todayV(){const want=Math.max(1,S.settings.daily-sentOn(today()));
  const list=S.leads.filter(l=>l.status=='New'&&(S.settings.igOnly?l.ig:(l.ig||l.x||l.tt))).sort((a,b)=>(a.ig?0:1)-(b.ig?0:1)||(a.shortsPct??50)-(b.shortsPct??50)||(a.subs||0)-(b.subs||0)).slice(0,want);
- const skip=todayV.skip=todayV.skip||new Set(),q=list.filter(l=>!skip.has(l.id)),cur=q[0];
+ const skip=todayV.skip=todayV.skip||new Set(),sko=todayV.skipOrder=todayV.skipOrder||[],q=list.filter(l=>!skip.has(l.id)),cur=q[0];
  const ctUrl=l=>l.ig||l.x||l.tt||l.web;
- $('#main').innerHTML=`<div class="card"><b>${sentOn(today())}/${S.settings.daily}</b> sent today · ${list.length} fresh leads queued. Open the profile, paste the DM, attach your clip, send.</div>
+ $('#main').innerHTML=`<div class="card"><b>${sentOn(today())}/${S.settings.daily}</b> sent today · ${list.length} fresh leads queued.${sko.length?` <button class="b" data-back="1">◀ Back to ${esc((S.leads.find(x=>x.id==sko[sko.length-1])||{}).name||'last skipped')} (${sko.length} skipped)</button>`:''} Open the profile, paste the DM, attach your clip, send.</div>
  ${cur?`<div class="card" style="border-color:var(--acc)"><b>Next up: ${esc(cur.name)}</b> <span class=mut>${(cur.subs||0).toLocaleString()} subs · ${cur.ig?'Instagram':cur.x?'X':cur.tt?'TikTok':'link'}</span>
  ${cur.epTitle?`<div class=mut>Episode: ${esc(cur.epTitle)}</div>`:''}${cur.notes&&/Clip idea/.test(cur.notes)?`<div class=mut>${esc(cur.notes.split(' | ').filter(x=>/Clip idea/.test(x))[0])}</div>`:''}<p class="dm" style="max-width:none">${esc(dm(cur))}</p>
  <div class="row"><button class="b p" data-open="${cur.id}">Open profile + copy DM</button>
@@ -120,7 +120,8 @@ function todayV(){const want=Math.max(1,S.settings.daily-sentOn(today()));
   if(d.shuf){const l=get(d.shuf);l.spin=(l.spin||0)+1;save();todayV()}
   if(d.ed)editLead(d.ed);if(d.edc)editLead(d.edc,'contact');if(d.ede)editLead(d.ede,'episode');if(d.gc)sendToClipper(d.gc);if(d.reveal)revealSample(d.reveal);
   if(d.rm){get(d.rm).status='Removed';save();todayV()}
-  if(d.skip){todayV.skip.add(d.skip);todayV()}};
+  if(d.skip){todayV.skip.add(d.skip);todayV.skipOrder.push(d.skip);todayV()}
+  if(d.back){const id=todayV.skipOrder.pop();if(id)todayV.skip.delete(id);todayV()}};
  $('#main').onchange=e=>{const id=e.target.dataset.sent;if(id&&e.target.checked){markSent(S.leads.find(x=>x.id==id));save();e.target.closest('tr').style.opacity=.4;$('.card b').textContent=sentOn(today())+'/'+S.settings.daily}}}
 function normSocial(v,base){v=(v||'').trim();if(!v)return '';if(/^https?:\/\//i.test(v))return v.replace(/\/+$/,'');v=v.replace(/^@/,'').replace(/\s+/g,'');return v?base+v:''}
 function normEpisode(v){v=(v||'').trim();if(!v)return '';let m=v.match(/[?&]v=([\w-]{11})/)||v.match(/youtu\.be\/([\w-]{11})/)||v.match(/youtube\.com\/(?:shorts|live|embed)\/([\w-]{11})/)||v.match(/^([\w-]{11})$/);return m?'https://www.youtube.com/watch?v='+m[1]:v}
