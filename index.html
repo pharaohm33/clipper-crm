@@ -38,7 +38,7 @@ a{color:var(--acc)}.hide{display:none}.mut{color:var(--mut)}pre{white-space:pre-
 const STATUSES=['New','Sample Sent','Replied','Interested','Client','No Response','Not Interested'];
 const TPL=['{n} podcast full episode','{n} podcast interview','how to start a {n} podcast','{n} podcast new episode'];
 const DEF={settings:{key:'',goal:5000,daily:100,minSubs:1000,maxSubs:150000,maxDays:60,followDays:3,templates:3,
- syncUrl:'',syncPw:'',geminiKey:'',geminiModel:'gemini-2.5-flash',skipNoContact:1,
+ syncUrl:'',syncPw:'',geminiKey:'',geminiModel:'gemini-2.5-flash',skipNoContact:1,igOnly:0,
  dm:"{Hey|Hey there|Hi}! {Just watched|Just finished|Caught} your {latest|recent|newest} episode on {niche} and {loved it|really enjoyed it|thought it was great}. I {made|cut|put together} a quick clip from it because {it deserved more eyes|it was too good not to share|I think it could do well on Reels}. {Totally free|No strings attached|No cost at all}, just thought you'd like to see it. Here's the full episode I pulled it from: {episode}"},
  niches:['real estate','personal finance','fitness','entrepreneurship','mental health','true crime','faith christian','sports betting','parenting','health longevity'],
  leads:[],payments:[],clients:[],team:[]};
@@ -92,22 +92,23 @@ function dash(){const s=stats(),g=S.settings;const pct=Math.min(100,s.earned/g.g
  <div class="card"><b>Earnings per influencer</b><div class="tw"><table><tr><th>Influencer</th><th>All-time</th><th>This month</th></tr>
  ${Object.entries(byInf).sort((a,b)=>b[1].all-a[1].all).map(([k,v])=>`<tr><td>${esc(k)}</td><td>${money(v.all)}</td><td>${money(v.mo)}</td></tr>`).join('')||'<tr><td colspan=3 class=mut>No payments yet — log them on the Money tab.</td></tr>'}</table></div></div>`}
 function todayV(){const want=Math.max(1,S.settings.daily-sentOn(today()));
- const list=S.leads.filter(l=>l.status=='New'&&(l.ig||l.x||l.tt)).sort((a,b)=>(a.ig?0:1)-(b.ig?0:1)||(a.subs||0)-(b.subs||0)).slice(0,want);
+ const list=S.leads.filter(l=>l.status=='New'&&(S.settings.igOnly?l.ig:(l.ig||l.x||l.tt))).sort((a,b)=>(a.ig?0:1)-(b.ig?0:1)||(a.subs||0)-(b.subs||0)).slice(0,want);
  const skip=todayV.skip=todayV.skip||new Set(),q=list.filter(l=>!skip.has(l.id)),cur=q[0];
  const ctUrl=l=>l.ig||l.x||l.tt||l.web;
  $('#main').innerHTML=`<div class="card"><b>${sentOn(today())}/${S.settings.daily}</b> sent today · ${list.length} fresh leads queued. Open the profile, paste the DM, attach your clip, send.</div>
  ${cur?`<div class="card" style="border-color:var(--acc)"><b>Next up: ${esc(cur.name)}</b> <span class=mut>${(cur.subs||0).toLocaleString()} subs · ${cur.ig?'Instagram':cur.x?'X':cur.tt?'TikTok':'link'}</span>
  <p class="dm" style="max-width:none">${esc(dm(cur))}</p>
  <div class="row"><button class="b p" data-open="${cur.id}">Open profile + copy DM</button>
- <button class="b" data-ep="${cur.id}">Open episode</button><button class="b" data-next="${cur.id}">Sent, next</button><button class="b" data-shuf="${cur.id}">Reshuffle DM</button><button class="b" data-skip="${cur.id}">Skip</button></div>
+ ${cur.ig&&cur.x?`<button class="b" data-openu="${esc(cur.x)}" data-id="${cur.id}">Open X + copy</button>`:''}${cur.ig&&cur.tt?`<button class="b" data-openu="${esc(cur.tt)}" data-id="${cur.id}">Open TikTok + copy</button>`:''}<button class="b" data-ep="${cur.id}">Open episode</button><button class="b" data-next="${cur.id}">Sent, next</button><button class="b" data-shuf="${cur.id}">Reshuffle DM</button><button class="b" data-skip="${cur.id}">Skip</button></div>
  <span class=mut>Opens in a new tab. If you're logged into Instagram there, it lands on their profile. Hit Message, paste, attach the clip.</span></div>`:''}
  <div class="card tw"><table><tr><th>Sent</th><th>Podcast</th><th>Contact</th><th>Episode</th><th>DM</th></tr>
  ${list.map(l=>`<tr><td><input type="checkbox" data-sent="${l.id}"></td><td>${esc(l.name)}<br><span class=mut>${(l.subs||0).toLocaleString()} subs</span></td>
  <td>${[l.ig&&`<a target=_blank rel=noopener href="${esc(l.ig)}">Instagram</a>`,l.x&&`<a target=_blank rel=noopener href="${esc(l.x)}">X</a>`,l.tt&&`<a target=_blank rel=noopener href="${esc(l.tt)}">TikTok</a>`,l.web&&`<a target=_blank rel=noopener href="${esc(l.web)}">Link</a>`].filter(Boolean).join(' · ')}</td>
- <td><a target=_blank rel=noopener href="${esc(l.episode)}">Episode</a></td><td class="dm">${esc(dm(l))}<br><button class="b" data-copy="${l.id}">Copy DM</button></td></tr>`).join('')||'<tr><td colspan=5 class=mut>No fresh leads with contact info. Go to Find Podcasts.</td></tr>'}</table></div>`;
+ <td><a target=_blank rel=noopener href="${esc(l.episode)}">Episode</a></td><td class="dm">${esc(dm(l))}<br><button class="b" data-copy="${l.id}">Copy DM</button></td></tr>`).join('')||'<tr><td colspan=5 class=mut>No fresh leads with an Instagram. Use Find Podcasts, or Leads → Find missing Instagrams.</td></tr>'}</table></div>`;
  $('#main').onclick=e=>{const d=e.target.dataset,get=id=>S.leads.find(x=>x.id==id);
   if(d.copy){navigator.clipboard.writeText(dm(get(d.copy)));e.target.textContent='Copied ✓'}
   if(d.open){const l=get(d.open);navigator.clipboard.writeText(dm(l));window.open(ctUrl(l),'_blank','noopener');e.target.textContent='Opened + copied ✓'}
+  if(d.openu){navigator.clipboard.writeText(dm(get(d.id)));window.open(d.openu,'_blank','noopener');e.target.textContent='Opened + copied ✓'}
   if(d.ep){window.open(get(d.ep).episode,'_blank','noopener')}
   if(d.next){markSent(get(d.next));save();todayV()}
   if(d.shuf){const l=get(d.shuf);l.spin=(l.spin||0)+1;save();todayV()}
@@ -116,13 +117,16 @@ function todayV(){const want=Math.max(1,S.settings.daily-sentOn(today()));
 function markSent(l){l.status='Sample Sent';if(!l.sent)l.sent=today();l.follow=addDays(today(),+S.settings.followDays||3)}
 function leads(){const q=(leads.q||'').toLowerCase(),f=leads.f||'';
  const rows=S.leads.filter(l=>(!f||l.status==f)&&(!q||(l.name+l.niche).toLowerCase().includes(q)));
- $('#main').innerHTML=`<div class="row"><input id="q" placeholder="Search" value="${esc(leads.q||'')}"><select id="f"><option value="">All statuses</option>${STATUSES.map(s=>`<option ${s==f?'selected':''}>${s}</option>`).join('')}</select><span class=mut>${rows.length} leads</span><button class="b" id="cl">Remove no-contact leads</button></div>
+ $('#main').innerHTML=`<div class="row"><input id="q" placeholder="Search" value="${esc(leads.q||'')}"><select id="f"><option value="">All statuses</option>${STATUSES.map(s=>`<option ${s==f?'selected':''}>${s}</option>`).join('')}</select><span class=mut>${rows.length} leads</span><button class="b" id="cl">Remove no-contact leads</button><button class="b p" id="fi">Find missing Instagrams</button><button class="b" id="ri">Remove leads without Instagram</button></div>
  <div class="card tw"><table><tr><th>Podcast</th><th>Niche</th><th>Subs</th><th>Contact</th><th>Status</th><th>Sent / Follow-up</th><th>Notes</th></tr>
  ${rows.slice(0,300).map(l=>`<tr><td><a target=_blank rel=noopener href="${esc(l.url)}">${esc(l.name)}</a></td><td>${esc(l.niche)}</td><td>${(l.subs||0).toLocaleString()}</td>
  <td>${[l.ig&&`<a target=_blank rel=noopener href="${esc(l.ig)}">IG</a>`,l.x&&`<a target=_blank rel=noopener href="${esc(l.x)}">X</a>`,l.tt&&`<a target=_blank rel=noopener href="${esc(l.tt)}">TT</a>`,l.web&&`<a target=_blank rel=noopener href="${esc(l.web)}">Link</a>`].filter(Boolean).join(' · ')||'<span class=mut>none</span>'}</td>
  <td><select data-st="${l.id}">${STATUSES.map(s=>`<option ${s==l.status?'selected':''}>${s}</option>`).join('')}</select></td><td>${l.sent||''}<br><span class=mut>${l.follow||''}</span></td>
  <td><input data-nt="${l.id}" value="${esc(l.notes||'')}"></td></tr>`).join('')}</table></div>${rows.length>300?'<p class=mut>Showing first 300 — use search/filter.</p>':''}`;
  $('#cl').onclick=()=>{const bad=S.leads.filter(l=>l.status=='New'&&!(l.ig||l.x||l.tt||l.web));if(!bad.length)return alert('No no-contact leads to remove.');if(!confirm(`Remove ${bad.length} untouched leads with no contact info?`))return;const ids=new Set(bad.map(l=>l.id));S.leads=S.leads.filter(l=>!ids.has(l.id));save();leads()};
+ $('#fi').onclick=async()=>{const need=S.leads.filter(l=>l.status=='New'&&!l.ig).slice(0,20);if(!need.length)return alert('Every fresh lead already has an Instagram.');
+  $('#fi').disabled=true;$('#fi').textContent='Searching…';try{const n=await findInstagrams(need);alert(`Found ${n} Instagram handle(s) out of ${need.length}. They're flagged in Notes. Check them before DMing.`)}catch(e){alert('Stopped: '+e.message)}leads()};
+ $('#ri').onclick=()=>{const bad=S.leads.filter(l=>l.status=='New'&&!l.ig);if(!bad.length)return alert('Nothing to remove.');if(!confirm(`Remove ${bad.length} untouched leads without an Instagram?`))return;const ids=new Set(bad.map(l=>l.id));S.leads=S.leads.filter(l=>!ids.has(l.id));save();leads()};
  $('#q').oninput=e=>{leads.q=e.target.value;leads()};$('#q').focus&&0;$('#f').onchange=e=>{leads.f=e.target.value;leads()};
  $('#main').onchange=e=>{const t=e.target,l=S.leads.find(x=>x.id==(t.dataset.st||t.dataset.nt));if(!l)return;
   if(t.dataset.st){l.status=t.value;if(t.value=='Sample Sent')markSent(l);if(t.value=='Client'&&!S.clients.includes(l.name))S.clients.push(l.name)}else l.notes=t.value;save()}}
@@ -149,6 +153,7 @@ async function addChannels(c,log,force){const g=S.settings,have=new Set(S.leads.
    if(!force&&last&&(Date.now()-new Date(last))/864e5>g.maxDays)continue;
    const s=socials(ch.snippet.description);
    if(force!==true&&g.skipNoContact&&!(s.ig||s.x||s.tt||s.web||k.aiIg||k.aiX||k.aiTt||k.aiWeb)){skipped++;continue}
+   if(force!==true&&g.igOnly&&!(s.ig||k.aiIg)&&!g.geminiKey){skipped++;continue}
    S.leads.push({id:ch.id,name:ch.snippet.title,niche:k.niche||'',url:'https://www.youtube.com/channel/'+ch.id,subs,last,episode:(k.video||lastVid)?'https://www.youtube.com/watch?v='+(k.video||lastVid):'',
     ig:s.ig||(k.aiIg?'https://instagram.com/'+k.aiIg:''),x:s.x||k.aiX||'',tt:s.tt||k.aiTt||'',web:s.web||k.aiWeb||'',status:'New',added:today(),sent:'',follow:'',notes:s.ig?'':(k.aiIg?'IG handle from Gemini — verify':'')});added++}
   save();log(`  checked ${Math.min(i+50,c.length)}/${c.length} channels…`)}return added}
@@ -185,6 +190,14 @@ async function ingestPasted(text,niche,log){let items=null;
   else{const lid='m:'+(ig||it.name.toLowerCase());if(have.has(lid)||!(ig||it.x_url||it.tiktok_url||it.website))continue;have.add(lid);
    S.leads.push({id:lid,name:it.name,niche,url:it.youtube_url||'',subs:0,last:'',episode:'',ig:ig?'https://instagram.com/'+ig:'',x:it.x_url||'',tt:it.tiktok_url||'',web:it.website||'',status:'New',added:today(),sent:'',follow:'',notes:'No YouTube channel found — find an episode to clip'});direct++;log('  added without YouTube: '+it.name)}}
  const a=await addChannels(cands,log,'soft');save();return a+direct}
+async function findInstagrams(list){const g=S.settings;if(!g.geminiKey)throw new Error('Add your Gemini API key in Settings first.');let found=0;
+ for(let i=0;i<list.length;i+=10){const grp=list.slice(i,i+10);
+  const prompt='Use Google Search. For each podcast below, find the official Instagram handle of the show or its host. Return ONLY a JSON array like [{"i":0,"instagram_handle":""}]. Leave instagram_handle empty if you are not sure. Never guess.\n'+grp.map((l,k)=>`${k}. ${l.name} (YouTube: ${l.url}${l.niche?', niche: '+l.niche:''})`).join('\n');
+  const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+(g.geminiModel||'gemini-2.5-flash')+':generateContent',{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':g.geminiKey},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],tools:[{google_search:{}}]})});
+  const j=await r.json();if(j.error)throw new Error(j.error.message);const t=(j.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join('');const m=t.match(/\[[\s\S]*\]/);if(!m)continue;
+  let arr;try{arr=JSON.parse(m[0])}catch(e){continue}
+  for(const a of arr){const l=grp[a.i];const h=(a.instagram_handle||'').replace(/^@/,'').replace(/[^A-Za-z0-9._]/g,'');if(l&&h){l.ig='https://instagram.com/'+h;l.notes=(l.notes?l.notes+' | ':'')+'IG from Gemini, verify';found++}}}
+ save();return found}
 function find(){$('#main').innerHTML=`<div class="card"><b>Niches</b> <span class=mut>(one per line)</span><textarea id="ni">${esc(S.niches.join('\n'))}</textarea>
  <div class="row"><button class="b p" id="run">Find podcasts</button><span class=mut>Each query costs 100 of your 10,000 free daily API units.</span></div></div>
  <div class="card"><b>Quick add</b> <span class=mut>(paste YouTube video / channel / @handle links)</span><textarea id="qa"></textarea>
@@ -233,7 +246,7 @@ function moneyV(){const s=stats();
  $('#tb').onclick=()=>{const c=+$('#tc').value,r=+$('#tr').value;if(!c||!r)return;S.team.push({date:$('#td').value,who:$('#tn').value,clips:c,rate:r});save();moneyV()};
  $('#main').onclick=e=>{if(e.target.dataset.dp){S.payments.splice(e.target.dataset.dp,1);save();moneyV()}if(e.target.dataset.dt){S.team.splice(e.target.dataset.dt,1);save();moneyV()}}}
 function settings(){const g=S.settings,f=(k,l,t='number')=>`<div><label>${l}</label><input data-k="${k}" type="${t}" value="${esc(g[k])}"></div>`;
- $('#main').innerHTML=`<div class="card"><div class="grid">${f('key','YouTube API key','password')}${f('goal','Monthly goal ($)')}${f('daily','Daily outreach goal')}${f('minSubs','Min subscribers')}${f('maxSubs','Max subscribers')}${f('maxDays','Max days since last upload')}${f('followDays','Follow-up days')}${f('templates','Queries per niche (1-4)')}${f('geminiKey','Gemini API key (aistudio.google.com/apikey)','password')}${f('geminiModel','Gemini model','text')}<div><label>Skip podcasts with no contact info (1 = yes, 0 = no)</label><input data-k="skipNoContact" type="number" min="0" max="1" value="${esc(g.skipNoContact)}"></div></div>
+ $('#main').innerHTML=`<div class="card"><div class="grid">${f('key','YouTube API key','password')}${f('goal','Monthly goal ($)')}${f('daily','Daily outreach goal')}${f('minSubs','Min subscribers')}${f('maxSubs','Max subscribers')}${f('maxDays','Max days since last upload')}${f('followDays','Follow-up days')}${f('templates','Queries per niche (1-4)')}${f('geminiKey','Gemini API key (aistudio.google.com/apikey)','password')}${f('geminiModel','Gemini model','text')}<div><label>Skip podcasts with no contact info (1 = yes, 0 = no)</label><input data-k="skipNoContact" type="number" min="0" max="1" value="${esc(g.skipNoContact)}"></div><div><label>Instagram only (1 = only queue leads with an Instagram, 0 = Instagram first, then X / TikTok / link)</label><input data-k="igOnly" type="number" min="0" max="1" value="${esc(g.igOnly)}"></div></div>
  <h4>Google Sheet sync (so your bot sees your numbers)</h4><div class="grid">${f('syncUrl','Web app URL (…/exec)','text')}${f('syncPw','Sync password','password')}</div>
  <div class="row"><button class="b p" id="sn">Sync now</button><button class="b" id="pl">Pull from Sheet (replaces local data)</button></div>
  <label>DM template: {name} {niche} {episode}. Spintax like {Hey|Hi|Hey there} picks one per lead. Dashes are removed automatically</label><textarea data-k="dm">${esc(g.dm)}</textarea></div>
