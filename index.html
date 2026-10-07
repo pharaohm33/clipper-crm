@@ -105,7 +105,7 @@ function todayV(){const want=Math.max(1,S.settings.daily-sentOn(today()));
  ${cur?`<div class="card" style="border-color:var(--acc)"><b>Next up: ${esc(cur.name)}</b> <span class=mut>${(cur.subs||0).toLocaleString()} subs · ${cur.ig?'Instagram':cur.x?'X':cur.tt?'TikTok':'link'}</span>
  ${cur.epTitle?`<div class=mut>Episode: ${esc(cur.epTitle)}</div>`:''}${cur.notes&&/Clip idea/.test(cur.notes)?`<div class=mut>${esc(cur.notes.split(' | ').filter(x=>/Clip idea/.test(x))[0])}</div>`:''}<p class="dm" style="max-width:none">${esc(dm(cur))}</p>
  <div class="row"><button class="b p" data-open="${cur.id}">Open profile + copy DM</button>
- ${cur.ig&&cur.x?`<button class="b" data-openu="${esc(cur.x)}" data-id="${cur.id}">Open X + copy</button>`:''}${cur.ig&&cur.tt?`<button class="b" data-openu="${esc(cur.tt)}" data-id="${cur.id}">Open TikTok + copy</button>`:''}<button class="b" data-ep="${cur.id}">Open episode</button><button class="b" data-next="${cur.id}">Sent, next</button><button class="b" data-shuf="${cur.id}">Reshuffle DM</button><button class="b" data-skip="${cur.id}">Skip</button><button class="b p" data-gc="${cur.id}">Send 5 min to clipper</button><button class="b" data-edc="${cur.id}">Edit contact</button><button class="b" data-ede="${cur.id}">Edit episode</button><button class="b" data-rm="${cur.id}" title="Remove for good, never added back">Remove</button></div>
+ ${cur.ig&&cur.x?`<button class="b" data-openu="${esc(cur.x)}" data-id="${cur.id}">Open X + copy</button>`:''}${cur.ig&&cur.tt?`<button class="b" data-openu="${esc(cur.tt)}" data-id="${cur.id}">Open TikTok + copy</button>`:''}<button class="b" data-ep="${cur.id}">Open episode</button><button class="b" data-next="${cur.id}">Sent, next</button><button class="b" data-shuf="${cur.id}">Reshuffle DM</button><button class="b" data-skip="${cur.id}">Skip</button><button class="b p" data-gc="${cur.id}">Send clip range to clipper</button><button class="b" data-edc="${cur.id}">Edit contact</button><button class="b" data-ede="${cur.id}">Edit episode</button><button class="b" data-rm="${cur.id}" title="Remove for good, never added back">Remove</button></div>
  <span class=mut>Opens in a new tab. If you're logged into Instagram there, it lands on their profile. Hit Message, paste, attach the clip.</span></div>`:''}
  <div class="card tw"><table><tr><th>Sent</th><th>Podcast</th><th>Contact</th><th>Episode</th><th>DM</th></tr>
  ${list.map(l=>`<tr><td><input type="checkbox" data-sent="${l.id}"> <button class="b" data-ed="${l.id}" title="Edit links">✎</button><button class="b" data-rm="${l.id}" title="Remove for good">✕</button></td><td>${esc(l.name)}<br><span class=mut>${(l.subs||0).toLocaleString()} subs${l.shortsPct!=null?` · ${l.shortsPct}% Shorts`:''}</span></td>
@@ -158,14 +158,19 @@ async function pollClipper(){const e=document.getElementById('cp');if(!e)return;
 const toSecs=t=>t.split(':').reduce((a,x)=>a*60+(+x||0),0),fmtSecs=n=>{const h=Math.floor(n/3600),m=Math.floor(n%3600/60),sec=n%60,p=x=>String(x).padStart(2,'0');return h?`${h}:${p(m)}:${p(sec)}`:`${m}:${p(sec)}`};
 function sendToClipper(id){const l=S.leads.find(x=>x.id==id);if(!l)return;if(!l.episode)return alert('This lead has no episode link yet. Use Edit episode first.');const ov=$('#ov');
  ov.className='ov';ov.innerHTML=`<div class="card"><b>Send to clipper</b> <span class=mut>${esc(l.name)}</span>
- <p class=mut style="margin:6px 0">Downloads just a slice of the episode and saves it as a NEW template in the clipper. It does not generate clips: you change the rules there first.</p>
- <div class="row"><div><label>Start at (mm:ss)</label><input id="gs" value="10:00" style="width:110px"></div><div><label>Minutes</label><input id="gm" type="number" value="5" style="width:90px"></div></div>
+ <p class=mut style="margin:6px 0">Downloads just the start to end range you pick and saves it as a NEW template in the clipper. It does not generate clips: you change the rules there first.</p>
+ <div class="row"><div><label>Start (mm:ss)</label><input id="gs" value="${esc(l.clipStart||'10:00')}" style="width:110px"></div><div><label>End (mm:ss)</label><input id="ge" value="${esc(l.clipEnd||'15:00')}" style="width:110px"></div><span class=mut id="glen"></span></div>
  <label>Template name</label><input id="gn2" value="${esc('Sample '+l.name)}">
- <div class="row" style="margin-top:12px"><button class="b p" id="gsend">Download and send</button><button class="b" id="gclose">Close</button><a target=_blank rel=noopener href="${esc(l.episode)}">Open episode to pick a start time</a></div><pre id="glog" style="margin-top:8px">Ready.</pre><div id="glink"></div></div>`;
+ <div class="row" style="margin-top:12px"><button class="b p" id="gsend">Download and send</button><button class="b" id="gclose">Close</button><a id="gopen" target=_blank rel=noopener href="${esc(l.episode)}">Open episode at the start time</a></div><pre id="glog" style="margin-top:8px">Ready.</pre><div id="glink"></div></div>`;
  const glog=t=>{const p=document.getElementById('glog');if(p){p.textContent+='\n'+t;p.scrollTop=1e9}};
  $('#gclose').onclick=()=>{ov.className='hide';ov.innerHTML=''};
- $('#gsend').onclick=async()=>{const st=$('#gs').value.trim(),mins=+$('#gm').value||5;if(!/^\d{1,2}(:\d{2}){1,2}$/.test(st))return glog('Start must look like 12:00');
-  const end=fmtSecs(toSecs(st)+Math.round(mins*60));$('#glog').textContent='';
+ const re2=/^\d{1,2}(:\d{2}){1,2}$/,refresh=()=>{const a=$('#gs').value.trim(),b=$('#ge').value.trim(),len=document.getElementById('glen'),op=document.getElementById('gopen');
+  if(re2.test(a)){op.href=l.episode+(l.episode.includes('?')?'&':'?')+'t='+toSecs(a)+'s'}
+  if(re2.test(a)&&re2.test(b)){const d=toSecs(b)-toSecs(a);len.textContent=d>0?`Length: ${fmtSecs(d)}`:'End must be after start'}else len.textContent=''};
+ $('#gs').oninput=refresh;$('#ge').oninput=refresh;refresh();
+ $('#gsend').onclick=async()=>{const st=$('#gs').value.trim(),end=$('#ge').value.trim();if(!re2.test(st)||!re2.test(end))return glog('Start and end must look like 12:00');
+  const dur=toSecs(end)-toSecs(st);if(dur<=0)return glog('End must be after start.');if(dur>1800&&!confirm('That is '+fmtSecs(dur)+' long, which is a big download. Continue?'))return;
+  l.clipStart=st;l.clipEnd=end;save();$('#glog').textContent='';
   let r;try{r=await (await fetch(RUNNER+'/clipper/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:l.episode,start:st,end,name:$('#gn2').value.trim()})})).json()}
   catch(e){return glog('Helper not running. In Terminal: cd ~/clipper-crm && python3 tools/local_runner.py')}
   if(r.error)return glog('Could not start: '+r.error);
