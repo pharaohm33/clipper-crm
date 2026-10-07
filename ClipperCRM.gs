@@ -566,6 +566,7 @@ function doPost(e) {
     var secret = PropertiesService.getScriptProperties().getProperty('SYNC_SECRET');
     if (!secret || b.secret !== secret) return json_({ ok: false, error: 'Wrong or unset password' });
     if (b.action === 'pull') return json_({ ok: true, state: readState_() });
+    if (b.action === 'append') return json_({ ok: true, added: appendLeads_(b.leads || []) });
     writeState_(b.state);
     return json_({ ok: true, at: new Date().toISOString() });
   } catch (err) {
@@ -626,4 +627,22 @@ function readState_() {
   var cs = ss.getSheetByName(SHEETS.clients), cn = cs.getLastRow() - 1;
   var clients = cn > 0 ? cs.getRange(2, 1, cn, 1).getValues().map(function (r) { return r[0]; }).filter(String) : [];
   return { leads: leads, payments: payments, team: team, clients: clients };
+}
+
+
+function appendLeads_(leads) {
+  var ss = SpreadsheetApp.getActive(), sh = ss.getSheetByName(SHEETS.leads);
+  var names = sh.getRange(2, L.name, Math.max(1, sh.getMaxRows() - 1), 1).getValues();
+  var last = 1; for (var i = 0; i < names.length; i++) if (names[i][0] !== '') last = i + 2;
+  var have = {};
+  if (last > 1) sh.getRange(2, L.cid, last - 1, 1).getValues().forEach(function (r) { if (r[0]) have[r[0]] = true; });
+  var fresh = leads.filter(function (l) { if (!l.id || have[l.id]) return false; have[l.id] = true; return true; });
+  if (!fresh.length) return 0;
+  if (sh.getMaxRows() < last + fresh.length) sh.insertRowsAfter(sh.getMaxRows(), last + fresh.length - sh.getMaxRows());
+  sh.getRange(last + 1, 1, fresh.length, 15).setValues(fresh.map(function (l) {
+    return [d_(l.added), l.name, l.niche, l.url, l.subs || '', d_(l.last), l.episode, l.ig, l.x, l.tt, l.web,
+            l.status || 'New', d_(l.sent), d_(l.follow), l.notes || ''];
+  }));
+  sh.getRange(last + 1, L.cid, fresh.length, 1).setValues(fresh.map(function (l) { return [l.id]; }));
+  return fresh.length;
 }

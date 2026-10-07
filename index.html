@@ -167,7 +167,7 @@ async function addChannels(c,log,force){const g=S.settings,have=new Set(S.leads.
   save();log(`  checked ${Math.min(i+50,c.length)}/${c.length} channels…`)}return added}
 function episodePrompt(niche,count,extra,json){const base=`Use Google Search. Find ${count} real podcasts in the niche "${niche}" that post full length episodes on YouTube and are small enough to want clipping help (roughly 1k to 150k subscribers). For EACH show, pick ONE specific episode (published in the last 90 days, 20 minutes or longer, not a Short) that has a strong clippable moment, like a surprising story, a hot take or a practical tip. ${extra||''}`;
  return json?base+`\nReturn ONLY a JSON array. Each item: {"name":"podcast name","episode_title":"exact episode title","episode_url":"direct https://www.youtube.com/watch?v= link","clip_idea":"one line on the moment worth clipping, with a timestamp if known","youtube_url":"channel link","instagram_handle":"official show or host handle without @","x_url":"","tiktok_url":""}. Only include episodes you actually found in search results with a real watch link. Leave a field empty if unknown. Never guess or invent links or handles.`
- :base+`\nFor each show give me: the podcast name, the YouTube channel link, the exact episode title, the direct episode link (youtube.com/watch?v=...), a one line clip idea with a timestamp if you can, the official Instagram handle of the show or host, and their X or TikTok if they have one. Only use real links you found. If you can't find something, say "unknown". Don't guess handles or links.`}
+ :`List ${count} small ${niche} podcasts on YouTube (1k to 150k subscribers). For each one give the YouTube channel link, a recent full length episode title with its direct YouTube watch link, and the show's Instagram handle. Format it as a table.`}
 async function geminiModels(){if(geminiModels.c)return geminiModels.c;const g=S.settings;
  const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200',{headers:{'x-goog-api-key':g.geminiKey}});const j=await r.json();if(j.error)throw new Error(j.error.message);
  const all=(j.models||[]).filter(m=>(m.supportedGenerationMethods||[]).includes('generateContent')&&/flash/i.test(m.name)&&!/lite|image|tts|live|audio|embed|thinking/i.test(m.name)).map(m=>m.name.replace('models/',''));
@@ -310,7 +310,11 @@ function settings(){const g=S.settings,f=(k,l,t='number')=>`<div><label>${l}</la
  $('#ex').onclick=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(S,null,1)],{type:'application/json'}));a.download='clipper-crm-'+today()+'.json';a.click()};
  $('#im').onchange=async e=>{try{S=Object.assign({},DEF,JSON.parse(await e.target.files[0].text()));save();alert('Imported.');render()}catch(x){alert('Bad file')}}}
 setInterval(()=>$('#clock').textContent=new Date().toLocaleString([],{weekday:'short',hour:'numeric',minute:'2-digit'}),1000);
-render();setSync(S.settings.syncUrl?'Sync on':'');
+async function mergePull(){if(!S.settings.syncUrl||!S.settings.syncPw)return;const j=await syncCall('pull');if(!j)return;
+ const have=new Set(S.leads.map(l=>l.id));let n=0;for(const l of j.state.leads||[]){if(!have.has(l.id)){S.leads.push(l);have.add(l.id);n++}}
+ if(n){save();render();setSync(`Merged ${n} new lead(s) from the Sheet`)}else setSync('Synced ✓ (up to date)')}
+render();setSync(S.settings.syncUrl?'Sync on':'');mergePull();
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)mergePull()});
 </script>
 </body>
 </html>

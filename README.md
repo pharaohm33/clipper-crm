@@ -18,3 +18,19 @@ Clipper CRM menu → Find podcasts → Build today's outreach list → clip the 
 The sheet includes `KPI Summary` and `Daily Outreach Log` tabs in the format used by the [AI Executive Coach bot](https://github.com/pharaohm33/productivity_bot). Connect this Sheet to that bot as your CRM and it coaches you from your live DM count, follow-ups and income. Don't use `/set_income`/`/set_expenses` — those cells are formulas.
 
 MIT licensed.
+
+## Auto-fill leads from Google AI Mode (optional)
+`tools/google_ai_to_crm.py` opens Google AI Mode in Chrome, asks for podcasts per niche, reads the answer table
+(including the hidden links) and adds new leads to your Sheet. The website merges them in when you open it.
+
+```bash
+pip install playwright requests
+export CRM_SYNC_URL="https://script.google.com/macros/s/.../exec"   # your Apps Script web app
+export CRM_SYNC_PASSWORD="..."                                      # your sync password
+export YT_API_KEY="..."                                             # recommended: finds channels + episodes
+python tools/google_ai_to_crm.py --login                            # once: log into Google in the window
+python tools/google_ai_to_crm.py "real estate" "personal finance"   # add --dry-run to preview
+```
+If Google shows a "verify you're human" check, solve it yourself in the window; the script waits.
+Runs use a separate Chrome profile (`~/.clipper_chrome_profile`). Keep runs small (a few niches) to avoid checks.
+Re-paste `ClipperCRM.gs` into Apps Script and redeploy (new version) to enable the append endpoint.
