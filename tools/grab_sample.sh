@@ -16,7 +16,7 @@ for CLIENT in "tv_simply,android_vr" "default" "ios"; do
         -o "$OUT/%(title).60s [${START//:/-}].%(ext)s" --print after_move:filepath)
   [ "$CLIENT" != "default" ] && ARGS+=(--extractor-args "youtube:player_client=$CLIENT")
   if FILE=$("${YT[@]}" "${ARGS[@]}" "$URL" 2>/dev/null | tail -1) && [ -n "$FILE" ] && [ -f "$FILE" ]; then
-    echo "Saved: $FILE"; open -R "$FILE" 2>/dev/null || true; exit 0
+    echo "Saved: $FILE"; [ -z "$NO_OPEN" ] && { open -R "$FILE" 2>/dev/null || true; }; exit 0
   fi
   echo "client '$CLIENT' failed, trying next..." >&2
 done

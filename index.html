@@ -33,7 +33,7 @@ a{color:var(--acc)}.hide{display:none}.mut{color:var(--mut)}pre{white-space:pre-
 <body>
 <header><b>Clipper CRM</b>
 <nav id="nav"></nav>
-<span style="margin-left:auto" class="mut" id="sync"></span><span class="mut" id="clock"></span></header>
+<span id="cp" style="margin-left:auto" class="mut"></span><span class="mut" id="sync"></span><span class="mut" id="clock"></span></header>
 <main id="main"></main>
 <div id="ov" class="hide"></div>
 <script>
@@ -105,7 +105,7 @@ function todayV(){const want=Math.max(1,S.settings.daily-sentOn(today()));
  ${cur?`<div class="card" style="border-color:var(--acc)"><b>Next up: ${esc(cur.name)}</b> <span class=mut>${(cur.subs||0).toLocaleString()} subs · ${cur.ig?'Instagram':cur.x?'X':cur.tt?'TikTok':'link'}</span>
  ${cur.epTitle?`<div class=mut>Episode: ${esc(cur.epTitle)}</div>`:''}${cur.notes&&/Clip idea/.test(cur.notes)?`<div class=mut>${esc(cur.notes.split(' | ').filter(x=>/Clip idea/.test(x))[0])}</div>`:''}<p class="dm" style="max-width:none">${esc(dm(cur))}</p>
  <div class="row"><button class="b p" data-open="${cur.id}">Open profile + copy DM</button>
- ${cur.ig&&cur.x?`<button class="b" data-openu="${esc(cur.x)}" data-id="${cur.id}">Open X + copy</button>`:''}${cur.ig&&cur.tt?`<button class="b" data-openu="${esc(cur.tt)}" data-id="${cur.id}">Open TikTok + copy</button>`:''}<button class="b" data-ep="${cur.id}">Open episode</button><button class="b" data-next="${cur.id}">Sent, next</button><button class="b" data-shuf="${cur.id}">Reshuffle DM</button><button class="b" data-skip="${cur.id}">Skip</button><button class="b" data-edc="${cur.id}">Edit contact</button><button class="b" data-ede="${cur.id}">Edit episode</button><button class="b" data-rm="${cur.id}" title="Remove for good, never added back">Remove</button></div>
+ ${cur.ig&&cur.x?`<button class="b" data-openu="${esc(cur.x)}" data-id="${cur.id}">Open X + copy</button>`:''}${cur.ig&&cur.tt?`<button class="b" data-openu="${esc(cur.tt)}" data-id="${cur.id}">Open TikTok + copy</button>`:''}<button class="b" data-ep="${cur.id}">Open episode</button><button class="b" data-next="${cur.id}">Sent, next</button><button class="b" data-shuf="${cur.id}">Reshuffle DM</button><button class="b" data-skip="${cur.id}">Skip</button><button class="b p" data-gc="${cur.id}">Send 5 min to clipper</button><button class="b" data-edc="${cur.id}">Edit contact</button><button class="b" data-ede="${cur.id}">Edit episode</button><button class="b" data-rm="${cur.id}" title="Remove for good, never added back">Remove</button></div>
  <span class=mut>Opens in a new tab. If you're logged into Instagram there, it lands on their profile. Hit Message, paste, attach the clip.</span></div>`:''}
  <div class="card tw"><table><tr><th>Sent</th><th>Podcast</th><th>Contact</th><th>Episode</th><th>DM</th></tr>
  ${list.map(l=>`<tr><td><input type="checkbox" data-sent="${l.id}"> <button class="b" data-ed="${l.id}" title="Edit links">✎</button><button class="b" data-rm="${l.id}" title="Remove for good">✕</button></td><td>${esc(l.name)}<br><span class=mut>${(l.subs||0).toLocaleString()} subs${l.shortsPct!=null?` · ${l.shortsPct}% Shorts`:''}</span></td>
@@ -118,7 +118,7 @@ function todayV(){const want=Math.max(1,S.settings.daily-sentOn(today()));
   if(d.ep){window.open(get(d.ep).episode,'_blank','noopener')}
   if(d.next){markSent(get(d.next));save();todayV()}
   if(d.shuf){const l=get(d.shuf);l.spin=(l.spin||0)+1;save();todayV()}
-  if(d.ed)editLead(d.ed);if(d.edc)editLead(d.edc,'contact');if(d.ede)editLead(d.ede,'episode');
+  if(d.ed)editLead(d.ed);if(d.edc)editLead(d.edc,'contact');if(d.ede)editLead(d.ede,'episode');if(d.gc)sendToClipper(d.gc);
   if(d.rm){get(d.rm).status='Removed';save();todayV()}
   if(d.skip){todayV.skip.add(d.skip);todayV()}};
  $('#main').onchange=e=>{const id=e.target.dataset.sent;if(id&&e.target.checked){markSent(S.leads.find(x=>x.id==id));save();e.target.closest('tr').style.opacity=.4;$('.card b').textContent=sentOn(today())+'/'+S.settings.daily}}}
@@ -150,6 +150,28 @@ function editLead(id,mode){const l=S.leads.find(x=>x.id==id);if(!l)return;const 
   if(d.edpick){const m=$('#edmsg');if(!/^UC/.test(l.id)){m.textContent='Needs a lead with a YouTube channel id.';return}
    try{m.textContent='Checking…';const ep=await pickEpisode('UU'+l.id.slice(2));if(!ep){m.textContent='No uploads found.';return}
     ov.querySelector('[data-f="episode"]').value='https://www.youtube.com/watch?v='+ep.id;ov.querySelector('[data-f="epTitle"]').value=ep.title;m.textContent='Filled. Press Save.'}catch(x){m.textContent=x.message}}}}
+const RUNNER='http://127.0.0.1:8765';
+async function pollClipper(){const e=document.getElementById('cp');if(!e)return;
+ try{const j=await (await fetch(RUNNER+'/clipper/status')).json();const c={on:['#16a34a','on'],busy:['#f59e0b','busy'],off:['#dc2626','off']}[j.state]||['#6b7280','?'];
+  e.innerHTML=`Clipper: <b style="color:${c[0]}">● ${c[1]}</b>`;e.title=j.message||'';pollClipper.last=j}
+ catch(x){e.innerHTML='Clipper: <span style="color:#6b7280">● helper not running</span>';e.title='Start the helper: python3 tools/local_runner.py';pollClipper.last=null}}
+const toSecs=t=>t.split(':').reduce((a,x)=>a*60+(+x||0),0),fmtSecs=n=>{const h=Math.floor(n/3600),m=Math.floor(n%3600/60),sec=n%60,p=x=>String(x).padStart(2,'0');return h?`${h}:${p(m)}:${p(sec)}`:`${m}:${p(sec)}`};
+function sendToClipper(id){const l=S.leads.find(x=>x.id==id);if(!l)return;if(!l.episode)return alert('This lead has no episode link yet. Use Edit episode first.');const ov=$('#ov');
+ ov.className='ov';ov.innerHTML=`<div class="card"><b>Send to clipper</b> <span class=mut>${esc(l.name)}</span>
+ <p class=mut style="margin:6px 0">Downloads just a slice of the episode and saves it as a NEW template in the clipper. It does not generate clips: you change the rules there first.</p>
+ <div class="row"><div><label>Start at (mm:ss)</label><input id="gs" value="10:00" style="width:110px"></div><div><label>Minutes</label><input id="gm" type="number" value="5" style="width:90px"></div></div>
+ <label>Template name</label><input id="gn2" value="${esc('Sample '+l.name)}">
+ <div class="row" style="margin-top:12px"><button class="b p" id="gsend">Download and send</button><button class="b" id="gclose">Close</button><a target=_blank rel=noopener href="${esc(l.episode)}">Open episode to pick a start time</a></div><pre id="glog" style="margin-top:8px">Ready.</pre><div id="glink"></div></div>`;
+ const glog=t=>{const p=document.getElementById('glog');if(p){p.textContent+='\n'+t;p.scrollTop=1e9}};
+ $('#gclose').onclick=()=>{ov.className='hide';ov.innerHTML=''};
+ $('#gsend').onclick=async()=>{const st=$('#gs').value.trim(),mins=+$('#gm').value||5;if(!/^\d{1,2}(:\d{2}){1,2}$/.test(st))return glog('Start must look like 12:00');
+  const end=fmtSecs(toSecs(st)+Math.round(mins*60));$('#glog').textContent='';
+  let r;try{r=await (await fetch(RUNNER+'/clipper/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:l.episode,start:st,end,name:$('#gn2').value.trim()})})).json()}
+  catch(e){return glog('Helper not running. In Terminal: cd ~/clipper-crm && python3 tools/local_runner.py')}
+  if(r.error)return glog('Could not start: '+r.error);
+  $('#gsend').disabled=true;let since=0,go=true;
+  while(go&&document.getElementById('glog')){await new Promise(x=>setTimeout(x,2000));try{const j=await (await fetch(RUNNER+'/log?since='+since)).json();since=j.next;j.lines.forEach(glog);go=j.running}catch(e){glog('Lost contact with the helper.');go=false}}
+  pollClipper();const url=(pollClipper.last&&pollClipper.last.url)||'http://127.0.0.1:5001';const gl=document.getElementById('glink');if(gl)gl.innerHTML=`<a target=_blank rel=noopener href="${esc(url)}">Open the clipper</a>`;const b=document.getElementById('gsend');if(b)b.disabled=false}}
 function markSent(l){l.status='Sample Sent';if(!l.sent)l.sent=today();l.follow=addDays(today(),+S.settings.followDays||3)}
 function leads(){const q=(leads.q||'').toLowerCase(),f=leads.f||'';
  const rows=S.leads.filter(l=>(f?l.status==f:l.status!='Removed')&&(!q||(l.name+l.niche).toLowerCase().includes(q)));
@@ -379,7 +401,7 @@ setInterval(()=>$('#clock').textContent=new Date().toLocaleString([],{weekday:'s
 async function mergePull(){if(!S.settings.syncUrl||!S.settings.syncPw)return;const j=await syncCall('pull');if(!j)return;
  const have=new Set(S.leads.map(l=>l.id));let n=0;for(const l of j.state.leads||[]){if(!have.has(l.id)){S.leads.push(l);have.add(l.id);n++}}
  if(n){save();render();setSync(`Merged ${n} new lead(s) from the Sheet`)}else setSync('Synced ✓ (up to date)')}
-render();setSync(S.settings.syncUrl?'Sync on':'');mergePull();
+render();setSync(S.settings.syncUrl?'Sync on':'');mergePull();pollClipper();setInterval(pollClipper,6000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)mergePull()});
 </script>
 </body>

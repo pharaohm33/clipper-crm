@@ -50,3 +50,9 @@ tools/grab_sample.sh "https://www.youtube.com/watch?v=VIDEO_ID" 12:00 17:00
 ```
 Downloads only that time range (default 10:00 to 15:00) into `~/Downloads/clip-samples`, so you can make a sample clip fast.
 Needs ffmpeg and yt-dlp. If it says all attempts failed, run `brew install yt-dlp`.
+
+## Send a slice to your local clipper app
+With the helper running (`python3 tools/local_runner.py`), the header shows **Clipper: on / busy / off** (read from your clipper app at
+`http://127.0.0.1:5001`, change with `CLIPPER_URL`). On the Today tab, **Send 5 min to clipper** downloads a slice of the lead's episode and
+saves it as a new template in the clipper, in the folder "Outreach samples". It does not generate clips: change the rules in the clipper, then press Generate.
+If the clipper is busy it waits (up to 15 minutes); if it is off, the file is kept and the helper tells you where it is.
