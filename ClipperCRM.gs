@@ -210,15 +210,15 @@ function setupDashboard_(ss) {
     ['All-time earned', '=SUM(Payments!C:C)'],
     ['', ''],
     ['OUTREACH (daily goal)', ''],
-    ['Samples sent today (ticks + bot log)', '=COUNTIFS(Leads!M:M,">="&TODAY(),Leads!M:M,"<"&TODAY()+1)+SUMIFS('Daily Outreach Log'!B:B,'Daily Outreach Log'!A:A,">="&TODAY(),'Daily Outreach Log'!A:A,"<"&TODAY()+1)'],
+    ['Samples sent today (ticks + bot log)', '=COUNTIFS(Leads!M:M,">="&TODAY(),Leads!M:M,"<"&TODAY()+1)+SUMIFS(\'Daily Outreach Log\'!B:B,\'Daily Outreach Log\'!A:A,">="&TODAY(),\'Daily Outreach Log\'!A:A,"<"&TODAY()+1)'],
     ['Daily goal', '=DAILY_GOAL'],
     ['Still to send today', '=MAX(0,B14-B13)'],
-    ['Sent this week', '=COUNTIFS(Leads!M:M,">="&TODAY()-WEEKDAY(TODAY(),2)+1,Leads!M:M,"<"&TODAY()+1)+SUMIFS('Daily Outreach Log'!B:B,'Daily Outreach Log'!A:A,">="&TODAY()-WEEKDAY(TODAY(),2)+1,'Daily Outreach Log'!A:A,"<"&TODAY()+1)'],
+    ['Sent this week', '=COUNTIFS(Leads!M:M,">="&TODAY()-WEEKDAY(TODAY(),2)+1,Leads!M:M,"<"&TODAY()+1)+SUMIFS(\'Daily Outreach Log\'!B:B,\'Daily Outreach Log\'!A:A,">="&TODAY()-WEEKDAY(TODAY(),2)+1,\'Daily Outreach Log\'!A:A,"<"&TODAY()+1)'],
     ['Fresh leads in queue', '=COUNTIF(Leads!L:L,"New")'],
     ['Follow-ups due', '=COUNTIFS(Leads!N:N,"<="&TODAY(),Leads!N:N,">0",Leads!L:L,"Sample Sent")'],
     ['', ''],
     ['FUNNEL', ''],
-    ['Samples sent (all-time)', '=COUNT(Leads!M2:M)+SUM('Daily Outreach Log'!B2:B)'],
+    ['Samples sent (all-time)', '=COUNT(Leads!M2:M)+SUM(\'Daily Outreach Log\'!B2:B)'],
     ['Replies (replied+interested+client)', '=COUNTIF(Leads!L:L,"Replied")+COUNTIF(Leads!L:L,"Interested")+COUNTIF(Leads!L:L,"Client")'],
     ['Reply rate', '=IFERROR(B22/B21,0)'],
     ['Clients won', '=COUNTIF(Leads!L:L,"Client")'],
@@ -249,7 +249,7 @@ function setupDashboard_(ss) {
   var rows = [];
   for (var i = 0; i < 14; i++) {
     var r = 4 + i;
-    rows.push(['=TODAY()-' + i, '=COUNTIFS(Leads!M:M,">="&J' + r + ',Leads!M:M,"<"&J' + r + '+1)+SUMIFS('Daily Outreach Log'!B:B,'Daily Outreach Log'!A:A,">="&J' + r + ','Daily Outreach Log'!A:A,"<"&J' + r + '+1)',
+    rows.push(['=TODAY()-' + i, '=COUNTIFS(Leads!M:M,">="&J' + r + ',Leads!M:M,"<"&J' + r + '+1)+SUMIFS(\'Daily Outreach Log\'!B:B,\'Daily Outreach Log\'!A:A,">="&J' + r + ',\'Daily Outreach Log\'!A:A,"<"&J' + r + '+1)',
       '=SPARKLINE(K' + r + ',{"charttype","bar";"max",DAILY_GOAL;"color1","#e11d48"})']);
   }
   sh.getRange(4, 10, 14, 3).setFormulas(rows);
