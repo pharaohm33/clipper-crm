@@ -10,14 +10,16 @@ URL="$1"; START="${2:-10:00}"; END="${3:-15:00}"; OUT="${4:-$HOME/Downloads/clip
 mkdir -p "$OUT"
 if command -v yt-dlp >/dev/null 2>&1; then YT=(yt-dlp); else YT=(python3 -m yt_dlp); fi
 # try a few YouTube client modes; older yt-dlp builds often fail on the default one
-for CLIENT in "tv_simply,android_vr" "default" "ios"; do
+ERRF=$(mktemp)
+for CLIENT in "android" "tv_simply,android_vr" "default" "ios"; do
   ARGS=(--no-playlist --download-sections "*${START}-${END}" --force-keyframes-at-cuts
         -f "bv*[height<=1080]+ba/b[height<=1080]" --merge-output-format mp4
         -o "$OUT/%(title).60s [${START//:/-}].%(ext)s" --print after_move:filepath)
   [ "$CLIENT" != "default" ] && ARGS+=(--extractor-args "youtube:player_client=$CLIENT")
-  if FILE=$("${YT[@]}" "${ARGS[@]}" "$URL" 2>/dev/null | tail -1) && [ -n "$FILE" ] && [ -f "$FILE" ]; then
+  if FILE=$("${YT[@]}" "${ARGS[@]}" "$URL" 2>"$ERRF" | tail -1) && [ -n "$FILE" ] && [ -f "$FILE" ]; then
     echo "Saved: $FILE"; [ -z "$NO_OPEN" ] && { open -R "$FILE" 2>/dev/null || true; }; exit 0
   fi
   echo "client '$CLIENT' failed, trying next..." >&2
 done
-echo "All attempts failed. Update yt-dlp:  brew install yt-dlp   (then run again)" >&2; exit 1
+echo "All attempts failed. Last error: $(grep -E "ERROR" "$ERRF" | tail -1 | cut -c1-200)" >&2
+echo "Try updating yt-dlp:  brew install yt-dlp   (then run again)" >&2; exit 1
