@@ -14,7 +14,7 @@
 
 var SHEETS = {
   dash: 'Dashboard', leads: 'Leads', today: 'Today', clients: 'Clients',
-  pay: 'Payments', team: 'Team Pay', queue: 'Search Queue', quick: 'Quick Add', helper: 'Search Helper', settings: 'Settings'
+  pay: 'Payments', team: 'Team Pay', log: 'Daily Outreach Log', kpi: 'KPI Summary', queue: 'Search Queue', quick: 'Quick Add', helper: 'Search Helper', settings: 'Settings'
 };
 var STATUSES = ['New', 'Sample Sent', 'Replied', 'Interested', 'Client', 'No Response', 'Not Interested'];
 var L = { added: 1, name: 2, niche: 3, url: 4, subs: 5, last: 6, episode: 7, ig: 8, x: 9, tt: 10, web: 11,
@@ -29,10 +29,6 @@ function onOpen() {
     .addItem("Build today's outreach list", 'buildTodayList')
     .addItem('Find podcasts (from Search Queue)', 'findPodcasts')
     .addItem('Process Quick Add links', 'processQuickAdd')
-    .addSeparator()
-    .addItem('Start Telegram coach', 'startCoach')
-    .addItem('Stop Telegram coach', 'stopCoach')
-    .addItem('Send test Telegram message', 'testCoach')
     .addSeparator()
     .addItem('Mark selected Leads rows as Sample Sent', 'markSelectedSent')
     .addItem('Refresh Search Helper links', 'buildSearchHelper')
@@ -49,7 +45,7 @@ function setupCRM() {
   names.forEach(function (n, i) { ss.setActiveSheet(ss.getSheetByName(n)); ss.moveActiveSheet(i + 1); });
 
   setupSettings_(ss); setupLeads_(ss); setupClients_(ss); setupPayments_(ss); setupTeam_(ss);
-  setupQueue_(ss); setupQuick_(ss); setupToday_(ss); setupDashboard_(ss); buildSearchHelper(); addCoachSettings_();
+  setupQueue_(ss); setupQuick_(ss); setupToday_(ss); setupDashboard_(ss); setupBotTabs_(ss); buildSearchHelper();
   ss.setActiveSheet(ss.getSheetByName(SHEETS.dash));
   SpreadsheetApp.getUi().alert('CRM ready. Paste your YouTube API key in Settings!B2, then use the Clipper CRM menu.');
 }
@@ -146,6 +142,31 @@ function setupTeam_(ss) {
   sh.getRange('G2:G1000').insertCheckboxes();
   [110, 190, 240, 110, 120, 100, 70].forEach(function (w, i) { sh.setColumnWidth(i + 1, w); });
   sh.getRange('A1').setNote('Once you hire: log clips each clipper delivers. Dashboard subtracts Owed from earnings to show profit.');
+}
+
+/** Tabs your Telegram Executive Coach bot reads/writes (same names/columns as its CRM template). */
+function setupBotTabs_(ss) {
+  var log = ss.getSheetByName(SHEETS.log);
+  if (log.getLastRow() < 1) header_(log, ['Date', 'Contacts Made', 'Follow-ups', 'Replies', 'Meetings Booked', 'Sales Closed', 'Notes'], '#0f766e');
+  log.setColumnWidths(1, 7, 120);
+  var kpi = ss.getSheetByName(SHEETS.kpi);
+  kpi.clear();
+  var rows = [
+    ['Metric', 'Value', 'Notes'],
+    ['Monthly Income', '=Dashboard!B5', 'Auto: payments this month'],
+    ['Monthly Expenses', '=Dashboard!B29', 'Auto: team pay owed this month'],
+    ['Monthly Profit', '=B2-B3', 'Auto-calculated'],
+    ['12-Month Income Goal', '=GOAL*12', 'Auto: monthly goal x 12'],
+    ['Total Contacts (samples sent)', '=Dashboard!B21', 'Auto from Leads'],
+    ['Total Sales Closed (clients won)', '=Dashboard!B24', 'Auto from Leads'],
+    ['Contacts per Sale', '=IF(B7=0,"",B6/B7)', 'Auto-calculated — lower is better'],
+    ['DMs sent today vs goal', '=Dashboard!B13&" / "&DAILY_GOAL', 'Auto'],
+    ['Follow-ups due', '=Dashboard!B18', 'Auto']
+  ];
+  kpi.getRange(1, 1, rows.length, 3).setValues(rows);
+  kpi.getRange(1, 1, 1, 3).setFontWeight('bold').setBackground('#0f766e').setFontColor('#fff');
+  kpi.getRange('B2:B5').setNumberFormat('$#,##0');
+  kpi.setColumnWidths(1, 3, 240);
 }
 
 function setupQueue_(ss) {
