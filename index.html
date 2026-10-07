@@ -38,7 +38,7 @@ a{color:var(--acc)}.hide{display:none}.mut{color:var(--mut)}pre{white-space:pre-
 const STATUSES=['New','Sample Sent','Replied','Interested','Client','No Response','Not Interested'];
 const TPL=['{n} podcast full episode','{n} podcast interview','how to start a {n} podcast','{n} podcast new episode'];
 const DEF={settings:{key:'',goal:5000,daily:100,minSubs:1000,maxSubs:150000,maxDays:60,followDays:3,templates:3,
- syncUrl:'',syncPw:'',
+ syncUrl:'',syncPw:'',geminiKey:'',geminiModel:'gemini-2.5-flash',
  dm:"Saw your episode on {niche} — made this clip because it was too good not to share. No strings, just thought you'd like it. Full episode: {episode}"},
  niches:['real estate','personal finance','fitness','entrepreneurship','mental health','true crime','faith christian','sports betting','parenting','health longevity'],
  leads:[],payments:[],clients:[],team:[]};
@@ -124,17 +124,37 @@ async function addChannels(c,log,force){const g=S.settings,have=new Set(S.leads.
   const j=await yt('channels',{part:'snippet,statistics,contentDetails',id:grp.map(x=>x.id).join(','),maxResults:50});
   for(const ch of j.items||[]){const k=by[ch.id],subs=ch.statistics.hiddenSubscriberCount?0:+ch.statistics.subscriberCount||0;
    if(!force&&ch.statistics.hiddenSubscriberCount!==true&&(subs<g.minSubs||subs>g.maxSubs))continue;
-   let last='';try{const pi=await yt('playlistItems',{part:'contentDetails',playlistId:ch.contentDetails.relatedPlaylists.uploads,maxResults:1});
-    if(pi.items[0])last=pi.items[0].contentDetails.videoPublishedAt.slice(0,10)}catch(e){}
+   let last='',lastVid='';try{const pi=await yt('playlistItems',{part:'contentDetails',playlistId:ch.contentDetails.relatedPlaylists.uploads,maxResults:1});
+    if(pi.items[0]){last=pi.items[0].contentDetails.videoPublishedAt.slice(0,10);lastVid=pi.items[0].contentDetails.videoId}}catch(e){}
    if(!force&&last&&(Date.now()-new Date(last))/864e5>g.maxDays)continue;
    const s=socials(ch.snippet.description);
-   S.leads.push({id:ch.id,name:ch.snippet.title,niche:k.niche||'',url:'https://www.youtube.com/channel/'+ch.id,subs,last,episode:k.video?'https://www.youtube.com/watch?v='+k.video:'',
-    ig:s.ig,x:s.x,tt:s.tt,web:s.web,status:'New',added:today(),sent:'',follow:'',notes:''});added++}
+   S.leads.push({id:ch.id,name:ch.snippet.title,niche:k.niche||'',url:'https://www.youtube.com/channel/'+ch.id,subs,last,episode:(k.video||lastVid)?'https://www.youtube.com/watch?v='+(k.video||lastVid):'',
+    ig:s.ig||(k.aiIg?'https://instagram.com/'+k.aiIg:''),x:s.x,tt:s.tt,web:s.web,status:'New',added:today(),sent:'',follow:'',notes:s.ig?'':(k.aiIg?'IG handle from Gemini — verify':'')});added++}
   save();log(`  checked ${Math.min(i+50,c.length)}/${c.length} channels…`)}return added}
+async function askGemini(niche,count,extra){const g=S.settings;if(!g.geminiKey)throw new Error('Add your Gemini API key in Settings first.');
+ const prompt=`Use Google Search. Find ${count} real, currently active podcasts in the niche "${niche}" that publish long-form episodes on YouTube and likely have 5k-100k subscribers. ${extra}\nReturn ONLY a JSON array, no prose. Each item: {"name":"","youtube_url":"","instagram_handle":"","why":""}. Only include shows you actually found in search results; leave a field empty if unknown — never guess handles.`;
+ const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+(g.geminiModel||'gemini-2.5-flash')+':generateContent',{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':g.geminiKey},
+  body:JSON.stringify({contents:[{parts:[{text:prompt}]}],tools:[{google_search:{}}]})});const j=await r.json();if(j.error)throw new Error(j.error.message);
+ const t=(j.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join('');const m=t.match(/\[[\s\S]*\]/);if(!m)throw new Error('Gemini returned no list — try again.');return JSON.parse(m[0])}
+async function resolveAI(it){let m;const u=it.youtube_url||'';
+ if((m=u.match(/youtube\.com\/channel\/(UC[\w-]{20,})/)))return m[1];
+ if((m=u.match(/youtube\.com\/(@[\w.-]+)/))){const j=await yt('channels',{part:'id',forHandle:m[1]});if(j.items?.[0])return j.items[0].id}
+ if((m=u.match(/[?&]v=([\w-]{11})/))){const v=await yt('videos',{part:'snippet',id:m[1]});if(v.items?.[0])return v.items[0].snippet.channelId}
+ if(!it.name)return null;const j=await yt('search',{part:'snippet',type:'channel',q:it.name+' podcast',maxResults:1});const x=j.items?.[0];return x?(x.snippet.channelId||x.id.channelId):null}
 function find(){$('#main').innerHTML=`<div class="card"><b>Niches</b> <span class=mut>(one per line)</span><textarea id="ni">${esc(S.niches.join('\n'))}</textarea>
  <div class="row"><button class="b p" id="run">Find podcasts</button><span class=mut>Each query costs 100 of your 10,000 free daily API units.</span></div></div>
  <div class="card"><b>Quick add</b> <span class=mut>(paste YouTube video / channel / @handle links)</span><textarea id="qa"></textarea>
- <div class="row"><button class="b p" id="qb">Add these</button></div></div><pre id="log">Ready.</pre>`;
+ <div class="row"><button class="b p" id="qb">Add these</button></div></div><div class="card"><b>Google AI search (Gemini + Google Search)</b> <span class=mut>— finds podcasts, then YouTube verifies them and pulls real links</span>
+ <div class="row"><input id="gn" placeholder="Niche, e.g. real estate investing"><input id="gc" type="number" value="15" style="width:80px" title="How many podcasts">
+ <button class="b p" id="gb">Ask Google AI</button></div><label>Extra instructions / dork ideas (optional)</label>
+ <input id="gx" style="width:100%" placeholder='e.g. prefer shows that say "audio only" or have few Shorts; hosts active on Instagram'></div>
+ <div class="card"><b>Dork links</b> <span class=mut>— open in Google, paste good finds into Quick add</span><div class="tw"><table>${S.niches.map(n=>{const q=x=>'https://www.google.com/search?q='+encodeURIComponent(x);return `<tr><td>${esc(n)}</td>
+ <td><a target=_blank rel=noopener href="${q('site:youtube.com "full episode" '+n+' podcast')}">full episodes</a></td>
+ <td><a target=_blank rel=noopener href="${q('site:youtube.com '+n+' podcast "how to start a podcast" OR "audio only"')}">new/audio-only</a></td>
+ <td><a target=_blank rel=noopener href="${q('site:instagram.com "'+n+' podcast" "link in bio"')}">IG hosts</a></td>
+ <td><a target=_blank rel=noopener href="${q('site:linktr.ee '+n+' podcast')}">linktree</a></td>
+ <td><a target=_blank rel=noopener href="https://www.google.com/search?udm=50&q=${encodeURIComponent('List small '+n+' podcasts with 5k-100k YouTube subscribers and their host Instagram handles')}">Google AI mode</a></td></tr>`}).join('')}</table></div></div>
+ <pre id="log">Ready.</pre>`;
  const log=t=>{$('#log').textContent+='\n'+t;$('#log').scrollTop=1e9};
  $('#ni').onchange=e=>{S.niches=e.target.value.split('\n').map(x=>x.trim()).filter(Boolean);save()};
  $('#run').onclick=async()=>{S.niches=$('#ni').value.split('\n').map(x=>x.trim()).filter(Boolean);save();$('#log').textContent='';let tot=0;
@@ -142,6 +162,10 @@ function find(){$('#main').innerHTML=`<div class="card"><b>Niches</b> <span clas
    for(let t=0;t<Math.min(4,S.settings.templates);t++){const j=await yt('search',{part:'snippet',type:'video',videoDuration:'long',maxResults:50,order:'relevance',q:TPL[t].replace('{n}',n)});
     (j.items||[]).forEach(it=>{const id=it.snippet.channelId;if(!cand[id])cand[id]={id,video:it.id.videoId,niche:n}})}
    const a=await addChannels(Object.values(cand),log);tot+=a;log(`  +${a} new leads`)}log(`Done. ${tot} new leads. Open the Today tab.`)}catch(e){log('Stopped: '+e.message)}};
+ $('#gb').onclick=async()=>{$('#log').textContent='';const n=$('#gn').value.trim();if(!n)return log('Enter a niche.');
+  try{log('Asking Gemini (Google Search)…');const list=await askGemini(n,+$('#gc').value||15,$('#gx').value.trim());log(`Gemini suggested ${list.length} podcasts. Verifying on YouTube…`);
+   const c=[];for(const it of list){try{const id=await resolveAI(it);if(id)c.push({id,niche:n,aiIg:(it.instagram_handle||'').replace(/^@/,'').replace(/[^A-Za-z0-9._]/g,'')});else log('  not found: '+it.name)}catch(e){log('  skip '+it.name+': '+e.message)}}
+   const a=await addChannels(c,log);log(`Added ${a} verified lead(s) (filtered by your subscriber/activity settings).`)}catch(e){log('Stopped: '+e.message)}};
  $('#qb').onclick=async()=>{const urls=$('#qa').value.split('\n').map(x=>x.trim()).filter(Boolean),c=[];$('#log').textContent='';
   try{for(const u of urls){let m;if((m=u.match(/youtube\.com\/channel\/(UC[\w-]{20,})/)))c.push({id:m[1]});
    else if((m=u.match(/youtube\.com\/(@[\w.-]+)/))){const j=await yt('channels',{part:'id',forHandle:m[1]});if(j.items?.[0])c.push({id:j.items[0].id})}
@@ -159,7 +183,7 @@ function moneyV(){const s=stats();
  $('#tb').onclick=()=>{const c=+$('#tc').value,r=+$('#tr').value;if(!c||!r)return;S.team.push({date:$('#td').value,who:$('#tn').value,clips:c,rate:r});save();moneyV()};
  $('#main').onclick=e=>{if(e.target.dataset.dp){S.payments.splice(e.target.dataset.dp,1);save();moneyV()}if(e.target.dataset.dt){S.team.splice(e.target.dataset.dt,1);save();moneyV()}}}
 function settings(){const g=S.settings,f=(k,l,t='number')=>`<div><label>${l}</label><input data-k="${k}" type="${t}" value="${esc(g[k])}"></div>`;
- $('#main').innerHTML=`<div class="card"><div class="grid">${f('key','YouTube API key','password')}${f('goal','Monthly goal ($)')}${f('daily','Daily outreach goal')}${f('minSubs','Min subscribers')}${f('maxSubs','Max subscribers')}${f('maxDays','Max days since last upload')}${f('followDays','Follow-up days')}${f('templates','Queries per niche (1-4)')}</div>
+ $('#main').innerHTML=`<div class="card"><div class="grid">${f('key','YouTube API key','password')}${f('goal','Monthly goal ($)')}${f('daily','Daily outreach goal')}${f('minSubs','Min subscribers')}${f('maxSubs','Max subscribers')}${f('maxDays','Max days since last upload')}${f('followDays','Follow-up days')}${f('templates','Queries per niche (1-4)')}${f('geminiKey','Gemini API key (aistudio.google.com/apikey)','password')}${f('geminiModel','Gemini model','text')}</div>
  <h4>Google Sheet sync (so your bot sees your numbers)</h4><div class="grid">${f('syncUrl','Web app URL (…/exec)','text')}${f('syncPw','Sync password','password')}</div>
  <div class="row"><button class="b p" id="sn">Sync now</button><button class="b" id="pl">Pull from Sheet (replaces local data)</button></div>
  <label>DM template ({name} {niche} {episode})</label><textarea data-k="dm">${esc(g.dm)}</textarea></div>
