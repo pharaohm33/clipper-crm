@@ -365,6 +365,7 @@ function addChannels_(cands, deadline) {
         var s2 = extractSocials_(aboutPageText_(ch.id));
         soc.ig = soc.ig || s2.ig; soc.x = soc.x || s2.x; soc.tt = soc.tt || s2.tt; soc.web = soc.web || s2.web;
       }
+      if (!c.force && !(soc.ig || soc.x || soc.tt || soc.web)) return; // no contact info — not worth DMing
       var vid = c.video ? 'https://www.youtube.com/watch?v=' + c.video : '';
       var d = new Date(today.getFullYear(), today.getMonth(), today.getDate());
       rows.push([d, ch.snippet.title, c.niche || '', 'https://www.youtube.com/channel/' + ch.id, subs, last, vid,

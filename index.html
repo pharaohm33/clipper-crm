@@ -38,7 +38,7 @@ a{color:var(--acc)}.hide{display:none}.mut{color:var(--mut)}pre{white-space:pre-
 const STATUSES=['New','Sample Sent','Replied','Interested','Client','No Response','Not Interested'];
 const TPL=['{n} podcast full episode','{n} podcast interview','how to start a {n} podcast','{n} podcast new episode'];
 const DEF={settings:{key:'',goal:5000,daily:100,minSubs:1000,maxSubs:150000,maxDays:60,followDays:3,templates:3,
- syncUrl:'',syncPw:'',geminiKey:'',geminiModel:'gemini-2.5-flash',
+ syncUrl:'',syncPw:'',geminiKey:'',geminiModel:'gemini-2.5-flash',skipNoContact:1,
  dm:"Saw your episode on {niche} — made this clip because it was too good not to share. No strings, just thought you'd like it. Full episode: {episode}"},
  niches:['real estate','personal finance','fitness','entrepreneurship','mental health','true crime','faith christian','sports betting','parenting','health longevity'],
  leads:[],payments:[],clients:[],team:[]};
@@ -98,12 +98,13 @@ function todayV(){const want=Math.max(1,S.settings.daily-sentOn(today()));
 function markSent(l){l.status='Sample Sent';if(!l.sent)l.sent=today();l.follow=addDays(today(),+S.settings.followDays||3)}
 function leads(){const q=(leads.q||'').toLowerCase(),f=leads.f||'';
  const rows=S.leads.filter(l=>(!f||l.status==f)&&(!q||(l.name+l.niche).toLowerCase().includes(q)));
- $('#main').innerHTML=`<div class="row"><input id="q" placeholder="Search" value="${esc(leads.q||'')}"><select id="f"><option value="">All statuses</option>${STATUSES.map(s=>`<option ${s==f?'selected':''}>${s}</option>`).join('')}</select><span class=mut>${rows.length} leads</span></div>
+ $('#main').innerHTML=`<div class="row"><input id="q" placeholder="Search" value="${esc(leads.q||'')}"><select id="f"><option value="">All statuses</option>${STATUSES.map(s=>`<option ${s==f?'selected':''}>${s}</option>`).join('')}</select><span class=mut>${rows.length} leads</span><button class="b" id="cl">Remove no-contact leads</button></div>
  <div class="card tw"><table><tr><th>Podcast</th><th>Niche</th><th>Subs</th><th>Contact</th><th>Status</th><th>Sent / Follow-up</th><th>Notes</th></tr>
  ${rows.slice(0,300).map(l=>`<tr><td><a target=_blank rel=noopener href="${esc(l.url)}">${esc(l.name)}</a></td><td>${esc(l.niche)}</td><td>${(l.subs||0).toLocaleString()}</td>
  <td>${[l.ig&&`<a target=_blank rel=noopener href="${esc(l.ig)}">IG</a>`,l.x&&`<a target=_blank rel=noopener href="${esc(l.x)}">X</a>`,l.tt&&`<a target=_blank rel=noopener href="${esc(l.tt)}">TT</a>`,l.web&&`<a target=_blank rel=noopener href="${esc(l.web)}">Link</a>`].filter(Boolean).join(' · ')||'<span class=mut>none</span>'}</td>
  <td><select data-st="${l.id}">${STATUSES.map(s=>`<option ${s==l.status?'selected':''}>${s}</option>`).join('')}</select></td><td>${l.sent||''}<br><span class=mut>${l.follow||''}</span></td>
  <td><input data-nt="${l.id}" value="${esc(l.notes||'')}"></td></tr>`).join('')}</table></div>${rows.length>300?'<p class=mut>Showing first 300 — use search/filter.</p>':''}`;
+ $('#cl').onclick=()=>{const bad=S.leads.filter(l=>l.status=='New'&&!(l.ig||l.x||l.tt||l.web));if(!bad.length)return alert('No no-contact leads to remove.');if(!confirm(`Remove ${bad.length} untouched leads with no contact info?`))return;const ids=new Set(bad.map(l=>l.id));S.leads=S.leads.filter(l=>!ids.has(l.id));save();leads()};
  $('#q').oninput=e=>{leads.q=e.target.value;leads()};$('#q').focus&&0;$('#f').onchange=e=>{leads.f=e.target.value;leads()};
  $('#main').onchange=e=>{const t=e.target,l=S.leads.find(x=>x.id==(t.dataset.st||t.dataset.nt));if(!l)return;
   if(t.dataset.st){l.status=t.value;if(t.value=='Sample Sent')markSent(l);if(t.value=='Client'&&!S.clients.includes(l.name))S.clients.push(l.name)}else l.notes=t.value;save()}}
@@ -118,7 +119,8 @@ function socials(t){const o={ig:'',x:'',tt:'',web:''};let m;t=t||'';
  const bio=/https?:\/\/(?:www\.)?(?:linktr\.ee|beacons\.ai|stan\.store|bio\.link|linkin\.bio|lnk\.bio|campsite\.bio|solo\.to|carrd\.co)\/[^\s"'<>]+/i.exec(t);
  const any=/https?:\/\/(?:www\.)?(?!(?:[a-z0-9.-]*)(?:youtube|youtu\.be|instagram|twitter|x\.com|tiktok|facebook|spotify|apple|google|amazon|patreon))[a-z0-9.-]+\.[a-z]{2,}[^\s"'<>]*/i.exec(t);
  const b=bio||any;if(b)o.web=b[0].replace(/[),.]+$/,'');return o}
-async function addChannels(c,log,force){const g=S.settings,have=new Set(S.leads.map(l=>l.id));let added=0;
+let skipped=0;
+async function addChannels(c,log,force){const g=S.settings,have=new Set(S.leads.map(l=>l.id));let added=0;skipped=0;
  c=c.filter((x,i)=>!have.has(x.id)&&c.findIndex(y=>y.id==x.id)==i);
  for(let i=0;i<c.length;i+=50){const grp=c.slice(i,i+50),by=Object.fromEntries(grp.map(x=>[x.id,x]));
   const j=await yt('channels',{part:'snippet,statistics,contentDetails',id:grp.map(x=>x.id).join(','),maxResults:50});
@@ -128,6 +130,7 @@ async function addChannels(c,log,force){const g=S.settings,have=new Set(S.leads.
     if(pi.items[0]){last=pi.items[0].contentDetails.videoPublishedAt.slice(0,10);lastVid=pi.items[0].contentDetails.videoId}}catch(e){}
    if(!force&&last&&(Date.now()-new Date(last))/864e5>g.maxDays)continue;
    const s=socials(ch.snippet.description);
+   if(!force&&g.skipNoContact&&!(s.ig||s.x||s.tt||s.web||k.aiIg)){skipped++;continue}
    S.leads.push({id:ch.id,name:ch.snippet.title,niche:k.niche||'',url:'https://www.youtube.com/channel/'+ch.id,subs,last,episode:(k.video||lastVid)?'https://www.youtube.com/watch?v='+(k.video||lastVid):'',
     ig:s.ig||(k.aiIg?'https://instagram.com/'+k.aiIg:''),x:s.x,tt:s.tt,web:s.web,status:'New',added:today(),sent:'',follow:'',notes:s.ig?'':(k.aiIg?'IG handle from Gemini — verify':'')});added++}
   save();log(`  checked ${Math.min(i+50,c.length)}/${c.length} channels…`)}return added}
@@ -161,11 +164,11 @@ function find(){$('#main').innerHTML=`<div class="card"><b>Niches</b> <span clas
   try{for(const n of S.niches){log('Searching: '+n);const cand={};
    for(let t=0;t<Math.min(4,S.settings.templates);t++){const j=await yt('search',{part:'snippet',type:'video',videoDuration:'long',maxResults:50,order:'relevance',q:TPL[t].replace('{n}',n)});
     (j.items||[]).forEach(it=>{const id=it.snippet.channelId;if(!cand[id])cand[id]={id,video:it.id.videoId,niche:n}})}
-   const a=await addChannels(Object.values(cand),log);tot+=a;log(`  +${a} new leads`)}log(`Done. ${tot} new leads. Open the Today tab.`)}catch(e){log('Stopped: '+e.message)}};
+   const a=await addChannels(Object.values(cand),log);tot+=a;log(`  +${a} new leads (${skipped} skipped: no contact info)`)}log(`Done. ${tot} new leads. Open the Today tab.`)}catch(e){log('Stopped: '+e.message)}};
  $('#gb').onclick=async()=>{$('#log').textContent='';const n=$('#gn').value.trim();if(!n)return log('Enter a niche.');
   try{log('Asking Gemini (Google Search)…');const list=await askGemini(n,+$('#gc').value||15,$('#gx').value.trim());log(`Gemini suggested ${list.length} podcasts. Verifying on YouTube…`);
    const c=[];for(const it of list){try{const id=await resolveAI(it);if(id)c.push({id,niche:n,aiIg:(it.instagram_handle||'').replace(/^@/,'').replace(/[^A-Za-z0-9._]/g,'')});else log('  not found: '+it.name)}catch(e){log('  skip '+it.name+': '+e.message)}}
-   const a=await addChannels(c,log);log(`Added ${a} verified lead(s) (filtered by your subscriber/activity settings).`)}catch(e){log('Stopped: '+e.message)}};
+   const a=await addChannels(c,log);log(`Added ${a} verified lead(s). ${skipped} skipped for no contact info; others filtered by your subscriber/activity settings.`)}catch(e){log('Stopped: '+e.message)}};
  $('#qb').onclick=async()=>{const urls=$('#qa').value.split('\n').map(x=>x.trim()).filter(Boolean),c=[];$('#log').textContent='';
   try{for(const u of urls){let m;if((m=u.match(/youtube\.com\/channel\/(UC[\w-]{20,})/)))c.push({id:m[1]});
    else if((m=u.match(/youtube\.com\/(@[\w.-]+)/))){const j=await yt('channels',{part:'id',forHandle:m[1]});if(j.items?.[0])c.push({id:j.items[0].id})}
@@ -183,7 +186,7 @@ function moneyV(){const s=stats();
  $('#tb').onclick=()=>{const c=+$('#tc').value,r=+$('#tr').value;if(!c||!r)return;S.team.push({date:$('#td').value,who:$('#tn').value,clips:c,rate:r});save();moneyV()};
  $('#main').onclick=e=>{if(e.target.dataset.dp){S.payments.splice(e.target.dataset.dp,1);save();moneyV()}if(e.target.dataset.dt){S.team.splice(e.target.dataset.dt,1);save();moneyV()}}}
 function settings(){const g=S.settings,f=(k,l,t='number')=>`<div><label>${l}</label><input data-k="${k}" type="${t}" value="${esc(g[k])}"></div>`;
- $('#main').innerHTML=`<div class="card"><div class="grid">${f('key','YouTube API key','password')}${f('goal','Monthly goal ($)')}${f('daily','Daily outreach goal')}${f('minSubs','Min subscribers')}${f('maxSubs','Max subscribers')}${f('maxDays','Max days since last upload')}${f('followDays','Follow-up days')}${f('templates','Queries per niche (1-4)')}${f('geminiKey','Gemini API key (aistudio.google.com/apikey)','password')}${f('geminiModel','Gemini model','text')}</div>
+ $('#main').innerHTML=`<div class="card"><div class="grid">${f('key','YouTube API key','password')}${f('goal','Monthly goal ($)')}${f('daily','Daily outreach goal')}${f('minSubs','Min subscribers')}${f('maxSubs','Max subscribers')}${f('maxDays','Max days since last upload')}${f('followDays','Follow-up days')}${f('templates','Queries per niche (1-4)')}${f('geminiKey','Gemini API key (aistudio.google.com/apikey)','password')}${f('geminiModel','Gemini model','text')}<div><label>Skip podcasts with no contact info (1 = yes, 0 = no)</label><input data-k="skipNoContact" type="number" min="0" max="1" value="${esc(g.skipNoContact)}"></div></div>
  <h4>Google Sheet sync (so your bot sees your numbers)</h4><div class="grid">${f('syncUrl','Web app URL (…/exec)','text')}${f('syncPw','Sync password','password')}</div>
  <div class="row"><button class="b p" id="sn">Sync now</button><button class="b" id="pl">Pull from Sheet (replaces local data)</button></div>
  <label>DM template ({name} {niche} {episode})</label><textarea data-k="dm">${esc(g.dm)}</textarea></div>
