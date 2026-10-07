@@ -130,9 +130,9 @@ async function addChannels(c,log,force){const g=S.settings,have=new Set(S.leads.
     if(pi.items[0]){last=pi.items[0].contentDetails.videoPublishedAt.slice(0,10);lastVid=pi.items[0].contentDetails.videoId}}catch(e){}
    if(!force&&last&&(Date.now()-new Date(last))/864e5>g.maxDays)continue;
    const s=socials(ch.snippet.description);
-   if(!force&&g.skipNoContact&&!(s.ig||s.x||s.tt||s.web||k.aiIg)){skipped++;continue}
+   if(force!==true&&g.skipNoContact&&!(s.ig||s.x||s.tt||s.web||k.aiIg||k.aiX||k.aiTt||k.aiWeb)){skipped++;continue}
    S.leads.push({id:ch.id,name:ch.snippet.title,niche:k.niche||'',url:'https://www.youtube.com/channel/'+ch.id,subs,last,episode:(k.video||lastVid)?'https://www.youtube.com/watch?v='+(k.video||lastVid):'',
-    ig:s.ig||(k.aiIg?'https://instagram.com/'+k.aiIg:''),x:s.x,tt:s.tt,web:s.web,status:'New',added:today(),sent:'',follow:'',notes:s.ig?'':(k.aiIg?'IG handle from Gemini — verify':'')});added++}
+    ig:s.ig||(k.aiIg?'https://instagram.com/'+k.aiIg:''),x:s.x||k.aiX||'',tt:s.tt||k.aiTt||'',web:s.web||k.aiWeb||'',status:'New',added:today(),sent:'',follow:'',notes:s.ig?'':(k.aiIg?'IG handle from Gemini — verify':'')});added++}
   save();log(`  checked ${Math.min(i+50,c.length)}/${c.length} channels…`)}return added}
 async function askGemini(niche,count,extra){const g=S.settings;if(!g.geminiKey)throw new Error('Add your Gemini API key in Settings first.');
  const prompt=`Use Google Search. Find ${count} real, currently active podcasts in the niche "${niche}" that publish long-form episodes on YouTube and likely have 5k-100k subscribers. ${extra}\nReturn ONLY a JSON array, no prose. Each item: {"name":"","youtube_url":"","instagram_handle":"","why":""}. Only include shows you actually found in search results; leave a field empty if unknown — never guess handles.`;
@@ -144,6 +144,29 @@ async function resolveAI(it){let m;const u=it.youtube_url||'';
  if((m=u.match(/youtube\.com\/(@[\w.-]+)/))){const j=await yt('channels',{part:'id',forHandle:m[1]});if(j.items?.[0])return j.items[0].id}
  if((m=u.match(/[?&]v=([\w-]{11})/))){const v=await yt('videos',{part:'snippet',id:m[1]});if(v.items?.[0])return v.items[0].snippet.channelId}
  if(!it.name)return null;const j=await yt('search',{part:'snippet',type:'channel',q:it.name+' podcast',maxResults:1});const x=j.items?.[0];return x?(x.snippet.channelId||x.id.channelId):null}
+async function geminiParse(text){const g=S.settings;
+ const prompt='Extract every podcast mentioned in the text below. Return ONLY a JSON array. Each item: {"name":"","youtube_url":"","instagram_handle":"","x_url":"","tiktok_url":"","website":""}. Use only information present in the text; leave a field empty if absent; never invent handles or URLs.\n\nTEXT:\n'+text.slice(0,30000);
+ const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+(g.geminiModel||'gemini-2.5-flash')+':generateContent',{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':g.geminiKey},body:JSON.stringify({contents:[{parts:[{text:prompt}]}]})});
+ const j=await r.json();if(j.error)throw new Error(j.error.message);const t=(j.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join('');const m=t.match(/\[[\s\S]*\]/);if(!m)throw new Error('no list returned');return JSON.parse(m[0])}
+function basicParse(text){const blocks=text.split(/\n\s*(?:\d+[.)]|[-*•])\s+|\n{2,}/).map(b=>b.trim()).filter(b=>b.length>3),out=[];
+ for(const b of blocks){const o={name:'',youtube_url:'',instagram_handle:'',x_url:'',tiktok_url:'',website:''};let m;
+  const bold=/\*\*([^*]{2,80})\*\*/.exec(b);o.name=(bold?bold[1]:b.split('\n')[0]).replace(/[*_#`>\[\]]|\(https?:[^)]*\)/g,'').replace(/^[\s:–—-]+/,'').slice(0,70).trim();
+  if((m=/https?:\/\/(?:www\.)?youtube\.com\/(?:channel\/UC[\w-]{20,}|@[\w.-]+|watch\?v=[\w-]{11})/i.exec(b)))o.youtube_url=m[0];
+  else if((m=/https?:\/\/youtu\.be\/[\w-]{11}/i.exec(b)))o.youtube_url=m[0].replace('youtu.be/','www.youtube.com/watch?v=');
+  const so=socials(b);if(so.ig)o.instagram_handle=so.ig.split('/').pop();
+  else if((m=/(?:instagram|insta|\big\b)[^@\n]{0,25}@([A-Za-z0-9._]{2,30})/i.exec(b)))o.instagram_handle=m[1];
+  o.x_url=so.x;o.tiktok_url=so.tt;o.website=so.web;
+  if(o.name&&(o.youtube_url||o.instagram_handle||o.x_url||o.tiktok_url||o.website))out.push(o)}return out}
+async function ingestPasted(text,niche,log){let items=null;
+ if(S.settings.geminiKey){try{items=await geminiParse(text)}catch(e){log('Gemini parse failed ('+e.message+') — using basic parser.')}}
+ if(!items)items=basicParse(text);log(`Found ${items.length} podcast(s) in the text.`);
+ const cands=[],have=new Set(S.leads.map(l=>l.id));let direct=0;skipped=0;
+ for(const it of items){const ig=(it.instagram_handle||'').replace(/^@/,'').replace(/[^A-Za-z0-9._]/g,'');let id=null;
+  try{id=await resolveAI(it)}catch(e){log('  YouTube lookup failed for '+it.name+': '+e.message)}
+  if(id)cands.push({id,niche,aiIg:ig,aiX:it.x_url||'',aiTt:it.tiktok_url||'',aiWeb:it.website||''});
+  else{const lid='m:'+(ig||it.name.toLowerCase());if(have.has(lid)||!(ig||it.x_url||it.tiktok_url||it.website))continue;have.add(lid);
+   S.leads.push({id:lid,name:it.name,niche,url:it.youtube_url||'',subs:0,last:'',episode:'',ig:ig?'https://instagram.com/'+ig:'',x:it.x_url||'',tt:it.tiktok_url||'',web:it.website||'',status:'New',added:today(),sent:'',follow:'',notes:'No YouTube channel found — find an episode to clip'});direct++;log('  added without YouTube: '+it.name)}}
+ const a=await addChannels(cands,log,'soft');save();return a+direct}
 function find(){$('#main').innerHTML=`<div class="card"><b>Niches</b> <span class=mut>(one per line)</span><textarea id="ni">${esc(S.niches.join('\n'))}</textarea>
  <div class="row"><button class="b p" id="run">Find podcasts</button><span class=mut>Each query costs 100 of your 10,000 free daily API units.</span></div></div>
  <div class="card"><b>Quick add</b> <span class=mut>(paste YouTube video / channel / @handle links)</span><textarea id="qa"></textarea>
@@ -151,6 +174,10 @@ function find(){$('#main').innerHTML=`<div class="card"><b>Niches</b> <span clas
  <div class="row"><input id="gn" placeholder="Niche, e.g. real estate investing"><input id="gc" type="number" value="15" style="width:80px" title="How many podcasts">
  <button class="b p" id="gb">Ask Google AI</button></div><label>Extra instructions / dork ideas (optional)</label>
  <input id="gx" style="width:100%" placeholder='e.g. prefer shows that say "audio only" or have few Shorts; hosts active on Instagram'></div>
+ <div class="card"><b>Paste AI results</b> <span class=mut>— paste Google AI Mode / ChatGPT / any text listing podcasts; I'll pull out the podcasts and contact info</span>
+ <textarea id="pt" style="min-height:140px" placeholder="Paste the whole AI answer here…"></textarea>
+ <div class="row"><input id="pn" placeholder="Niche for these leads"><button class="b p" id="pb2">Parse &amp; add to CRM</button>
+ <span class=mut>${S.settings.geminiKey?'Using Gemini to structure the text.':'No Gemini key — using the basic parser (add a Gemini key in Settings for better results).'}</span></div></div>
  <div class="card"><b>Dork links</b> <span class=mut>— open in Google, paste good finds into Quick add</span><div class="tw"><table>${S.niches.map(n=>{const q=x=>'https://www.google.com/search?q='+encodeURIComponent(x);return `<tr><td>${esc(n)}</td>
  <td><a target=_blank rel=noopener href="${q('site:youtube.com "full episode" '+n+' podcast')}">full episodes</a></td>
  <td><a target=_blank rel=noopener href="${q('site:youtube.com '+n+' podcast "how to start a podcast" OR "audio only"')}">new/audio-only</a></td>
@@ -165,6 +192,8 @@ function find(){$('#main').innerHTML=`<div class="card"><b>Niches</b> <span clas
    for(let t=0;t<Math.min(4,S.settings.templates);t++){const j=await yt('search',{part:'snippet',type:'video',videoDuration:'long',maxResults:50,order:'relevance',q:TPL[t].replace('{n}',n)});
     (j.items||[]).forEach(it=>{const id=it.snippet.channelId;if(!cand[id])cand[id]={id,video:it.id.videoId,niche:n}})}
    const a=await addChannels(Object.values(cand),log);tot+=a;log(`  +${a} new leads (${skipped} skipped: no contact info)`)}log(`Done. ${tot} new leads. Open the Today tab.`)}catch(e){log('Stopped: '+e.message)}};
+ $('#pb2').onclick=async()=>{$('#log').textContent='';const t=$('#pt').value.trim();if(!t)return log('Paste some text first.');
+  try{const a=await ingestPasted(t,$('#pn').value.trim(),log);log(`Done: ${a} lead(s) added.`);$('#pt').value=''}catch(e){log('Stopped: '+e.message)}};
  $('#gb').onclick=async()=>{$('#log').textContent='';const n=$('#gn').value.trim();if(!n)return log('Enter a niche.');
   try{log('Asking Gemini (Google Search)…');const list=await askGemini(n,+$('#gc').value||15,$('#gx').value.trim());log(`Gemini suggested ${list.length} podcasts. Verifying on YouTube…`);
    const c=[];for(const it of list){try{const id=await resolveAI(it);if(id)c.push({id,niche:n,aiIg:(it.instagram_handle||'').replace(/^@/,'').replace(/[^A-Za-z0-9._]/g,'')});else log('  not found: '+it.name)}catch(e){log('  skip '+it.name+': '+e.message)}}
