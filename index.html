@@ -168,20 +168,39 @@ async function addChannels(c,log,force){const g=S.settings,have=new Set(S.leads.
 function episodePrompt(niche,count,extra,json){const base=`Use Google Search. Find ${count} real podcasts in the niche "${niche}" that post full length episodes on YouTube and are small enough to want clipping help (roughly 1k to 150k subscribers). For EACH show, pick ONE specific episode (published in the last 90 days, 20 minutes or longer, not a Short) that has a strong clippable moment, like a surprising story, a hot take or a practical tip. ${extra||''}`;
  return json?base+`\nReturn ONLY a JSON array. Each item: {"name":"podcast name","episode_title":"exact episode title","episode_url":"direct https://www.youtube.com/watch?v= link","clip_idea":"one line on the moment worth clipping, with a timestamp if known","youtube_url":"channel link","instagram_handle":"official show or host handle without @","x_url":"","tiktok_url":""}. Only include episodes you actually found in search results with a real watch link. Leave a field empty if unknown. Never guess or invent links or handles.`
  :base+`\nFor each show give me: the podcast name, the YouTube channel link, the exact episode title, the direct episode link (youtube.com/watch?v=...), a one line clip idea with a timestamp if you can, the official Instagram handle of the show or host, and their X or TikTok if they have one. Only use real links you found. If you can't find something, say "unknown". Don't guess handles or links.`}
-async function askGemini(niche,count,extra){const g=S.settings;if(!g.geminiKey)throw new Error('Add your Gemini API key in Settings first.');
- const prompt=episodePrompt(niche,count,extra,true);
- const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+(g.geminiModel||'gemini-2.5-flash')+':generateContent',{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':g.geminiKey},
-  body:JSON.stringify({contents:[{parts:[{text:prompt}]}],tools:[{google_search:{}}]})});const j=await r.json();if(j.error)throw new Error(j.error.message);
- const t=(j.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join('');const m=t.match(/\[[\s\S]*\]/);if(!m)throw new Error('Gemini returned no list — try again.');return JSON.parse(m[0])}
+async function geminiModels(){if(geminiModels.c)return geminiModels.c;const g=S.settings;
+ const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200',{headers:{'x-goog-api-key':g.geminiKey}});const j=await r.json();if(j.error)throw new Error(j.error.message);
+ const all=(j.models||[]).filter(m=>(m.supportedGenerationMethods||[]).includes('generateContent')&&/flash/i.test(m.name)&&!/lite|image|tts|live|audio|embed|thinking/i.test(m.name)).map(m=>m.name.replace('models/',''));
+ all.sort((a,b)=>(/preview|exp/i.test(a)?1:0)-(/preview|exp/i.test(b)?1:0)||b.localeCompare(a));return geminiModels.c=all}
+async function geminiCall(prompt,useSearch,log){const g=S.settings;log=log||(()=>{});if(!g.geminiKey)throw new Error('Add your Gemini API key in Settings first.');
+ const models=[g.geminiModel||'gemini-2.5-flash'];let lastErr='',discovered=false;
+ for(let i=0;i<models.length&&i<6;i++){const model=models[i];
+  for(const tools of useSearch?[true,false]:[false]){
+   const body={contents:[{parts:[{text:prompt}]}]};if(tools)body.tools=[{google_search:{}}];
+   let j;try{const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+model+':generateContent',{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':g.geminiKey},body:JSON.stringify(body)});j=await r.json()}
+   catch(e){lastErr='Network/CORS error: '+e.message;break}
+   if(j.error){const m=j.error.message||'error';lastErr=model+': '+m;
+    if(/API key|API_KEY|PERMISSION_DENIED|not valid/i.test(m+(j.error.status||'')))throw new Error('Gemini rejected your key ('+m+'). Make a new one at aistudio.google.com/apikey and paste it in Settings.');
+    if(tools&&/search|ground|tool/i.test(m)){log('  Google Search grounding unavailable for this key, retrying without it…');continue}
+    break}
+   const t=(j.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join('');
+   if(!t){lastErr=model+': empty response'+(j.promptFeedback?.blockReason?' ('+j.promptFeedback.blockReason+')':'');break}
+   if(model!==g.geminiModel){g.geminiModel=model;save()}
+   if(useSearch&&!tools)log('  (this answer is NOT web grounded, so verify links)');
+   return t}
+  if(i==models.length-1&&!discovered){discovered=true;try{(await geminiModels()).forEach(m=>{if(!models.includes(m))models.push(m)})}catch(e){lastErr+=' | model list: '+e.message}}}
+ throw new Error('Gemini failed. Last error: '+lastErr)}
+function jsonList(t){const m=t.match(/\[[\s\S]*\]/);if(!m)throw new Error('Gemini did not return a list. Try again or lower the count.');
+ try{return JSON.parse(m[0])}catch(e){return JSON.parse(m[0].replace(/,\s*([\]}])/g,'$1'))}}
+async function askGemini(niche,count,extra,log){return jsonList(await geminiCall(episodePrompt(niche,count,extra,true),true,log))}
 async function resolveAI(it){let m;const eu=it.episode_url||'',u=it.youtube_url||'';
  if((m=eu.match(/[?&]v=([\w-]{11})/)||eu.match(/youtu\.be\/([\w-]{11})/)||u.match(/[?&]v=([\w-]{11})/))){const v=await yt('videos',{part:'snippet',id:m[1]});if(v.items?.[0])return{id:v.items[0].snippet.channelId,video:m[1],epTitle:v.items[0].snippet.title}}
  if((m=u.match(/youtube\.com\/channel\/(UC[\w-]{20,})/)))return{id:m[1]};
  if((m=u.match(/youtube\.com\/(@[\w.-]+)/))){const j=await yt('channels',{part:'id',forHandle:m[1]});if(j.items?.[0])return{id:j.items[0].id}}
  if(!it.name)return null;const j=await yt('search',{part:'snippet',type:'channel',q:it.name+' podcast',maxResults:1});const x=j.items?.[0];return x?{id:x.snippet.channelId||x.id.channelId}:null}
-async function geminiParse(text){const g=S.settings;
+async function geminiParse(text,log){
  const prompt='Extract every podcast mentioned in the text below. Return ONLY a JSON array. Each item: {"name":"","youtube_url":"channel link","episode_url":"direct watch link of a specific episode","episode_title":"","clip_idea":"","instagram_handle":"","x_url":"","tiktok_url":"","website":""}. Use only information present in the text; leave a field empty if absent; never invent handles or URLs.\n\nTEXT:\n'+text.slice(0,30000);
- const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+(g.geminiModel||'gemini-2.5-flash')+':generateContent',{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':g.geminiKey},body:JSON.stringify({contents:[{parts:[{text:prompt}]}]})});
- const j=await r.json();if(j.error)throw new Error(j.error.message);const t=(j.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join('');const m=t.match(/\[[\s\S]*\]/);if(!m)throw new Error('no list returned');return JSON.parse(m[0])}
+ return jsonList(await geminiCall(prompt,false,log))}
 function basicParse(text){const blocks=text.split(/\n\s*(?:\d+[.)]|[-*•])\s+|\n{2,}/).map(b=>b.trim()).filter(b=>b.length>3),out=[];
  for(const b of blocks){const o={name:'',youtube_url:'',episode_url:'',clip_idea:'',instagram_handle:'',x_url:'',tiktok_url:'',website:''};let m;
   const bold=/\*\*([^*]{2,80})\*\*/.exec(b);o.name=(bold?bold[1]:b.split('\n')[0]).replace(/[*_#`>\[\]]|\(https?:[^)]*\)/g,'').replace(/^[\s:–—-]+/,'').slice(0,70).trim();
@@ -192,7 +211,7 @@ function basicParse(text){const blocks=text.split(/\n\s*(?:\d+[.)]|[-*•])\s+|\
   o.x_url=so.x;o.tiktok_url=so.tt;o.website=so.web;
   if(o.name&&(o.youtube_url||o.episode_url||o.instagram_handle||o.x_url||o.tiktok_url||o.website))out.push(o)}return out}
 async function ingestPasted(text,niche,log){let items=null;
- if(S.settings.geminiKey){try{items=await geminiParse(text)}catch(e){log('Gemini parse failed ('+e.message+') — using basic parser.')}}
+ if(S.settings.geminiKey){try{items=await geminiParse(text,log)}catch(e){log('Gemini parse failed ('+e.message+') — using basic parser.')}}
  if(!items)items=basicParse(text);log(`Found ${items.length} podcast(s) in the text.`);
  const cands=[],have=new Set(S.leads.map(l=>l.id));let direct=0;skipped=0;
  for(const it of items){const ig=(it.instagram_handle||'').replace(/^@/,'').replace(/[^A-Za-z0-9._]/g,'');let rr=null;
@@ -201,12 +220,10 @@ async function ingestPasted(text,niche,log){let items=null;
   else{const lid='m:'+(ig||it.name.toLowerCase());if(have.has(lid)||!(ig||it.x_url||it.tiktok_url||it.website))continue;have.add(lid);
    S.leads.push({id:lid,name:it.name,niche,url:it.youtube_url||'',subs:0,last:'',episode:it.episode_url||'',epTitle:it.episode_title||'',ig:ig?'https://instagram.com/'+ig:'',x:it.x_url||'',tt:it.tiktok_url||'',web:it.website||'',status:'New',added:today(),sent:'',follow:'',notes:(it.episode_url?'':'No YouTube channel found, find an episode to clip')+(it.clip_idea?(it.episode_url?'':' | ')+'Clip idea: '+it.clip_idea:'')});direct++;log('  added without YouTube: '+it.name)}}
  const a=await addChannels(cands,log,'soft');save();return a+direct}
-async function findInstagrams(list){const g=S.settings;if(!g.geminiKey)throw new Error('Add your Gemini API key in Settings first.');let found=0;
+async function findInstagrams(list){let found=0;
  for(let i=0;i<list.length;i+=10){const grp=list.slice(i,i+10);
   const prompt='Use Google Search. For each podcast below, find the official Instagram handle of the show or its host. Return ONLY a JSON array like [{"i":0,"instagram_handle":""}]. Leave instagram_handle empty if you are not sure. Never guess.\n'+grp.map((l,k)=>`${k}. ${l.name} (YouTube: ${l.url}${l.niche?', niche: '+l.niche:''})`).join('\n');
-  const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+(g.geminiModel||'gemini-2.5-flash')+':generateContent',{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':g.geminiKey},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],tools:[{google_search:{}}]})});
-  const j=await r.json();if(j.error)throw new Error(j.error.message);const t=(j.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join('');const m=t.match(/\[[\s\S]*\]/);if(!m)continue;
-  let arr;try{arr=JSON.parse(m[0])}catch(e){continue}
+  let arr;try{arr=jsonList(await geminiCall(prompt,true))}catch(e){if(/key|Gemini failed/i.test(e.message))throw e;continue}
   for(const a of arr){const l=grp[a.i];const h=(a.instagram_handle||'').replace(/^@/,'').replace(/[^A-Za-z0-9._]/g,'');if(l&&h){l.ig='https://instagram.com/'+h;l.notes=(l.notes?l.notes+' | ':'')+'IG from Gemini, verify';found++}}}
  save();return found}
 function find(){$('#main').innerHTML=`<div class="card"><b>Niches</b> <span class=mut>(one per line)</span><textarea id="ni">${esc(S.niches.join('\n'))}</textarea>
@@ -241,7 +258,7 @@ function find(){$('#main').innerHTML=`<div class="card"><b>Niches</b> <span clas
  $('#pb2').onclick=async()=>{$('#log').textContent='';const t=$('#pt').value.trim();if(!t)return log('Paste some text first.');
   try{const a=await ingestPasted(t,$('#pn').value.trim(),log);log(`Done: ${a} lead(s) added.`);$('#pt').value=''}catch(e){log('Stopped: '+e.message)}};
  $('#gb').onclick=async()=>{$('#log').textContent='';const n=$('#gn').value.trim();if(!n)return log('Enter a niche.');
-  try{log('Asking Gemini (Google Search)…');const list=await askGemini(n,+$('#gc').value||15,$('#gx').value.trim());log(`Gemini suggested ${list.length} podcasts. Verifying on YouTube…`);
+  try{log('Asking Gemini (Google Search)…');const list=await askGemini(n,+$('#gc').value||15,$('#gx').value.trim(),log);log(`Gemini suggested ${list.length} podcasts. Verifying on YouTube…`);
    const c=[];for(const it of list){try{const rr=await resolveAI(it);if(rr)c.push({...rr,niche:n,aiNote:it.clip_idea?'Clip idea: '+it.clip_idea:'',aiIg:(it.instagram_handle||'').replace(/^@/,'').replace(/[^A-Za-z0-9._]/g,'')});else log('  not found: '+it.name)}catch(e){log('  skip '+it.name+': '+e.message)}}
    const a=await addChannels(c,log);log(`Added ${a} verified lead(s). ${skipped} skipped for no contact info; others filtered by your subscriber/activity settings.`)}catch(e){log('Stopped: '+e.message)}};
  $('#qb').onclick=async()=>{const urls=$('#qa').value.split('\n').map(x=>x.trim()).filter(Boolean),c=[];$('#log').textContent='';
@@ -263,11 +280,12 @@ function moneyV(){const s=stats();
 function settings(){const g=S.settings,f=(k,l,t='number')=>`<div><label>${l}</label><input data-k="${k}" type="${t}" value="${esc(g[k])}"></div>`;
  $('#main').innerHTML=`<div class="card"><div class="grid">${f('key','YouTube API key','password')}${f('goal','Monthly goal ($)')}${f('daily','Daily outreach goal')}${f('minSubs','Min subscribers')}${f('maxSubs','Max subscribers')}${f('maxDays','Max days since last upload')}${f('followDays','Follow-up days')}${f('templates','Queries per niche (1-4)')}${f('geminiKey','Gemini API key (aistudio.google.com/apikey)','password')}${f('geminiModel','Gemini model','text')}<div><label>Skip podcasts with no contact info (1 = yes, 0 = no)</label><input data-k="skipNoContact" type="number" min="0" max="1" value="${esc(g.skipNoContact)}"></div><div><label>Instagram only (1 = only queue leads with an Instagram, 0 = Instagram first, then X / TikTok / link)</label><input data-k="igOnly" type="number" min="0" max="1" value="${esc(g.igOnly)}"></div></div>
  <h4>Google Sheet sync (so your bot sees your numbers)</h4><div class="grid">${f('syncUrl','Web app URL (…/exec)','text')}${f('syncPw','Sync password','password')}</div>
- <div class="row"><button class="b p" id="sn">Sync now</button><button class="b" id="pl">Pull from Sheet (replaces local data)</button></div>
+ <div class="row"><button class="b" id="tg">Test Gemini</button><button class="b p" id="sn">Sync now</button><button class="b" id="pl">Pull from Sheet (replaces local data)</button></div>
  <label>DM template: {name} {niche} {episode}. Spintax like {Hey|Hi|Hey there} picks one per lead. Dashes are removed automatically</label><textarea data-k="dm">${esc(g.dm)}</textarea></div>
  <div class="card"><b>Backup</b><p class=mut>Your data lives in this browser only. Export regularly (or before clearing browser data) and import on another device.</p>
  <div class="row"><button class="b p" id="ex">Export JSON</button><input type="file" id="im" accept=".json"></div></div>`;
  $('#main').oninput=e=>{const k=e.target.dataset.k;if(!k)return;g[k]=e.target.type=='number'?+e.target.value:e.target.value;save()};
+ $('#tg').onclick=async()=>{$('#tg').textContent='Testing…';const out=[];try{const t=await geminiCall('Use Google Search. Reply with exactly: OK and today\'s date.',true,m=>out.push(m.trim()));out.push('Reply: '+t.slice(0,80).replace(/\n/g,' '));out.push('Model in use: '+S.settings.geminiModel)}catch(e){out.push('FAILED: '+e.message)}alert(out.join('\n'));$('#tg').textContent='Test Gemini'};
  $('#sn').onclick=()=>syncCall('push');
  $('#pl').onclick=async()=>{if(!confirm('Replace local leads/payments with the Sheet data?'))return;const j=await syncCall('pull');if(j){Object.assign(S,j.state);localStorage.setItem('clipperCRM',JSON.stringify(S));render()}};
  $('#ex').onclick=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(S,null,1)],{type:'application/json'}));a.download='clipper-crm-'+today()+'.json';a.click()};
