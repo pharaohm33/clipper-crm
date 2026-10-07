@@ -113,7 +113,7 @@ function setupLeads_(ss) {
 
 function setupClients_(ss) {
   var sh = ss.getSheetByName(SHEETS.clients);
-  header_(sh, ['Influencer / Podcast', 'Instagram / Contact', 'Deal (e.g. $/clip, retainer)', 'Start Date', 'Status', 'Clips Posted', 'Total Earned', 'This Month', 'Notes'], '#065f46');
+  header_(sh, ['Influencer / Podcast', 'Instagram / Contact', 'Deal (e.g. $/clip, retainer)', 'Start Date', 'Status', 'Clips Posted', 'Total Earned', 'This Month', 'Notes', 'Monthly Fee', 'Clips / Month'], '#065f46');
   sh.getRange('G2').setFormula('=ARRAYFORMULA(IF(A2:A="","",SUMIF(Payments!B:B,A2:A,Payments!C:C)))');
   sh.getRange('H2').setFormula('=ARRAYFORMULA(IF(A2:A="","",SUMIFS(Payments!C:C,Payments!B:B,A2:A,Payments!A:A,">="&DATE(YEAR(TODAY()),MONTH(TODAY()),1))))');
   sh.getRange('G2:H').setNumberFormat('$#,##0.00');
@@ -157,7 +157,7 @@ function setupBotTabs_(ss) {
     ['Monthly Income', '=Dashboard!B5', 'Auto: payments this month'],
     ['Monthly Expenses', '=Dashboard!B29', 'Auto: team pay owed this month'],
     ['Monthly Profit', '=B2-B3', 'Auto-calculated'],
-    ['12-Month Income Goal', '=GOAL*12', 'Auto: monthly goal x 12'],
+    ['Monthly Recurring Revenue (MRR)', '=Dashboard!B34', 'Auto: active retainers'],
     ['Total Contacts (samples sent)', '=Dashboard!B21', 'Auto from Leads'],
     ['Total Sales Closed (clients won)', '=Dashboard!B24', 'Auto from Leads'],
     ['Contacts per Sale', '=IF(B7=0,"",B6/B7)', 'Auto-calculated — lower is better'],
@@ -229,16 +229,23 @@ function setupDashboard_(ss) {
     ['PROFIT (after team pay)', ''],
     ['Team pay owed this month', '=SUMIFS(\'Team Pay\'!F:F,\'Team Pay\'!A:A,">="&' + monthStart + ',\'Team Pay\'!A:A,"<"&EDATE(' + monthStart + ',1))'],
     ['Unpaid team balance', '=SUMIF(\'Team Pay\'!G:G,FALSE,\'Team Pay\'!F:F)'],
-    ['Profit this month', '=B5-B29']
+    ['Profit this month', '=B5-B29'],
+    ['', ''],
+    ['RECURRING REVENUE (MRR)', ''],
+    ['MRR (active retainers)', '=SUMIFS(Clients!J:J,Clients!E:E,"Active")'],
+    ['Active retainers', '=COUNTIFS(Clients!J:J,">0",Clients!E:E,"Active")'],
+    ['Clips committed / month', '=SUMIFS(Clients!K:K,Clients!E:E,"Active")'],
+    ['MRR vs monthly goal', '=IFERROR(B34/B4,0)'],
+    ['Clients still needed at avg fee', '=IF(B35=0,"",CEILING(MAX(0,B4-B34)/(B34/B35),1))']
   ];
   sh.getRange(1, 1, f.length, 2).setValues(f);
   sh.getRange('A1').setFontSize(20).setFontWeight('bold');
-  ['A3', 'A12', 'A20', 'A28'].forEach(function (a) { sh.getRange(a).setFontWeight('bold').setBackground('#111827').setFontColor('#fff'); sh.getRange(a).offset(0, 1).setBackground('#111827'); });
+  ['A3', 'A12', 'A20', 'A28', 'A33'].forEach(function (a) { sh.getRange(a).setFontWeight('bold').setBackground('#111827').setFontColor('#fff'); sh.getRange(a).offset(0, 1).setBackground('#111827'); });
   sh.getRange('B4:B6').setNumberFormat('$#,##0'); sh.getRange('B9:B10').setNumberFormat('$#,##0');
   sh.getRange('B7').setNumberFormat('0%'); sh.getRange('B23').setNumberFormat('0.0%'); sh.getRange('B25').setNumberFormat('0.0%');
   sh.getRange('C7').setFormula('=SPARKLINE(B5,{"charttype","bar";"max",B4;"color1","#16a34a"})');
   sh.getRange('C13').setFormula('=SPARKLINE(B13,{"charttype","bar";"max",B14;"color1","#e11d48"})');
-  sh.getRange('B29:B31').setNumberFormat('$#,##0'); sh.getRange('B3:B31').setHorizontalAlignment('right');
+  sh.getRange('B29:B31').setNumberFormat('$#,##0'); sh.getRange('B34').setNumberFormat('$#,##0'); sh.getRange('B37').setNumberFormat('0%'); sh.getRange('B3:B38').setHorizontalAlignment('right');
 
   sh.getRange('E3').setValue('EARNINGS PER INFLUENCER').setFontWeight('bold').setBackground('#065f46').setFontColor('#fff');
   sh.getRange('F3:H3').setBackground('#065f46');
@@ -604,10 +611,25 @@ function writeState_(st) {
   replaceRows_(ss.getSheetByName(SHEETS.team), 5, (st.team || []).map(function (t) { return [d_(t.date), t.who, '', t.clips, t.rate]; }));
   (st.clients || []).forEach(function (n) { addClientIfMissing_(n, ''); });
 
+  if (st.retainers) writeRetainers_(st.retainers, st.clients || []);
   var g = st.settings || {};
   var set = ss.getSheetByName(SHEETS.settings);
   if (g.goal) set.getRange('B3').setValue(g.goal);
   if (g.daily) set.getRange('B4').setValue(g.daily);
+}
+
+function writeRetainers_(ret, clients) {
+  var sh = SpreadsheetApp.getActive().getSheetByName(SHEETS.clients), max = sh.getMaxRows();
+  if (max > 1) { sh.getRange(2, 1, max - 1, 6).clearContent(); sh.getRange(2, 10, max - 1, 2).clearContent(); }
+  var by = {}, names = [];
+  ret.forEach(function (r) { by[r.who] = r; names.push(r.who); });
+  clients.forEach(function (n) { if (!by[n] && names.indexOf(n) < 0) names.push(n); });
+  if (!names.length) return;
+  if (sh.getMaxRows() < names.length + 1) sh.insertRowsAfter(sh.getMaxRows(), names.length + 1 - sh.getMaxRows());
+  sh.getRange(2, 1, names.length, 6).setValues(names.map(function (n) {
+    var r = by[n]; return [n, '', r ? r.clips + ' clips / $' + r.fee + ' per month' : '', r ? d_(r.start) : '', r ? r.status : 'Active', ''];
+  }));
+  sh.getRange(2, 10, names.length, 2).setValues(names.map(function (n) { var r = by[n]; return [r ? Number(r.fee) : '', r ? Number(r.clips) : '']; }));
 }
 
 function readState_() {
@@ -628,7 +650,9 @@ function readState_() {
     .map(function (r) { return { date: s_(r[0]), who: r[1], clips: Number(r[3]), rate: Number(r[4]) }; }) : [];
   var cs = ss.getSheetByName(SHEETS.clients), cn = cs.getLastRow() - 1;
   var clients = cn > 0 ? cs.getRange(2, 1, cn, 1).getValues().map(function (r) { return r[0]; }).filter(String) : [];
-  return { leads: leads, payments: payments, team: team, clients: clients };
+  var retainers = cn > 0 ? cs.getRange(2, 1, cn, 11).getValues().filter(function (r) { return r[0] && Number(r[9]) > 0; })
+    .map(function (r) { return { who: r[0], clips: Number(r[10]) || 0, fee: Number(r[9]), start: s_(r[3]), status: r[4] || 'Active' }; }) : [];
+  return { leads: leads, payments: payments, team: team, clients: clients, retainers: retainers };
 }
 
 

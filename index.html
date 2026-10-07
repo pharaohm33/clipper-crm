@@ -35,13 +35,14 @@ a{color:var(--acc)}.hide{display:none}.mut{color:var(--mut)}pre{white-space:pre-
 <span style="margin-left:auto" class="mut" id="sync"></span><span class="mut" id="clock"></span></header>
 <main id="main"></main>
 <script>
+const TIERS=[{n:'Starter',clips:20,fee:300},{n:'Growth',clips:50,fee:500},{n:'Scale',clips:100,fee:1000}];
 const STATUSES=['New','Sample Sent','Replied','Interested','Client','No Response','Not Interested','Removed'];
 const TPL=['{n} podcast full episode','{n} podcast interview','how to start a {n} podcast','{n} podcast new episode'];
 const DEF={settings:{key:'',goal:5000,daily:100,minSubs:1000,maxSubs:150000,maxDays:60,followDays:3,templates:3,
  syncUrl:'',syncPw:'',geminiKey:'',geminiModel:'gemini-2.5-flash',skipNoContact:1,igOnly:0,useGeminiParse:0,maxShorts:20,
  dm:"{Hey|Hey there|Hi}! {Just watched|Just finished|Caught} your {latest|recent|newest} episode on {niche} and {loved it|really enjoyed it|thought it was great}. I {made|cut|put together} a quick clip from it because {it deserved more eyes|it was too good not to share|I think it could do well on Reels}. {Totally free|No strings attached|No cost at all}, just thought you'd like to see it. Here's the full episode I pulled it from: {episode}"},
  niches:['real estate','personal finance','fitness','entrepreneurship','mental health','true crime','faith christian','sports betting','parenting','health longevity'],
- leads:[],payments:[],clients:[],team:[]};
+ leads:[],payments:[],clients:[],team:[],retainers:[]};
 let S;try{S=JSON.parse(localStorage.getItem('clipperCRM'))}catch(e){}
 S=Object.assign({},DEF,S||{});S.settings=Object.assign({},DEF.settings,S.settings);
 if(/[—–]/.test(S.settings.dm)||S.settings.dm.startsWith('Hey! Just watched your latest'))S.settings.dm=DEF.settings.dm;
@@ -50,7 +51,7 @@ function setSync(m){syncMsg=m;const e=document.getElementById('sync');if(e)e.tex
 function save(){localStorage.setItem('clipperCRM',JSON.stringify(S));clearTimeout(syncT);if(S.settings.syncUrl&&S.settings.syncPw)syncT=setTimeout(()=>syncCall('push'),2500)}
 async function syncCall(action){const g=S.settings;if(!g.syncUrl||!g.syncPw){setSync('Sync not set up');return null}
  setSync(action=='push'?'Syncing…':'Pulling…');
- const st={leads:S.leads,payments:S.payments,team:S.team,clients:S.clients,settings:{goal:g.goal,daily:g.daily}};
+ const st={leads:S.leads,payments:S.payments,team:S.team,clients:S.clients,retainers:S.retainers||[],settings:{goal:g.goal,daily:g.daily}};
  try{const r=await fetch(g.syncUrl,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({secret:g.syncPw,action,state:action=='push'?st:undefined})});
   const j=await r.json();if(!j.ok)throw new Error(j.error);setSync(action=='push'?'Synced ✓ '+new Date().toLocaleTimeString():'Pulled ✓');return j}
  catch(e){setSync('Sync failed: '+e.message);return null}}
@@ -75,13 +76,16 @@ function stats(){
  const now=new Date(),dl=new Date(now.getFullYear(),now.getMonth()+1,0).getDate()-now.getDate()+1;
  const sentAll=S.leads.filter(l=>l.sent).length,rep=S.leads.filter(l=>['Replied','Interested','Client'].includes(l.status)).length,cl=S.leads.filter(l=>l.status=='Client').length;
  return{earned,owed,dl,remaining:Math.max(0,S.settings.goal-earned),sentToday:sentOn(today()),sentAll,rep,cl,
-  fresh:S.leads.filter(l=>l.status=='New').length,fu:S.leads.filter(l=>l.status=='Sample Sent'&&l.follow&&l.follow<=today()).length}}
+  fresh:S.leads.filter(l=>l.status=='New').length,fu:S.leads.filter(l=>l.status=='Sample Sent'&&l.follow&&l.follow<=today()).length,...mrrStats()}}
+function mrrStats(){const act=(S.retainers||[]).filter(r=>r.status=='Active'),mrr=act.reduce((a,r)=>a+(+r.fee||0),0);return{mrr,act:act.length,clipsM:act.reduce((a,r)=>a+(+r.clips||0),0),avgFee:act.length?mrr/act.length:0}}
 function render(){nav();({dash,today:todayV,leads,find,money:moneyV,settings})[tab]()}
 function dash(){const s=stats(),g=S.settings;const pct=Math.min(100,s.earned/g.goal*100);
  const days=[...Array(14)].map((_,i)=>{const d=iso(new Date(Date.now()-(13-i)*864e5));return[d,sentOn(d)]});const mx=Math.max(g.daily,...days.map(x=>x[1]));
  const byInf={};S.payments.forEach(p=>{(byInf[p.who]=byInf[p.who]||{all:0,mo:0}).all+=p.amount;if(p.date.startsWith(monthKey()))byInf[p.who].mo+=p.amount});
  $('#main').innerHTML=`<div class="card"><b>${money(s.earned)}</b> of ${money(g.goal)} this month<div class="bar"><i style="width:${pct}%"></i></div>
  <span class="mut">Need ${money(s.remaining/s.dl)}/day for ${s.dl} more days · Profit after team pay: ${money(s.earned-s.owed)}</span></div>
+ <div class="card" style="border-color:var(--ok)"><b>${money(s.mrr)}</b> monthly recurring revenue (MRR) · ${s.act} active retainer${s.act==1?'':'s'} · ${s.clipsM} clips/month<div class="bar"><i style="width:${Math.min(100,s.mrr/g.goal*100)}%"></i></div>
+ <span class="mut">${s.mrr>=g.goal?'Your retainers cover the monthly goal.':`Need ${money(g.goal-s.mrr)} more MRR, about ${Math.ceil((g.goal-s.mrr)/(s.avgFee||500))} more clients at ${money(s.avgFee||500)}${s.avgFee?' (your average)':''}.`}</span></div>
  <div class="grid">
  <div class="stat"><small>DMs today</small><b>${s.sentToday}/${g.daily}</b><div class="bar"><i style="width:${Math.min(100,s.sentToday/g.daily*100)}%;background:var(--acc)"></i></div></div>
  <div class="stat"><small>Fresh leads</small><b>${s.fresh}</b></div><div class="stat"><small>Follow-ups due</small><b>${s.fu}</b></div>
@@ -306,8 +310,14 @@ function find(){$('#main').innerHTML=`<div class="card" style="border-color:var(
    else if((m=u.match(/[?&]v=([\w-]{11})/)||u.match(/youtu\.be\/([\w-]{11})/)||u.match(/youtube\.com\/(?:live|shorts|embed)\/([\w-]{11})/))){const v=await yt('videos',{part:'snippet',id:m[1]});if(v.items?.[0])c.push({id:v.items[0].snippet.channelId,video:m[1]})}
    else log('Could not read: '+u)}
    const a=await addChannels(c,log,true);log(`Added ${a} lead(s).`)}catch(e){log('Stopped: '+e.message)}}}
-function moneyV(){const s=stats();
- $('#main').innerHTML=`<div class="card"><b>Log a payment</b><div class="row"><input id="pd" type="date" value="${today()}"><input id="pw" list="cl" placeholder="Influencer / podcast"><datalist id="cl">${S.clients.map(c=>`<option>${esc(c)}</option>`).join('')}</datalist>
+function moneyV(){const s=stats();const RS=S.retainers=S.retainers||[];
+ $('#main').innerHTML=`<div class="card"><b>Retainers (MRR)</b> <span class=mut>${money(s.mrr)} a month from ${s.act} active · ${s.clipsM} clips/month committed</span>
+ <div class="row"><input id="rw" list="cl" placeholder="Podcast / client"><select id="rt">${TIERS.map((t,i)=>`<option value="${i}">${t.n}: ${t.clips} clips, ${money(t.fee)}</option>`).join('')}<option value="c">Custom</option></select>
+ <input id="rcl" type="number" value="${TIERS[0].clips}" style="width:90px" title="Clips per month"><input id="rfe" type="number" value="${TIERS[0].fee}" style="width:100px" title="Monthly fee $"><input id="rsd" type="date" value="${today()}"><button class="b p" id="rb">Add retainer</button></div>
+ <div class="tw"><table><tr><th>Client</th><th>Clips / mo</th><th>Fee / mo</th><th>Since</th><th>Status</th><th></th></tr>${RS.map((r,i)=>`<tr><td>${esc(r.who)}</td><td>${r.clips}</td><td>${money(r.fee)}</td><td>${r.start||''}</td>
+ <td><select data-rst="${i}">${['Active','Paused','Ended'].map(x=>`<option ${x==r.status?'selected':''}>${x}</option>`).join('')}</select></td><td><button class="b" data-rd="${i}">✕</button></td></tr>`).join('')||'<tr><td colspan=6 class=mut>No retainers yet. Add one when a client says yes.</td></tr>'}</table></div>
+ <div class="row" style="margin-top:8px"><button class="b" id="rlog">Log this month's retainer payments</button><span class=mut>Adds a payment for each active retainer that has none this month.</span></div></div>
+ <div class="card"><b>Log a payment</b><div class="row"><input id="pd" type="date" value="${today()}"><input id="pw" list="cl" placeholder="Influencer / podcast"><datalist id="cl">${S.clients.map(c=>`<option>${esc(c)}</option>`).join('')}</datalist>
  <input id="pa" type="number" step="0.01" placeholder="Amount $"><button class="b p" id="pb">Add</button></div></div>
  <div class="card tw"><b>Payments</b><table><tr><th>Date</th><th>Influencer</th><th>Amount</th><th></th></tr>${S.payments.slice().reverse().map((p,i)=>`<tr><td>${p.date}</td><td>${esc(p.who)}</td><td>${money(p.amount)}</td><td><button class="b" data-dp="${S.payments.length-1-i}">✕</button></td></tr>`).join('')}</table></div>
  <div class="card"><b>Team pay</b> <span class=mut>(when you hire: clips × rate)</span><div class="row"><input id="td" type="date" value="${today()}"><input id="tn" placeholder="Clipper"><input id="tc" type="number" placeholder="Clips"><input id="tr" type="number" step="0.01" placeholder="$ per clip"><button class="b p" id="tb">Add</button></div>
@@ -315,7 +325,11 @@ function moneyV(){const s=stats();
  <p class=mut>Owed this month: ${money(s.owed)}</p></div>`;
  $('#pb').onclick=()=>{const a=+$('#pa').value,w=$('#pw').value.trim();if(!a||!w)return;S.payments.push({date:$('#pd').value,who:w,amount:a});if(!S.clients.includes(w))S.clients.push(w);save();moneyV()};
  $('#tb').onclick=()=>{const c=+$('#tc').value,r=+$('#tr').value;if(!c||!r)return;S.team.push({date:$('#td').value,who:$('#tn').value,clips:c,rate:r});save();moneyV()};
- $('#main').onclick=e=>{if(e.target.dataset.dp){S.payments.splice(e.target.dataset.dp,1);save();moneyV()}if(e.target.dataset.dt){S.team.splice(e.target.dataset.dt,1);save();moneyV()}}}
+ $('#rt').onchange=e=>{const t=TIERS[+e.target.value];if(t){$('#rcl').value=t.clips;$('#rfe').value=t.fee}};
+ $('#rb').onclick=()=>{const w=$('#rw').value.trim(),c=+$('#rcl').value,f=+$('#rfe').value;if(!w||!c||!f)return;RS.push({who:w,clips:c,fee:f,start:$('#rsd').value||today(),status:'Active'});if(!S.clients.includes(w))S.clients.push(w);save();moneyV()};
+ $('#rlog').onclick=()=>{const m=monthKey();let n=0;for(const r of RS){if(r.status!='Active')continue;if(!S.payments.some(p=>p.who==r.who&&p.date.startsWith(m))){S.payments.push({date:today(),who:r.who,amount:+r.fee});n++}}save();alert(n?`Logged ${n} retainer payment(s) for this month.`:'Every active retainer already has a payment this month.');moneyV()};
+ $('#main').onchange=e=>{if(e.target.dataset.rst!=null){RS[+e.target.dataset.rst].status=e.target.value;save();moneyV()}};
+ $('#main').onclick=e=>{if(e.target.dataset.dp){S.payments.splice(e.target.dataset.dp,1);save();moneyV()}if(e.target.dataset.dt){S.team.splice(e.target.dataset.dt,1);save();moneyV()}if(e.target.dataset.rd!=null){RS.splice(+e.target.dataset.rd,1);save();moneyV()}}}
 function settings(){const g=S.settings,f=(k,l,t='number')=>`<div><label>${l}</label><input data-k="${k}" type="${t}" value="${esc(g[k])}"></div>`;
  $('#main').innerHTML=`<div class="card"><div class="grid">${f('key','YouTube API key','password')}${f('goal','Monthly goal ($)')}${f('daily','Daily outreach goal')}${f('minSubs','Min subscribers')}${f('maxSubs','Max subscribers')}${f('maxDays','Max days since last upload')}${f('followDays','Follow-up days')}${f('templates','Queries per niche (1-4)')}${f('geminiKey','Gemini API key (aistudio.google.com/apikey)','password')}${f('geminiModel','Gemini model','text')}<div><label>Skip podcasts with no contact info (1 = yes, 0 = no)</label><input data-k="skipNoContact" type="number" min="0" max="1" value="${esc(g.skipNoContact)}"></div><div><label>Use Gemini to structure pasted text (1 = yes, 0 = built in parser, free)</label><input data-k="useGeminiParse" type="number" min="0" max="1" value="${esc(g.useGeminiParse)}"></div><div><label>Max % Shorts in recent uploads (0 to 100, 100 = no filter)</label><input data-k="maxShorts" type="number" min="0" max="100" value="${esc(g.maxShorts)}"></div><div><label>Instagram only (1 = only queue leads with an Instagram, 0 = Instagram first, then X / TikTok / link)</label><input data-k="igOnly" type="number" min="0" max="1" value="${esc(g.igOnly)}"></div></div>
  <h4>Google Sheet sync (so your bot sees your numbers)</h4><div class="grid">${f('syncUrl','Web app URL (…/exec)','text')}${f('syncPw','Sync password','password')}</div>
