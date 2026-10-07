@@ -101,7 +101,7 @@ function todayV(){const want=Math.max(1,S.settings.daily-sentOn(today()));
  const list=S.leads.filter(l=>l.status=='New'&&(S.settings.igOnly?l.ig:(l.ig||l.x||l.tt))).sort((a,b)=>(a.ig?0:1)-(b.ig?0:1)||(a.shortsPct??50)-(b.shortsPct??50)||(a.subs||0)-(b.subs||0)).slice(0,want);
  const skip=todayV.skip=todayV.skip||new Set(),sko=todayV.skipOrder=todayV.skipOrder||[],q=list.filter(l=>!skip.has(l.id)),cur=q[0];
  const ctUrl=l=>l.ig||l.x||l.tt||l.web;
- $('#main').innerHTML=`<div class="card"><b>${sentOn(today())}/${S.settings.daily}</b> sent today · ${list.length} fresh leads queued.${sko.length?` <button class="b" data-back="1">◀ Back to ${esc((S.leads.find(x=>x.id==sko[sko.length-1])||{}).name||'last skipped')} (${sko.length} skipped)</button>`:''} Open the profile, paste the DM, attach your clip, send.</div>
+ $('#main').innerHTML=`<div class="card"><b>${sentOn(today())}/${S.settings.daily}</b> sent today · ${list.length} fresh leads queued.${(S.undo||[]).length?` <button class="b" data-undo="1" title="Puts the last lead you marked as sent back where it was">↩ Undo sent: ${esc((S.leads.find(x=>x.id==S.undo[S.undo.length-1].id)||{}).name||'last lead')}</button>`:''}${sko.length?` <button class="b" data-back="1">◀ Back to ${esc((S.leads.find(x=>x.id==sko[sko.length-1])||{}).name||'last skipped')} (${sko.length} skipped)</button>`:''} Open the profile, paste the DM, attach your clip, send.</div>
  ${cur?`<div class="card" style="border-color:var(--acc)"><b>Next up: ${esc(cur.name)}</b> <span class=mut>${(cur.subs||0).toLocaleString()} subs · ${cur.ig?'Instagram':cur.x?'X':cur.tt?'TikTok':'link'}</span>
  ${cur.epTitle?`<div class=mut>Episode: ${esc(cur.epTitle)}</div>`:''}${cur.notes&&/Clip idea/.test(cur.notes)?`<div class=mut>${esc(cur.notes.split(' | ').filter(x=>/Clip idea/.test(x))[0])}</div>`:''}<p class="dm" style="max-width:none">${esc(dm(cur))}</p>
  <div class="row"><button class="b p" data-open="${cur.id}">Open profile + copy DM</button>
@@ -121,6 +121,7 @@ function todayV(){const want=Math.max(1,S.settings.daily-sentOn(today()));
   if(d.ed)editLead(d.ed);if(d.edc)editLead(d.edc,'contact');if(d.ede)editLead(d.ede,'episode');if(d.gc)sendToClipper(d.gc);if(d.reveal)revealSample(d.reveal);
   if(d.rm){get(d.rm).status='Removed';save();todayV()}
   if(d.skip){todayV.skip.add(d.skip);todayV.skipOrder.push(d.skip);todayV()}
+  if(d.undo)undoSent();
   if(d.back){const id=todayV.skipOrder.pop();if(id)todayV.skip.delete(id);todayV()}};
  $('#main').onchange=e=>{const id=e.target.dataset.sent;if(id&&e.target.checked){markSent(S.leads.find(x=>x.id==id));save();e.target.closest('tr').style.opacity=.4;$('.card b').textContent=sentOn(today())+'/'+S.settings.daily}}}
 function normSocial(v,base){v=(v||'').trim();if(!v)return '';if(/^https?:\/\//i.test(v))return v.replace(/\/+$/,'');v=v.replace(/^@/,'').replace(/\s+/g,'');return v?base+v:''}
@@ -186,7 +187,8 @@ async function matchSamples(){let j;try{j=await (await fetch(RUNNER+'/clipper/te
  for(const t of j.templates){const tn=normName(t.name);if(!tn)continue;const hit=S.leads.find(l=>{const ln=normName(l.name);return ln&&(ln===tn||ln.includes(tn)||tn.includes(ln))});
   if(hit){Object.assign(hit,{sampleSlug:t.slug,sampleName:t.name,sampleFile:t.video_path,sampleDir:t.dir});n++;lines.push(`${t.name}  ->  ${hit.name}`)}else lines.push(`${t.name}  ->  no matching lead`)}
  save();alert(`Matched ${n} of ${j.templates.length} samples in "${j.folder}".\n\n`+lines.join('\n'));render()}
-function markSent(l){l.status='Sample Sent';if(!l.sent)l.sent=today();l.follow=addDays(today(),+S.settings.followDays||3)}
+function undoSent(){const u=(S.undo||[]).pop();if(!u)return;const l=S.leads.find(x=>x.id==u.id);if(l){l.status=u.status||'New';l.sent=u.sent;l.follow=u.follow}save();render()}
+function markSent(l){(S.undo=S.undo||[]).push({id:l.id,status:l.status,sent:l.sent||'',follow:l.follow||'',at:Date.now()});S.undo=S.undo.slice(-30);l.status='Sample Sent';if(!l.sent)l.sent=today();l.follow=addDays(today(),+S.settings.followDays||3)}
 function leads(){const q=(leads.q||'').toLowerCase(),f=leads.f||'';
  const rows=S.leads.filter(l=>(f?l.status==f:l.status!='Removed')&&(!q||(l.name+l.niche).toLowerCase().includes(q)));
  $('#main').innerHTML=`<div class="row"><input id="q" placeholder="Search" value="${esc(leads.q||'')}"><select id="f"><option value="">All statuses</option>${STATUSES.map(s=>`<option ${s==f?'selected':''}>${s}</option>`).join('')}</select><span class=mut>${rows.length} leads</span><button class="b" id="cl">Remove no-contact leads</button><button class="b p" id="fi">Find missing Instagrams</button><button class="b p" id="fe">Fill episodes + Shorts %</button><button class="b" id="rs2">Remove Shorts-heavy leads</button><button class="b" id="ms">Match existing samples</button><button class="b" id="ri">Remove leads without Instagram</button></div>
@@ -206,7 +208,7 @@ function leads(){const q=(leads.q||'').toLowerCase(),f=leads.f||'';
  $('#ri').onclick=()=>{const bad=S.leads.filter(l=>l.status=='New'&&!l.ig);if(!bad.length)return alert('Nothing to remove.');if(!confirm(`Remove ${bad.length} untouched leads without an Instagram?`))return;const ids=new Set(bad.map(l=>l.id));S.leads.forEach(l=>{if(ids.has(l.id))l.status='Removed'});save();leads()};
  $('#q').oninput=e=>{leads.q=e.target.value;leads()};$('#q').focus&&0;$('#f').onchange=e=>{leads.f=e.target.value;leads()};
  $('#main').onchange=e=>{const t=e.target,l=S.leads.find(x=>x.id==(t.dataset.st||t.dataset.nt));if(!l)return;
-  if(t.dataset.st){l.status=t.value;if(t.value=='Sample Sent')markSent(l);if(t.value=='Client'&&!S.clients.includes(l.name))S.clients.push(l.name)}else l.notes=t.value;save()}}
+  if(t.dataset.st){l.status=t.value;if(t.value=='New'){l.sent='';l.follow=''}if(t.value=='Sample Sent')markSent(l);if(t.value=='Client'&&!S.clients.includes(l.name))S.clients.push(l.name)}else l.notes=t.value;save()}}
 /* ---- YouTube ---- */
 async function yt(path,p){if(!S.settings.key)throw new Error('Add your YouTube API key in Settings first.');
  const r=await fetch('https://www.googleapis.com/youtube/v3/'+path+'?'+new URLSearchParams({...p,key:S.settings.key}));const j=await r.json();if(j.error)throw new Error(j.error.message);return j}
