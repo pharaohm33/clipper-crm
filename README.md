@@ -34,3 +34,12 @@ If Google shows a "verify you're human" check, solve it yourself in the window; 
 No Google login is needed (Google blocks sign-in inside automated browsers; the script works signed out).
 Runs use a separate Chrome profile (`~/.clipper_chrome_profile`). Keep runs small (a few niches) to avoid checks.
 Re-paste `ClipperCRM.gs` into Apps Script and redeploy (new version) to enable the append endpoint.
+
+### One-click from the website
+The **Run live and send to CRM** button on Find Podcasts starts the script for you. Browsers can't launch programs,
+so run this small helper once and leave it open:
+```bash
+cp tools/.env.example tools/.env      # then fill in CRM_SYNC_URL, CRM_SYNC_PASSWORD, YT_API_KEY (git-ignored)
+python3 tools/local_runner.py
+```
+It listens only on `127.0.0.1` and only accepts requests from this site. Your keys stay in `tools/.env`.

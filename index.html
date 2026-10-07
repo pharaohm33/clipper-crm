@@ -246,9 +246,10 @@ async function findInstagrams(list){let found=0;
 function find(){$('#main').innerHTML=`<div class="card" style="border-color:var(--acc)"><b>Find podcasts</b> <span class=mut>opens Google AI with the prompt already filled in</span>
  <div class="row"><input id="pgn" list="nl" placeholder="Niche, e.g. real estate investing"><datalist id="nl">${S.niches.map(n=>`<option>${esc(n)}</option>`).join('')}</datalist>
  <input id="pgc" type="number" value="15" style="width:80px" title="How many podcasts"><button class="b p" id="pgb">Find podcasts in Google AI</button></div>
+ <div class="row"><button class="b p" id="rl">Run live and send to CRM</button><label style="display:inline-flex;gap:4px;align-items:center"><input type="checkbox" id="rdry"> preview only</label><button class="b" id="rstop">Stop</button><span class=mut id="rs">Needs the local helper running (see below).</span></div>
  <div class="row"><input id="pgf" style="flex:1;min-width:240px" placeholder="Optional focus so results differ, e.g. in Texas, for first time buyers, run by women"></div>
  <div class="row">${S.niches.map(n=>`<button class="b" data-ai="${esc(n)}">${esc(n)}</button>`).join('')}</div>
- <span class=mut>Step 2: copy Google's answer and paste it into the box below. The prompt is also copied to your clipboard as a backup.</span></div>
+ <span class=mut>Or use the Run live button: it asks Google AI for you and sends the leads straight to the CRM. Step 2 (manual): copy Google's answer and paste it into the box below. The prompt is also copied to your clipboard as a backup.</span></div>
  <div class="card"><b>Niches</b> <span class=mut>(one per line)</span><textarea id="ni">${esc(S.niches.join('\n'))}</textarea>
  <div class="row"><button class="b" id="run">Auto search on YouTube instead</button><span class=mut>Each query costs 100 of your 10,000 free daily API units.</span></div></div>
  <div class="card"><b>Quick add</b> <span class=mut>(paste YouTube video / channel / @handle links)</span><textarea id="qa"></textarea>
@@ -276,6 +277,18 @@ function find(){$('#main').innerHTML=`<div class="card" style="border-color:var(
    const a=await addChannels(Object.values(cand),log);tot+=a;log(`  +${a} new leads (${skipped} no contact info, ${dups} already seen)`)}log(`Done. ${tot} new leads. Open the Today tab.`)}catch(e){log('Stopped: '+e.message)}};
  const openAI=n=>{n=(n||'').trim();if(!n)return log('Type a niche first.');const p=episodePrompt(n,+$('#pgc').value||15,($('#pgf').value||'').trim(),false);navigator.clipboard.writeText(p).catch(()=>{});
   window.open('https://www.google.com/search?udm=50&q='+encodeURIComponent(p),'_blank','noopener');$('#pn').value=n;$('#log').textContent='';log('Opened Google AI for "'+n+'". Copy its answer and paste it into "Paste AI results" below.')};
+ const RUN='http://127.0.0.1:8765',rc=async(p,o)=>(await fetch(RUN+p,o)).json();
+ $('#rstop').onclick=async()=>{try{await rc('/stop',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})}catch(e){}};
+ $('#rl').onclick=async()=>{$('#log').textContent='';let st;
+  try{st=await rc('/status')}catch(e){log('Helper not running. Open Terminal and run:\n   cd ~/clipper-crm && python3 tools/local_runner.py\nleave that window open, then click this again.');$('#rs').textContent='Helper not detected';return}
+  if(st.running)return log('A run is already in progress.');
+  const dry=$('#rdry').checked;if(!dry&&!st.configured)return log('The helper has no CRM link yet. Copy tools/.env.example to tools/.env, fill in CRM_SYNC_URL and CRM_SYNC_PASSWORD, restart the helper. Or tick "preview only".');
+  const one=$('#pgn').value.trim(),niches=one?[one]:S.niches;
+  const r=await rc('/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({niches,focus:($('#pgf').value||'').trim(),count:+$('#pgc').value||10,dry})});
+  if(r.error)return log('Could not start: '+r.error);
+  $('#rs').textContent='Running…';log(`Running on ${niches.length} niche(s). A Chrome window will open. If Google asks you to verify, solve it there.`);
+  let since=0,go=true;while(go){await new Promise(x=>setTimeout(x,2000));try{const l=await rc('/log?since='+since);since=l.next;l.lines.forEach(t=>log(t));go=l.running}catch(e){log('Lost contact with the helper.');go=false}}
+  $('#rs').textContent='Finished';if(!dry){log('Merging new leads into the CRM…');await mergePull();log('Done. Check the Leads tab and Today.')}};
  $('#pgb').onclick=()=>openAI($('#pgn').value||S.niches[0]);
  $('#main').onclick=e=>{if(e.target.dataset.ai)openAI(e.target.dataset.ai)};
  $('#pb2').onclick=async()=>{$('#log').textContent='';const t=$('#pt').value.trim();if(!t)return log('Paste some text first.');

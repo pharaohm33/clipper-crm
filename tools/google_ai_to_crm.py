@@ -37,6 +37,16 @@ EXTRACT_JS = """() => {
 }"""
 
 
+def load_env():
+    f = Path(__file__).resolve().parent / ".env"
+    if f.exists():
+        for line in f.read_text().splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+
+
 def build_prompt(niche, count, focus=""):
     return (f"List {count} small {niche} podcasts{' ' + focus if focus else ''} on YouTube (1k to 150k subscribers). For each one give the YouTube "
             "channel link, a recent full length episode title with its direct YouTube watch link, and the show's "
@@ -235,6 +245,7 @@ def main():
     ap.add_argument("--min-subs", type=int, default=1000)
     ap.add_argument("--max-subs", type=int, default=150000)
     a = ap.parse_args()
+    load_env()
 
     from playwright.sync_api import sync_playwright
     url, pw, key = os.getenv("CRM_SYNC_URL"), os.getenv("CRM_SYNC_PASSWORD"), os.getenv("YT_API_KEY")
