@@ -17,23 +17,35 @@ REPO = Path(os.getenv("CLIPPER_REPO") or Path.home() / "instagram-video-generato
 URL = os.getenv("DEEPSEEK_API_URL", "https://api.deepseek.com/chat/completions")
 MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 
-SYSTEM = """You help a video editor write a cold email to a podcast host. The editor cut a short clip from the host's own episode.
+SYSTEM = """You help a video editor write a cold email to a podcast host. The editor cut a short clip from one of the host's episodes.
 The email has this sentence: "I really liked ____, so I made a short clip out of it."
 
-Write ONLY the words that fill the blank: one short phrase (6 to 18 words) naming ONE specific idea, story or point the host makes in the clip transcript.
+Write ONLY the words that fill the blank: one short phrase (6 to 18 words) naming ONE specific idea, story or point that comes up in the clip transcript.
+
+IMPORTANT: a transcript does not say who is speaking, and the host often has a guest. So never say WHO said it and never use "you" or "your".
+Start with "the part about", "the point about", "the story about", "the discussion about" or "the idea that".
 
 Good fills, for the style only:
-- the part where you explain why you bought near Music Row before running the numbers
-- your story about the first deal that almost fell through
-- how you describe pricing a flip when the comps are thin
+- the part about buying near Music Row before running the numbers
+- the story about the first deal that almost fell through
+- the discussion about pricing a flip when the comps are thin
 
 Hard rules:
 - Use only what is in the transcript. Never invent facts, numbers, names or quotes, and never claim what other people or most people do.
-- Start with "the part where you", "your story about", "your point about", "how you" or "your take on".
+- Never use the words you, your, you're, I, we or our.
 - Plain words, no hype, no flattery words ("amazing", "incredible", "game changer").
 - No hyphens, no em dashes, no quotation marks, no emojis, no hashtags, no exclamation marks.
 - No ending punctuation, no greeting, no extra sentences.
 Reply with only the phrase."""
+
+
+REWRITE = """Rewrite this phrase so that it does not say who said it. Keep the same topic and the same level of detail.
+It will complete the sentence "I really liked ____, so I made a short clip out of it."
+Start with "the part about", "the point about", "the story about", "the discussion about" or "the idea that".
+Never use the words you, your, you're, I, we or our. No hyphens, no quotation marks, no ending punctuation.
+Reply with only the rewritten phrase."""
+
+SPEAKER = re.compile(r"\b(you|your|you're|you've|you'll|yours|we|our|i|my)\b", re.I)
 
 
 def deepseek_key():
@@ -64,24 +76,43 @@ def clean(text):
     return t
 
 
+def _ask(system, user, key, timeout=60, max_tokens=60):
+    body = json.dumps({"model": MODEL, "temperature": 0.4, "max_tokens": max_tokens,
+                       "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}).encode()
+    req = urllib.request.Request(URL, data=body, headers={"Content-Type": "application/json", "Authorization": "Bearer " + key})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return clean(json.loads(r.read())["choices"][0]["message"]["content"])
+
+
+def neutralize(phrase, timeout=60):
+    """Rewrites an existing topic phrase so it does not say who said it. '' when it cannot be done cleanly."""
+    key = deepseek_key()
+    if not phrase or not key:
+        return ""
+    if not SPEAKER.search(phrase) and re.match(r"(the|a) (part|point|story|discussion|idea)", phrase, re.I):
+        return phrase
+    try:
+        out = _ask(REWRITE, phrase, key, timeout)
+    except Exception:
+        return ""
+    return out if len(out.split()) >= 4 and not SPEAKER.search(out) else ""
+
+
 def write_line(podcast, episode_title, clip_title, hook, transcript, timeout=60):
-    """One personalized note, or '' when there is not enough to say something real (or the key/network is missing)."""
+    """One topic phrase that does not say who said it, or '' when there is not enough to say something real (or the key/network is missing)."""
     transcript = re.sub(r"\s+", " ", transcript or "").strip()
     key = deepseek_key()
     if len(transcript.split()) < 25 or not key:
         return ""
     user = (f"Podcast: {podcast}\nEpisode: {episode_title or 'unknown'}\nClip title: {clip_title or 'unknown'}\n"
             f"On screen hook: {hook or 'none'}\n\nClip transcript:\n{transcript[:3500]}")
-    body = json.dumps({"model": MODEL, "temperature": 0.6, "max_tokens": 60,
-                       "messages": [{"role": "system", "content": SYSTEM}, {"role": "user", "content": user}]}).encode()
-    req = urllib.request.Request(URL, data=body, headers={"Content-Type": "application/json", "Authorization": "Bearer " + key})
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            out = json.loads(r.read())["choices"][0]["message"]["content"]
+        line = _ask(SYSTEM, user, key, timeout)
     except Exception:
         return ""
-    line = clean(out)
-    return line if len(line.split()) >= 4 else ""
+    if SPEAKER.search(line):  # it slipped; rewrite once, and give up rather than send something that credits a speaker
+        line = neutralize(line, timeout)
+    return line if len(line.split()) >= 4 and not SPEAKER.search(line) else ""
 
 
 CLASSIFY = """You read a reply to a cold email. The sender offered to send a short video clip made from the recipient's podcast episode, free.

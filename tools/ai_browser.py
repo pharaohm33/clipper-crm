@@ -6,6 +6,7 @@ Chrome is started once with a debugging port and its own profile (the same one t
 verification you solved earlier is remembered). Every lead search or fit check connects to that window, reuses its tab, and then
 only disconnects, so the window is still there for the next job. Close it yourself whenever you like, or press the button in the CRM.
 """
+import fcntl
 import os
 import subprocess
 import sys
@@ -16,6 +17,41 @@ from pathlib import Path
 PORT = int(os.getenv("AI_BROWSER_PORT", "9223"))
 PROFILE = Path.home() / ".clipper_chrome_profile"
 CHROME_PATHS = ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "/usr/bin/google-chrome", "/usr/bin/chromium", "chrome"]
+
+
+LOCK_FILE = PROFILE / "ai.lock"
+_lock_fh = None
+
+
+def _acquire(wait_s=900):
+    """Only one job may use the shared Chrome window at a time (two jobs typing into it at once scramble both questions)."""
+    global _lock_fh
+    PROFILE.mkdir(parents=True, exist_ok=True)
+    fh = open(LOCK_FILE, "w")
+    start, told = time.time(), False
+    while True:
+        try:
+            fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            _lock_fh = fh
+            return
+        except OSError:
+            if not told:
+                print("  (another job is using the Google AI window, waiting for it to finish...)")
+                told = True
+            if time.time() - start > wait_s:
+                raise RuntimeError("the Google AI window stayed busy for 15 minutes")
+            time.sleep(3)
+
+
+def _release_lock():
+    global _lock_fh
+    if _lock_fh:
+        try:
+            fcntl.flock(_lock_fh, fcntl.LOCK_UN)
+            _lock_fh.close()
+        except Exception:
+            pass
+        _lock_fh = None
 
 
 def alive():
@@ -47,6 +83,7 @@ def ensure_chrome():
 def get_page(p):
     """(browser, context, page). Reuses the open window and its Google tab. Falls back to a normal one-off Chrome if the long lived one cannot start.
     Always finish with release(browser): that disconnects without closing the window."""
+    _acquire()
     if ensure_chrome():
         browser = p.chromium.connect_over_cdp(f"http://127.0.0.1:{PORT}")
         ctx = browser.contexts[0] if browser.contexts else browser.new_context()
@@ -68,6 +105,7 @@ def release(browser):
         browser.close()
     except Exception:
         pass
+    _release_lock()
 
 
 def close_window():

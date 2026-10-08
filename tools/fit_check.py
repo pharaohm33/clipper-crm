@@ -7,6 +7,7 @@ Fit check through Google AI Mode in Chrome (no API key and no quota): is each le
 Prints one 'FIT {json}' line per lead for the CRM to read. Uses the same separate Chrome profile as google_ai_to_crm.py, so a
 Google verification you solved before usually does not come back. If Google asks again, solve it in the window.
 """
+import difflib
 import json
 import random
 import re
@@ -25,20 +26,30 @@ def build_prompt(l):
             "media company or network, a corporate marketing department, about 50 or more employees, publicly traded, or the host is an employee and not the owner. Good fit signs: the host "
             "is the owner, a solo person or small team, their own agency, practice, brokerage, builder, coaching business or product. Affordability signs: sponsors, paid products or programs, "
             "several revenue streams. Do not guess, say unknown when you cannot find it. End your answer with exactly one line of JSON with these keys: "
-            "decider (owner, team, corporate or unknown), size (solo, small, mid, large or unknown), big_company (true or false), can_afford (yes, maybe, no or unknown), "
+            "show (the exact show name you are answering about), decider (owner, team, corporate or unknown), size (solo, small, mid, large or unknown), big_company (true or false), can_afford (yes, maybe, no or unknown), "
             "reasons (a list of up to 3 short strings), confidence (a number from 0 to 1).")
 
 
-def parse(text):
-    """The last JSON object in the answer that has real values (the echoed question contains a template full of | bars, which is skipped)."""
+def same_show(a, b):
+    norm = lambda s: re.sub(r"[^a-z0-9 ]", "", str(s or "").lower()).strip()
+    a, b = norm(a), norm(b)
+    return bool(a and b) and (a in b or b in a or difflib.SequenceMatcher(None, a, b).ratio() >= 0.55)
+
+
+def parse(text, name=""):
+    """The last JSON object in the answer that has real values AND is about this lead. (The echoed question holds a template full of | bars,
+    which is skipped, and if the page ever holds answers for two leads, only the one that names this show is used.)"""
     found = None
     for m in re.finditer(r"\{[^{}]*\"decider\"[^{}]*\}", text or "", re.S):
         try:
             o = json.loads(re.sub(r",\s*}", "}", m.group(0)))
         except Exception:
             continue
-        if str(o.get("decider", "")).lower() in DECIDERS:
-            found = o
+        if str(o.get("decider", "")).lower() not in DECIDERS:
+            continue
+        if name and not same_show(o.get("show"), name):
+            continue
+        found = o
     return found
 
 
@@ -50,7 +61,7 @@ def main():
         for n, l in enumerate(leads):
             print(f"[{n + 1}/{len(leads)}] checking {l.get('name')} with Google AI ...")
             data = G.ask_google_ai(page, build_prompt(l))
-            o = parse((data or {}).get("text", ""))
+            o = parse((data or {}).get("text", ""), l.get("name"))
             if not o:
                 print("  no usable answer, leaving this lead unchecked")
                 print("FIT " + json.dumps({"id": l["id"], "unchecked": True}))

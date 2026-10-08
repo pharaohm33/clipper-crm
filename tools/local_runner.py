@@ -643,6 +643,11 @@ class H(BaseHTTPRequestHandler):
                 else:
                     errors.append(shared.get("error") or str(code))
             return self._send(200, {"links": links, "errors": errors})
+        if self.path == "/personal/neutralize":
+            out = {}
+            for k, phrase in (body.get("phrases") or {}).items():
+                out[k] = personalize.neutralize(str(phrase)[:300])
+            return self._send(200, {"phrases": out})
         if self.path == "/unibox/yes":
             try:
                 return self._send(200, auto_reply.preview(str(body.get("to") or ""), str(body.get("name") or ""), str(body.get("slug") or "")))
