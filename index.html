@@ -251,7 +251,7 @@ function prepareClips(n,onlyWithEmail){
   if(r=parseTag(t,'PERSONAL')){const l=S.leads.find(x=>x.id==r.id);if(l)l.personalLine=r.line||''}
   if(r=parseTag(t,'PIPE')){const l=S.leads.find(x=>x.id==r.id);if(l)Object.assign(l,{clipLink:r.link,clipFile:r.clip,clipTitle:r.title,clipHook:r.hook||'',personalLine:r.personal||'',sampleSlug:r.slug,sampleName:r.name,sampleFile:r.video,sampleDir:r.dir,clipFail:''})}
   else if(r=parseTag(t,'PIPEFAIL')){const l=S.leads.find(x=>x.id==r.id);if(l)l.clipFail=r.why}})}
-const emailPayload=l=>({id:l.id,name:l.name,niche:l.niche,epTitle:l.epTitle,email:l.email,clipLink:l.clipLink,subject:l.emailSubject,personal:l.personalLine||''})
+const emailPayload=l=>({id:l.id,name:l.name,niche:l.niche,epTitle:l.epTitle,email:l.email,clipLink:l.clipLink,clipReady:!!(l.clipFile||(l.clipFiles||[]).length),clipLinks:l.clipLinks||[],subject:l.emailSubject,personal:l.personalLine||''})
 const tpl=()=>({subject:S.settings.emailSubject,body:S.settings.emailBody,variants:(S.settings.emailSubjectB||S.settings.emailBodyB)?[{subject:S.settings.emailSubjectB,body:S.settings.emailBodyB}]:[],skip_providers:S.settings.emailSkipMS===false?[]:['microsoft']});
 async function previewEmails(){ES.msg='';const leads=S.leads.filter(isEmailReady).slice(0,+S.settings.emailLimit||20).map(emailPayload);
  if(!leads.length){ES.preview=null;ES.msg='Nothing is ready to email yet (a lead needs an email AND a prepared clip).';return emailDyn()}
