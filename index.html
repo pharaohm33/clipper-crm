@@ -333,13 +333,20 @@ Never guess. Use "unknown" when you cannot find it. Return ONLY a JSON object:
  const t=await geminiCall(prompt,true,log);const m=t.match(/\{[\s\S]*\}/);if(!m)throw new Error('no answer');
  const o=JSON.parse(m[0].replace(/,\s*([\]}])/g,'$1'));
  l.fit={decider:String(o.decider||'unknown'),size:String(o.size||'unknown'),big:!!o.big_company,afford:String(o.can_afford||'unknown'),reasons:(o.reasons||[]).slice(0,3).map(String),conf:+o.confidence||0,at:Date.now()};save();return l.fit}
-async function fitBatch(n,log){const g=S.settings;if(!g.geminiKey){log('Fit check skipped: add your Gemini API key in Settings (free at aistudio.google.com/apikey).');return{checked:0,removed:0}}
- const todo=S.leads.filter(l=>l.status=='New'&&isHot(l)&&l.email&&!l.fit).slice(0,n);let removed=0,checked=0;
- for(const l of todo){if(AP&&AP.stop)break;try{const f=await fitCheck(l);checked++;
-   const bad=f.conf>=0.6&&(f.big||f.decider==='corporate'||f.afford==='no');
+const applyFit=(l,o)=>{l.fit={decider:String(o.decider||'unknown'),size:String(o.size||'unknown'),big:!!o.big_company,afford:String(o.can_afford||'unknown'),reasons:(o.reasons||[]).slice(0,3).map(String),conf:+o.confidence||0,at:Date.now()}};
+async function fitViaChrome(todo,log){log(`  Opening Chrome to ask Google AI about ${todo.length} lead(s). If Google asks you to verify, solve it in that window.`);
+ await helperJob('/fit/run',{leads:todo.map(l=>({id:l.id,name:l.name,url:l.url,web:l.web,subs:l.subs}))},t=>{const r=parseTag(t,'FIT');if(r&&!r.unchecked){const l=S.leads.find(x=>x.id==r.id);if(l)applyFit(l,r)}});save()}
+async function fitBatch(n,log){const g=S.settings;
+ const todo=S.leads.filter(l=>l.status=='New'&&isHot(l)&&l.email&&!l.fit).slice(0,n);let checked=0,removed=0;
+ if(g.geminiKey&&!AP.fitChrome){for(const l of todo){if(AP.stop)break;try{await fitCheck(l);checked++}catch(e){
+    if(/quota|exceeded|429|rate/i.test(e.message)){AP.fitChrome=true;log('  Gemini quota is used up, switching to Google AI in Chrome (no quota).');break}
+    if(/key/i.test(e.message)){log('  Gemini key problem: '+e.message.slice(0,80));AP.fitChrome=true;break}
+    log('  could not check '+l.name.slice(0,30)+': '+e.message.slice(0,80))}}}
+ const rest=todo.filter(l=>!l.fit);
+ if(rest.length&&(AP.fitChrome||!g.geminiKey)&&!AP.stop){try{await fitViaChrome(rest,log)}catch(e){log('  Chrome fit check failed: '+e.message.slice(0,80))}}
+ for(const l of todo){if(!l.fit)continue;const f=l.fit,bad=f.conf>=0.6&&(f.big||f.decider==='corporate'||f.afford==='no');if(l.fit.counted)continue;l.fit.counted=1;checked++;
    log(`  ${l.name.slice(0,34)}: ${bad?'NOT a fit':'ok'} (${f.decider}, ${f.size}, can pay: ${f.afford}${f.reasons[0]?'; '+f.reasons[0]:''})`);
-   if(bad){l.status='Removed';l.notes=((l.notes?l.notes+' | ':'')+'Removed by the fit check: '+(f.reasons.join('; ')||'looks like a big company or cannot decide alone'));removed++}
-  }catch(e){log('  could not check '+l.name.slice(0,30)+': '+e.message.slice(0,80));if(/key/i.test(e.message))break}}
+   if(bad){l.status='Removed';l.notes=((l.notes?l.notes+' | ':'')+'Removed by the fit check: '+(f.reasons.join('; ')||'looks like a big company or cannot decide alone'));removed++}}
  save();return{checked,removed}}
 function apWork(){const hot=S.leads.filter(l=>l.status=='New'&&isHot(l));const full=apQueue()>=(+S.settings.apMax||25);
  const needEmail=full?0:hot.filter(l=>!l.email&&l.episode&&!(l.emailChecked&&Date.now()-l.emailChecked<14*DAY)).length;

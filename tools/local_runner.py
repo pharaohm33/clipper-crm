@@ -69,6 +69,22 @@ def run_job(argv):
         STATE["running"] = False
 
 
+def run_fit(path):
+    env = {**os.environ, "PYTHONUNBUFFERED": "1"}
+    try:
+        proc = subprocess.Popen([sys.executable, "-u", str(HERE / "fit_check.py"), path], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                text=True, env=env, cwd=str(HERE))
+        STATE["proc"] = proc
+        for line in proc.stdout:
+            STATE["log"].append(line.rstrip())
+        proc.wait()
+        STATE["log"].append(f"[runner] fit check finished (exit {proc.returncode})")
+    except Exception as e:
+        STATE["log"].append(f"[runner] fit check failed to start: {e}")
+    finally:
+        STATE["running"] = False
+
+
 def outreach_settings():
     """The clipper settings every outreach template starts with (tools/outreach_settings.json; edit that file to change them)."""
     try:
@@ -646,6 +662,20 @@ class H(BaseHTTPRequestHandler):
                 return self._send(200, {"ok": cold_email.send_saved_reply(mid)})
             except Exception as e:
                 return self._send(500, {"error": str(e)[:200]})
+        if self.path == "/fit/run":
+            leads = [{k: str(l.get(k) or "")[:300] for k in ("id", "name", "url", "web", "subs")} for l in (body.get("leads") or [])][:40]
+            if not leads:
+                return self._send(400, {"error": "no leads to check"})
+            with LOCK:
+                if STATE["running"]:
+                    return self._send(409, {"error": "a run is already in progress"})
+                import tempfile
+                f = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8")
+                json.dump(leads, f)
+                f.close()
+                STATE.update(running=True, log=[f"[runner] checking {len(leads)} lead(s) with Google AI"])
+                threading.Thread(target=run_fit, args=(f.name,), daemon=True).start()
+            return self._send(200, {"ok": True})
         if self.path == "/awake":
             if "on" in body:
                 return self._send(200, awake_set(bool(body.get("on")), body.get("minutes") or 180))
