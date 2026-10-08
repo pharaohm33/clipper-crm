@@ -152,7 +152,8 @@ def stats(log=None):
 
 
 def sent_entries(log=None):
-    return [e for e in (log if log is not None else read_log()) if e.get("status") in ("sent", "drafted")]
+    """Real sends only. A draft is not a send: it must not count toward the 90 day rule, the warm-up ramp or reply checks."""
+    return [e for e in (log if log is not None else read_log()) if e.get("status") == "sent"]
 
 
 # ----------------------------------------------------------------------------------------- rotation / caps
@@ -210,13 +211,24 @@ def _prose(text):
     return re.sub(r"\s*[—–]\s*", ", ", text).replace("-", " ")
 
 
+def short_name(name):
+    """The show's name as a person would say it: 'D.J. Paris - Keeping It Real Podcast' -> 'Keeping It Real Podcast',
+    'Rosemary Lewis | Real Estate Coach' -> 'Rosemary Lewis', 'Zak Schmidt- Dallas Texas Homes' -> 'Zak Schmidt'."""
+    name = re.sub(r"\s+", " ", str(name or "")).strip()
+    parts = [p.strip() for p in re.split(r"\s*[|\u2013\u2014:]\s*|\s+-\s+|-\s+", name) if p.strip()]
+    if len(parts) > 1:
+        named = [p for p in parts if re.search(r"podcast|show|radio|talk|cast\b", p, re.I)]
+        return (named or parts)[0]
+    return name or "your podcast"
+
+
 def render(template, lead, cfg, step=0, subject_for_reply=None):
     """(subject, body) for one lead. Spintax picks are fixed per lead, so a re-preview shows the same email that will go out."""
     seed = f"{lead.get('id')}:{step}"
     links = [x for x in (lead.get("clipLinks") or []) if x] or [x for x in [lead.get("clipLink") or lead.get("link")] if x]
     fill = lambda t: (_prose(spin(t, seed))
                       .replace("{niche}", str(lead.get("niche") or "your").replace("-", " "))
-                      .replace("{name}", str(lead.get("name") or "your podcast"))
+                      .replace("{name}", short_name(lead.get("name")))
                       .replace("{episode}", str(lead.get("epTitle") or "your recent episode"))
                       .replace("{clips}", "a short clip" if len(links) < 2 else ("three" if len(links) == 3 else "a few") + " short clips")
                       .replace("{they_are}", "It is" if len(links) < 2 else "They are")
@@ -289,7 +301,14 @@ def plan(leads, template, mode="preview", limit=20, ignore_window=False, step=0)
     """Decides, for each lead in order, what would happen. No sending. Yields dicts (status: ready/skip)."""
     cfg, log = load_config(), read_log()
     used, recent = {}, {e["to"].lower() for e in sent_entries(log) if e.get("ts", 0) > time.time() - 90 * 86400 and e.get("step", 0) == step}
-    drafted = {e["to"].lower() for e in log if e.get("status") == "drafted" and e.get("ts", 0) > time.time() - 14 * 86400}
+    d_ts, r_ts = {}, {}
+    for e in log:
+        k = e.get("to", "").lower()
+        if e.get("status") == "drafted":
+            d_ts[k] = max(d_ts.get(k, 0), e.get("ts", 0))
+        elif e.get("status") == "draft_removed":
+            r_ts[k] = max(r_ts.get(k, 0), e.get("ts", 0))
+    drafted = {k for k, t in d_ts.items() if t > time.time() - 14 * 86400 and t > r_ts.get(k, 0)}
     n = 0
     for ld in leads:
         to = (ld.get("email") or "").strip().lower()
@@ -499,3 +518,36 @@ def check_bounces(log_fn=print):
         except Exception as e:
             errors.append(f"{acct['email']}: {str(e)[:120]}")
     return {"bounced": bounced, "errors": errors}
+
+
+def delete_drafts(addresses, log_fn=print):
+    """Removes the drafts THIS tool saved for these recipients (found by the Message-ID in the log) so they can be written again.
+    Nothing else in the Drafts folder is touched. Returns the addresses whose draft was removed."""
+    cfg, log = load_config(), read_log()
+    want = {a.lower() for a in addresses}
+    mine = {}
+    for e in log:
+        if e.get("status") == "drafted" and e.get("to", "").lower() in want and e.get("message_id"):
+            mine.setdefault(e["from"], {})[e["message_id"]] = e["to"].lower()
+    removed = set()
+    for acct in cfg.get("accounts", []):
+        ids = mine.get(acct["email"])
+        if not ids:
+            continue
+        try:
+            imap = imaplib.IMAP4_SSL(acct.get("imap_host") or acct["smtp_host"].replace("smtp.", "imap."))
+            imap.login(acct.get("username") or acct["email"], acct["password"])
+            imap.select("Drafts")
+            for mid, to in ids.items():
+                typ, data = imap.search(None, "HEADER", "Message-ID", mid)
+                for num in (data[0].split() if typ == "OK" and data and data[0] else []):
+                    imap.store(num, "+FLAGS", "\\Deleted")
+                    removed.add(to)
+            imap.expunge()
+            imap.logout()
+        except Exception as e:
+            log_fn(f"could not clean drafts in {acct['email']}: {str(e)[:100]}")
+    for to in removed:
+        append_log({"ts": time.time(), "to": to, "status": "draft_removed"})
+        log_fn(f"removed old draft for {to}")
+    return sorted(removed)

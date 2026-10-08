@@ -88,7 +88,7 @@ def handle(found, log_fn=print):
             log_fn(f"no link for {to}: {err}")
             continue
         body = (cold_email.spin(REPLY_BODY, f"reply:{to}")
-                .replace("{name}", str(f.get("name") or "channel"))
+                .replace("{name}", cold_email.short_name(f.get("name")))
                 .replace("{link}", link)
                 .replace("{sender}", str(cfg.get("sender_name") or ""))
                 .replace("{phone}", str(cfg.get("phone") or "")))
