@@ -16,7 +16,7 @@ var SHEETS = {
   dash: 'Dashboard', leads: 'Leads', today: 'Today', clients: 'Clients',
   pay: 'Payments', team: 'Team Pay', log: 'Daily Outreach Log', kpi: 'KPI Summary', queue: 'Search Queue', quick: 'Quick Add', helper: 'Search Helper', settings: 'Settings'
 };
-var STATUSES = ['New', 'Sample Sent', 'Replied', 'Interested', 'Client', 'No Response', 'Not Interested', 'Removed'];
+var STATUSES = ['New', 'Sample Sent', 'Contacted - no sample sent', 'Replied', 'Interested', 'Client', 'No Response', 'Not Interested', 'Removed'];
 var L = { added: 1, name: 2, niche: 3, url: 4, subs: 5, last: 6, episode: 7, ig: 8, x: 9, tt: 10, web: 11,
           status: 12, sent: 13, follow: 14, notes: 15, dm: 16, cid: 17, shorts: 18 };
 var QUERY_TEMPLATES = ['{n} podcast full episode', '{n} podcast interview', 'how to start a {n} podcast', '{n} podcast new episode'];
@@ -101,7 +101,7 @@ function setupLeads_(ss) {
   sh.getRange('L2:L2000').setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList(STATUSES, true).build());
   var rules = [
     ['Client', '#bbf7d0'], ['Interested', '#fde68a'], ['Replied', '#bfdbfe'], ['Sample Sent', '#e9d5ff'],
-    ['Not Interested', '#fecaca'], ['No Response', '#e5e7eb']
+    ['Not Interested', '#fecaca'], ['No Response', '#e5e7eb'], ['Contacted - no sample sent', '#fed7aa']
   ].map(function (p) {
     return SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo(p[0]).setBackground(p[1]).setRanges([sh.getRange('L2:L2000')]).build();
   });
