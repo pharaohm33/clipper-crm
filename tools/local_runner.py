@@ -566,7 +566,20 @@ class H(BaseHTTPRequestHandler):
         self._send(200, {"ok": True})
 
 
+def keep_clipper_awake():
+    """The clipper app shuts itself down after an hour with no open page. While this helper is running (and the app is up),
+    ping it every 30 seconds so unattended runs are not cut off. Set KEEP_CLIPPER_ALIVE=0 to turn this off."""
+    while True:
+        time.sleep(30)
+        try:
+            urllib.request.urlopen(urllib.request.Request(APP_URL + "/api/heartbeat", data=b"{}", headers={"Content-Type": "application/json"}), timeout=5).read()
+        except Exception:
+            pass
+
+
 if __name__ == "__main__":
+    if os.getenv("KEEP_CLIPPER_ALIVE", "1") != "0":
+        threading.Thread(target=keep_clipper_awake, daemon=True).start()
     load_env()
     srv = ThreadingHTTPServer(("127.0.0.1", PORT), H)
     print(f"Clipper runner listening on http://127.0.0.1:{PORT}  (leave this window open, Ctrl+C to stop)")

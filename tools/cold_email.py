@@ -413,6 +413,11 @@ def run(leads, template, mode, limit=20, ignore_window=False, step=0, log_fn=pri
         append_log(entry)
         results.append({**item, "status": status, "message_id": msg["Message-ID"]})
         log_fn(f"{status} {item['to']} via {item['from']}")
+    if mode == "send":
+        try:
+            delete_drafts([r["to"] for r in results if r.get("status") == "sent"], log_fn=lambda m: None)
+        except Exception:
+            pass
     return results
 
 
