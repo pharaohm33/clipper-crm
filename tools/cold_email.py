@@ -208,17 +208,27 @@ def _prose(text):
 
 
 def short_name(name):
-    """The show's name as a person would say it: 'D.J. Paris - Keeping It Real Podcast' -> 'Keeping It Real Podcast',
-    'Rosemary Lewis | Real Estate Coach' -> 'Rosemary Lewis', 'Zak Schmidt- Dallas Texas Homes' -> 'Zak Schmidt'."""
+    """The show's name as a person would say it, not the full channel title.
+    'D.J. Paris - Keeping It Real Podcast' -> 'Keeping It Real Podcast', 'Rosemary Lewis | Real Estate Coach' -> 'Rosemary Lewis',
+    'ActionCOACH Business Coaching UK' -> 'ActionCOACH', 'The Real Estate Guys Radio Show' -> 'The Real Estate Guys'."""
     name = re.sub(r"\s+", " ", str(name or "")).strip()
     parts = [p.strip() for p in re.split(r"\s*[|\u2013\u2014:]\s*|\s+-\s+|-\s+", name) if p.strip()]
     if len(parts) > 1:
-        named = [p for p in parts if re.search(r"podcast|show|radio|talk|cast\b", p, re.I)]
-        return (named or parts)[0]
-    return name or "your podcast"
-
-
-SHOWLIKE = re.compile(r"podcast|\bshow\b|radio|\btalk\b|cast\b|\bhour\b|\blive\b", re.I)
+        named = [p for p in parts if re.search(r"podcast|\bshow\b|radio|\btalk\b|cast\b", p, re.I)]
+        name = (named or parts)[0]
+    region = re.compile(r"\s+(UK|U\.K\.|US|USA|U\.S\.|AU|CA|Canada|Australia|Official|HD|TV|Channel)$", re.I)
+    tail = re.compile(r"\s+(business coaching|business coach|business consulting|coaching|consulting|consultants?|official channel|official|channel|"
+                      r"media|network|academy|group|llc|inc\.?|company|radio show|show|radio)$", re.I)
+    words = name.split()
+    while len(words) > 1 and region.search(" ".join(words)):
+        words = region.sub("", " ".join(words)).split()
+    while len(words) > 2 and tail.search(" ".join(words)):
+        words = tail.sub("", " ".join(words)).split()
+    if len(words) > 5:  # still very long: keep the first few words, never ending on a joining word
+        words = words[:4]
+        while len(words) > 1 and words[-1].lower() in ("and", "of", "to", "the", "for", "with", "in", "a", "an", "&"):
+            words.pop()
+    return " ".join(words) or "your podcast"
 
 
 def _title_case(s):
