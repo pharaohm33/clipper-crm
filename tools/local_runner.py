@@ -61,6 +61,9 @@ def run_job(argv):
         STATE["proc"] = proc
         for line in proc.stdout:
             STATE["log"].append(line.rstrip())
+            if "asking you to verify" in line:
+                if phone_notify("Google needs you", "Google is asking for a verification and the lead search is waiting (up to 5 minutes). " + REMOTE_HINT, key="captcha"):
+                    STATE["log"].append("[runner] sent a phone alert")
         proc.wait()
         STATE["log"].append(f"[runner] finished (exit {proc.returncode})")
     except Exception as e:
@@ -77,6 +80,9 @@ def run_fit(path):
         STATE["proc"] = proc
         for line in proc.stdout:
             STATE["log"].append(line.rstrip())
+            if "asking you to verify" in line:
+                if phone_notify("Google needs you", "Google is asking for a verification and the fit check is waiting (up to 5 minutes). " + REMOTE_HINT, key="captcha"):
+                    STATE["log"].append("[runner] sent a phone alert")
         proc.wait()
         STATE["log"].append(f"[runner] fit check finished (exit {proc.returncode})")
     except Exception as e:
@@ -110,6 +116,32 @@ def app_call(path, payload=None, timeout=5):
 
 
 AWAKE = {"proc": None, "until": 0}
+
+
+PHONE_LAST = {}
+REMOTE_HINT = os.getenv("PHONE_REMOTE_HINT", "To fix it from your phone: open RVNC Viewer, connect to your Mac (emmanuels-macbook-air.taile1d9f0.ts.net or its Tailscale address), find the Chrome window and complete the check there.")
+
+
+def phone_ready():
+    return bool(os.getenv("PHONE_BOT_TOKEN") and os.getenv("PHONE_CHAT_ID"))
+
+
+def phone_notify(title, message, key=None, every=600):
+    """A push message to your phone through your Telegram bot. The same alert is not repeated within `every` seconds. Returns True if sent."""
+    if not phone_ready():
+        return False
+    k = key or title
+    if time.time() - PHONE_LAST.get(k, 0) < every:
+        return False
+    PHONE_LAST[k] = time.time()
+    text = f"{title}\n{message}"
+    try:
+        req = urllib.request.Request(f"https://api.telegram.org/bot{os.environ['PHONE_BOT_TOKEN']}/sendMessage",
+                                     data=json.dumps({"chat_id": os.environ["PHONE_CHAT_ID"], "text": text[:900]}).encode(), headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=15).read()
+        return True
+    except Exception:
+        return False
 
 
 def awake_status():
@@ -527,8 +559,8 @@ class H(BaseHTTPRequestHandler):
             return
         u = urlparse(self.path)
         if u.path == "/status":
-            self._send(200, {"ok": True, "running": STATE["running"], "lines": len(STATE["log"]),
-                             "configured": bool(os.getenv("CRM_SYNC_URL") and os.getenv("CRM_SYNC_PASSWORD")),
+            self._send(200, {"ok": True, "phone": phone_ready(), "running": STATE["running"], "lines": len(STATE["log"]),
+                             "configured": bool(os.getenv("CRM_SYNC_URL") and os.getenv("CRM_SYNC_PASSWORD")), "phone": phone_ready(),
                              "yt": bool(os.getenv("YT_API_KEY"))})
         elif u.path == "/awake":
             self._send(200, awake_status())
@@ -691,7 +723,11 @@ class H(BaseHTTPRequestHandler):
             if sys.platform == "darwin" and msg:
                 subprocess.run(["osascript", "-e", 'display notification "%s" with title "%s" sound name "Glass"' % (msg.replace('"', "'"), title.replace('"', "'"))],
                                capture_output=True, timeout=10)
-            return self._send(200, {"ok": True})
+            sent = False
+            if body.get("phone", True) and msg:
+                extra = (" " + REMOTE_HINT) if "needs you" in title.lower() else ""
+                sent = phone_notify(title, msg + extra, key=str(body.get("key") or title), every=int(body.get("every") or 600))
+            return self._send(200, {"ok": True, "phone": sent, "phone_configured": phone_ready()})
         if self.path == "/email/stats":
             return self._send(200, cold_email.stats())
         if self.path == "/pipeline/stop":
