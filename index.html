@@ -47,12 +47,12 @@ const DEF={settings:{key:'',goal:5000,daily:100,minSubs:0,maxSubs:150000,maxDays
  emailSkipMS:true,emailSubjectB:"{name} clip you can post",emailBodyB:"",emailSubject:"made a clip from {name}",
  emailBody:"{Hey|Hi}, I {saw|came across} {name} and {really liked|loved} {topic}. It stuck with me, so I went ahead and made a short video clip out of it, ready for Reels, TikTok and YouTube Shorts.\n\nIt's already done and it's yours, no charge and no strings attached. {Want me to send it over?|Just reply yes and I'll send it right over.}\n\n{Thanks|Best|Cheers},\n{sender}",
  dm:"{Hey|Hey there|Hi}! {Just watched|Just finished|Caught} your {latest|recent|newest} episode on {niche} and {loved it|really enjoyed it|thought it was great}. I {made|cut|put together} a quick clip from it because {it deserved more eyes|it was too good not to share|I think it could do well on Reels}. {Totally free|No strings attached|No cost at all}, just thought you'd like to see it. Here's the full episode I pulled it from: {episode}"},
- niches:['real estate','commercial real estate','luxury real estate','real estate agent','commercial real estate broker','multifamily investing','real estate syndication','self storage investing','apartment investing','personal finance','fitness','entrepreneurship','mental health','true crime','faith christian','sports betting','parenting','health longevity'],
+ niches:['real estate','commercial real estate','luxury real estate','real estate agent','commercial real estate broker','business','business coaching','luxury vehicles','multifamily investing','real estate syndication','self storage investing','apartment investing','personal finance','fitness','entrepreneurship','mental health','true crime','faith christian','sports betting','parenting','health longevity'],
  leads:[],payments:[],clients:[],team:[],retainers:[]};
 let S;try{S=JSON.parse(localStorage.getItem('clipperCRM'))}catch(e){}
 S=Object.assign({},DEF,S||{});S.settings=Object.assign({},DEF.settings,S.settings);
 if(S.settings.hotScore===5&&S.settings.payMin===1){S.settings.hotScore=6}
-if((S.nicheV||0)<2){S.nicheV=2;['commercial real estate','luxury real estate','real estate agent','commercial real estate broker','multifamily investing','real estate syndication','self storage investing','apartment investing'].forEach(n=>{if(!S.niches.map(x=>x.toLowerCase()).includes(n))S.niches.push(n)})}
+if((S.nicheV||0)<3){S.nicheV=3;['commercial real estate','luxury real estate','real estate agent','commercial real estate broker','business','business coaching','luxury vehicles','personal finance','multifamily investing','real estate syndication','self storage investing','apartment investing'].forEach(n=>{if(!S.niches.map(x=>x.toLowerCase()).includes(n))S.niches.push(n)})}
 if(S.settings.minSubs===1000&&S.settings.maxDays===60&&S.settings.maxShorts===20){Object.assign(S.settings,{minSubs:0,maxDays:30,maxShorts:10,minViews:0})}
 if(S.settings.minSubs===5000&&S.settings.minViews===1500){S.settings.minSubs=0;S.settings.minViews=0}
 if(S.settings.emailSubject==="made a clip from your {name} episode")S.settings.emailSubject=DEF.settings.emailSubject;
@@ -378,7 +378,7 @@ function leadScore(l){let s=0;if(l.gapDays!=null){if(l.gapDays<=8)s+=2;else if(l
  if((l.subs||0)>150000)s-=4;else if((l.subs||0)>100000)s-=2;
  return s}
 const canAfford=l=>(l.payTags||[]).filter(t=>t!=='website').length>=(+S.settings.payMin||1);
-const isHot=l=>l.pin||!S.settings.onlyHot||(leadScore(l)>=(+S.settings.hotScore||6)&&canAfford(l));
+const isHot=l=>l.pin||!S.settings.onlyHot||(leadScore(l)>=(+S.settings.hotScore||6)&&canAfford(l)&&(l.shortsPct==null||(+S.settings.maxShorts||100)>=100||l.shortsPct<=+S.settings.maxShorts)&&(!l.last||(Date.now()-new Date(l.last))/864e5<=(+S.settings.maxDays||9999)));
 function mergePay(tags,sponsoredN){const t=[...(tags||[])];if((sponsoredN||0)>=2&&!t.includes('sponsor reads'))t.push('sponsor reads');return{tags:t,score:t.length}}
 function payHint(desc,web){const t=String(desc||''),tags=[];
  if(/sponsor|advertis|brand deal|partner with (us|me)/i.test(t))tags.push('sponsors');
