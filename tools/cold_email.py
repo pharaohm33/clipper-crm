@@ -236,7 +236,10 @@ def render(template, lead, cfg, step=0, subject_for_reply=None):
                       .replace("{topic}", _prose(str(lead.get("personal") or "")) or "your recent episode")
                       .replace("{personal_line}", _prose(str(lead.get("personal") or "")))
                       .replace("{sender}", str(cfg.get("sender_name") or "")))
-    if step == 0:
+    if step == 0 and (lead.get("body_override") or "").strip():
+        subject = (lead.get("subject_override") or "").strip() or fill(template.get("subject") or DEFAULT_SUBJECT)
+        body = lead["body_override"].strip()
+    elif step == 0:
         subject, body = fill(template.get("subject") or DEFAULT_SUBJECT), fill(template.get("body") or DEFAULT_BODY)
     else:
         days, text = FOLLOWUPS[min(step, len(FOLLOWUPS)) - 1]
@@ -553,6 +556,183 @@ def delete_drafts(addresses, log_fn=print):
         except Exception as e:
             log_fn(f"could not clean drafts in {acct['email']}: {str(e)[:100]}")
     for to in removed:
-        append_log({"ts": time.time(), "to": to, "status": "draft_removed"})
+        append_log({"ts": time.time(), "to": to, "status": "draft_removed", "mids": sorted(m for a in mine.values() for m, t in a.items() if t == to)})
         log_fn(f"removed old draft for {to}")
     return sorted(removed)
+
+
+# ----------------------------------------------------------------------------------------- the unibox
+def _body_text(msg):
+    for part in msg.walk() if msg.is_multipart() else [msg]:
+        if part.get_content_type() == "text/plain" and not part.get_filename():
+            try:
+                return part.get_payload(decode=True).decode(part.get_content_charset() or "utf-8", "ignore")
+            except Exception:
+                return ""
+    return ""
+
+
+def _open(acct, folder="Drafts", readonly=True):
+    imap = imaplib.IMAP4_SSL(acct.get("imap_host") or acct["smtp_host"].replace("smtp.", "imap."))
+    imap.login(acct.get("username") or acct["email"], acct["password"])
+    imap.select(f'"{folder}"' if " " in folder or "[" in folder else folder, readonly=readonly)
+    return imap
+
+
+def pending_drafts():
+    """Drafts this tool saved that are still waiting: {message_id: {kind, to, from, ts, step}}. First emails and auto replies."""
+    log = read_log()
+    gone = set()
+    for e in log:
+        if e.get("status") == "draft_removed":
+            gone.update(e.get("mids") or [])
+    out = {}
+    for e in log:
+        if e.get("status") in ("drafted", "auto_drafted") and e.get("message_id") and e["message_id"] not in gone:
+            out[e["message_id"]] = {"kind": "reply" if e["status"] == "auto_drafted" else "first", "to": e.get("to", "").lower(),
+                                    "from": e.get("from"), "ts": e.get("ts"), "id": e.get("id")}
+    # a first email that was later really sent is no longer a draft
+    sent_ts = {}
+    for e in log:
+        if e.get("status") == "sent" and e.get("step", 0) == 0:
+            sent_ts[e.get("to", "").lower()] = max(sent_ts.get(e.get("to", "").lower(), 0), e.get("ts", 0))
+    return {m: d for m, d in out.items() if not (d["kind"] == "first" and sent_ts.get(d["to"], 0) > d["ts"])}
+
+
+def list_drafts(log_fn=print):
+    """The saved drafts with their current text, read live from each sending inbox's Drafts folder (so edits made in webmail show up)."""
+    cfg, pend = load_config(), pending_drafts()
+    by_acct = {}
+    for mid, d in pend.items():
+        by_acct.setdefault(d["from"], {})[mid] = d
+    items, errors = [], []
+    for acct in cfg.get("accounts", []):
+        mids = by_acct.get(acct["email"])
+        if not mids:
+            continue
+        try:
+            imap = _open(acct)
+            for mid, d in mids.items():
+                typ, data = imap.search(None, "HEADER", "Message-ID", mid)
+                nums = data[0].split() if typ == "OK" and data and data[0] else []
+                if not nums:
+                    continue  # deleted in webmail
+                raw = imap.fetch(nums[-1], "(BODY.PEEK[])")[1][0][1]
+                m = email.message_from_bytes(raw)
+                items.append({**d, "mid": mid, "inbox": acct["email"], "subject": str(m.get("Subject") or ""), "body": _body_text(m).strip(),
+                              "reply_to": str(m.get("Reply-To") or ""), "date": str(m.get("Date") or "")})
+            imap.logout()
+        except Exception as e:
+            errors.append(f"{acct['email']}: {str(e)[:100]}")
+            log_fn(f"could not read drafts in {acct['email']}: {str(e)[:100]}")
+    items.sort(key=lambda x: (x["kind"] != "reply", x.get("ts") or 0))
+    return {"drafts": items, "errors": errors}
+
+
+def _find_draft(mid):
+    d = pending_drafts().get(mid)
+    acct = next((a for a in load_config().get("accounts", []) if d and a["email"] == d["from"]), None)
+    return d, acct
+
+
+def update_draft(mid, subject, body, log_fn=print):
+    """Replaces a saved draft's text. The old one is removed, a new one is saved, and the log is updated so sending uses the new text."""
+    d, acct = _find_draft(mid)
+    if not d or not acct:
+        raise RuntimeError("that draft is no longer waiting")
+    cfg = load_config()
+    msg = compose(acct, cfg, d["to"], subject, body, None)
+    imap = _open(acct, readonly=True)
+    typ, data = imap.search(None, "HEADER", "Message-ID", mid)
+    nums = data[0].split() if typ == "OK" and data and data[0] else []
+    if nums:
+        old = email.message_from_bytes(imap.fetch(nums[-1], "(BODY.PEEK[HEADER])")[1][0][1])
+        for h in ("In-Reply-To", "References"):
+            if old.get(h):
+                msg[h] = old[h]
+    imap.logout()
+    save_draft(acct, msg)
+    _remove_mid(acct, mid, d["to"])
+    append_log({"ts": time.time(), "id": d.get("id"), "to": d["to"], "from": acct["email"], "status": "auto_drafted" if d["kind"] == "reply" else "drafted",
+                "step": 0, "subject": subject, "message_id": msg["Message-ID"]})
+    return msg["Message-ID"]
+
+
+def _remove_mid(acct, mid, to):
+    try:
+        imap = _open(acct, readonly=False)
+        typ, data = imap.search(None, "HEADER", "Message-ID", mid)
+        for num in (data[0].split() if typ == "OK" and data and data[0] else []):
+            imap.store(num, "+FLAGS", "\\Deleted")
+        imap.expunge()
+        imap.logout()
+    finally:
+        append_log({"ts": time.time(), "to": to, "status": "draft_removed", "mids": [mid]})
+
+
+def discard_draft(mid):
+    d, acct = _find_draft(mid)
+    if not d or not acct:
+        return False
+    _remove_mid(acct, mid, d["to"])
+    return True
+
+
+def send_saved_reply(mid):
+    """Sends an auto reply draft exactly as saved, then removes the draft. First emails are sent by the normal drip, not here."""
+    d, acct = _find_draft(mid)
+    if not d or not acct or d["kind"] != "reply":
+        raise RuntimeError("that is not a reply draft that is waiting")
+    imap = _open(acct)
+    typ, data = imap.search(None, "HEADER", "Message-ID", mid)
+    nums = data[0].split() if typ == "OK" and data and data[0] else []
+    if not nums:
+        raise RuntimeError("the draft is not in the Drafts folder any more")
+    msg = email.message_from_bytes(imap.fetch(nums[-1], "(BODY.PEEK[])")[1][0][1])
+    imap.logout()
+    out = EmailMessage()
+    for k, v in msg.items():
+        if k.lower() not in ("content-type", "content-transfer-encoding", "mime-version", "date"):
+            out[k] = v
+    out["Date"] = email.utils.formatdate(localtime=True)
+    out.set_content(_body_text(msg))
+    send_message(acct, out)
+    _remove_mid(acct, mid, d["to"])
+    append_log({"ts": time.time(), "id": d.get("id"), "to": d["to"], "from": acct["email"], "status": "auto_replied", "step": 0, "subject": str(msg.get("Subject") or ""), "message_id": out["Message-ID"]})
+    return True
+
+
+def list_replies(days=21, limit=80):
+    """Recent mail that prospects sent back, across the reply inbox and every sending inbox, newest first."""
+    cfg, log = load_config(), read_log()
+    prospects = {e.get("to", "").lower() for e in log if e.get("status") in ("sent", "drafted") and e.get("to")}
+    boxes = [dict(a, _label=a["email"]) for a in cfg.get("accounts", [])]
+    ra = cfg.get("reply_account")
+    if ra and ra.get("password"):
+        boxes.insert(0, dict(ra, smtp_host=ra.get("imap_host", ""), _label=ra["email"] + " (reply inbox)"))
+    since = (datetime.now() - timedelta(days=days)).strftime("%d-%b-%Y")
+    items, errors, seen = [], [], set()
+    for acct in boxes:
+        try:
+            imap = _open(acct, "INBOX")
+            typ, data = imap.search(None, f"(SINCE {since})")
+            nums = data[0].split() if typ == "OK" and data and data[0] else []
+            for num in nums[-150:]:
+                raw = imap.fetch(num, "(BODY.PEEK[]<0.20000>)")[1][0][1]
+                m = email.message_from_bytes(raw)
+                frm = email.utils.parseaddr(str(m.get("From") or ""))[1].lower()
+                if not frm or frm not in prospects or frm in {a["email"].lower() for a in cfg.get("accounts", [])}:
+                    continue
+                mid = str(m.get("Message-ID") or "").strip()
+                if mid in seen:
+                    continue
+                seen.add(mid)
+                text, _, _ = _reply_text(raw)
+                items.append({"mid": mid, "from": frm, "inbox": acct["_label"], "subject": str(m.get("Subject") or ""), "date": str(m.get("Date") or ""),
+                              "ts": email.utils.mktime_tz(email.utils.parsedate_tz(str(m.get("Date")))) if m.get("Date") and email.utils.parsedate_tz(str(m.get("Date"))) else 0,
+                              "text": (text or _body_text(m)).strip()[:1500]})
+            imap.logout()
+        except Exception as e:
+            errors.append(f"{acct['_label']}: {str(e)[:100]}")
+    items.sort(key=lambda x: -x["ts"])
+    return {"replies": items[:limit], "errors": errors}

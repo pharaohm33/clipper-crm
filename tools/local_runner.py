@@ -123,9 +123,8 @@ def log(msg):
     STATE["log"].append(msg)
 
 
-def _prepare(url, start, end, name, folder=None):
-    """Downloads a slice of a YouTube video and saves it as a NEW template in the clipper (transcribes it once).
-    Waits while the clipper is busy. Returns (video_path, slug) or None after logging why it could not."""
+def _download(url, start, end):
+    """Downloads a slice of a YouTube video. Returns the saved file path, or None after logging why not."""
     log(f"[runner] downloading {start} to {end} ...")
     env = {**os.environ, "NO_OPEN": "1"}
     p = subprocess.run(["bash", GRAB, url, start, end, SAMPLES], capture_output=True, text=True, env=env, timeout=1800)
@@ -135,6 +134,18 @@ def _prepare(url, start, end, name, folder=None):
         return None
     video = saved[-1]
     log(f"[runner] saved {video}")
+    return video
+
+
+def _prepare(url, start, end, name, folder=None):
+    """Downloads a slice of a YouTube video and saves it as a NEW template in the clipper (transcribes it once).
+    Waits while the clipper is busy. Returns (video_path, slug) or None after logging why it could not."""
+    video = _download(url, start, end)
+    return _create_template(video, name, folder) if video else None
+
+
+def _create_template(video, name, folder=None):
+    """Saves an already downloaded slice as a NEW template in the clipper and waits for it to be transcribed."""
     waited, announced = 0, False
     while True:
         st = clipper_status()
@@ -158,8 +169,8 @@ def _prepare(url, start, end, name, folder=None):
         waited += 10
     log("[runner] template is being created (transcribing the slice) ...")
     last = ""
-    for _ in range(600):
-        time.sleep(3)
+    for _ in range(1800):
+        time.sleep(1)
         st = clipper_status()
         if st["state"] == "off":
             log("[runner] lost contact with the clipper app.")
@@ -226,6 +237,21 @@ def _mmss(sec):
 def run_pipeline(leads, minutes=5, clips=1, after=None, folder=None, share=False):
     """For each lead in turn: pick a slice, download it, make the template, generate the clip, put it on a shareable
     link. One 'PIPE {json}' line per finished lead; the website saves it on the lead. Contact is still up to you."""
+    def fetch(ld):
+        """Picks the slice and downloads it (needs no clipper), so it can happen while the clipper is busy with another lead."""
+        try:
+            if ld.get("start") and ld.get("end"):
+                s0, e0 = ld["start"], ld["end"]
+            else:
+                s_sec, e_sec = pick_range(video_duration(ld["url"]), minutes)
+                s0, e0 = _mmss(s_sec), _mmss(e_sec)
+            return s0, e0, _download(ld["url"], s0, e0)
+        except Exception as e:
+            return None, None, ("ERR", str(e)[:150])
+
+    from concurrent.futures import ThreadPoolExecutor
+    pool = ThreadPoolExecutor(max_workers=1)
+    pending = {}
     try:
         PIPE["stop"] = False
         for i, ld in enumerate(leads, 1):
@@ -235,12 +261,12 @@ def run_pipeline(leads, minutes=5, clips=1, after=None, folder=None, share=False
             name = f"Sample {ld.get('name') or ld['id']}"[:60]
             log(f"[{i}/{len(leads)}] {ld.get('name')}")
             try:
-                if ld.get("start") and ld.get("end"):
-                    s0, e0 = ld["start"], ld["end"]
-                else:
-                    s_sec, e_sec = pick_range(video_duration(ld["url"]), minutes)
-                    s0, e0 = _mmss(s_sec), _mmss(e_sec)
-                got = _prepare(ld["url"], s0, e0, name, folder)
+                s0, e0, video0 = (pending.pop(i).result() if i in pending else fetch(ld))
+                if isinstance(video0, tuple):
+                    raise RuntimeError(video0[1])
+                if i < len(leads):
+                    pending[i + 1] = pool.submit(fetch, leads[i])  # download the next slice while this one is processed
+                got = _create_template(video0, name, folder) if video0 else None
                 if not got:
                     log(f"PIPEFAIL {json.dumps({'id': ld['id'], 'why': 'could not prepare the slice'})}")
                     continue
@@ -254,8 +280,8 @@ def run_pipeline(leads, minutes=5, clips=1, after=None, folder=None, share=False
                     log(f"PIPEFAIL {json.dumps({'id': ld['id'], 'why': resp.get('error') or f'clipper said {code}'})}")
                     continue
                 last = ""
-                for _ in range(900):
-                    time.sleep(3)
+                for _ in range(2700):
+                    time.sleep(1)
                     c2, raw = app_call("/api/clipper/status", timeout=10)
                     if c2 != 200:
                         break
@@ -283,7 +309,8 @@ def run_pipeline(leads, minutes=5, clips=1, after=None, folder=None, share=False
                 first = infos[0] if infos else {}
                 clip_file = files[0] if files else str(REPO / "opencut-exports" / outs[0])
                 link = links[0] if links else ""
-                personal = personal_note(ld, Path(clip_file).name, first.get("title", ""), first.get("hook", ""))
+                ctext = clip_text_from_template(slug, first.get("real_start", first.get("start")), first.get("real_end", first.get("end"))) if first.get("start") is not None else ""
+                personal = personal_note(ld, Path(clip_file).name, first.get("title", ""), first.get("hook", ""), ctext)
                 log("PIPE " + json.dumps({"id": ld["id"], "slug": slug, "video": video, "dir": str(Path(video).parent), "clip": clip_file,
                                           "title": first.get("title", ""), "hook": first.get("hook", ""), "link": link, "personal": personal,
                                           "links": links, "files": files, "titles": titles,
@@ -292,17 +319,35 @@ def run_pipeline(leads, minutes=5, clips=1, after=None, folder=None, share=False
                 log(f"PIPEFAIL {json.dumps({'id': ld.get('id'), 'why': str(e)[:200]})}")
         log("[runner] pipeline finished.")
     finally:
+        pool.shutdown(wait=False)
         STATE["running"] = False
 
 
-def personal_note(ld, clip_name, title, hook):
+def clip_text_from_template(slug, start, end):
+    """The words spoken between start and end, read from the template's saved transcript (the same transcription the clip was cut from).
+    Returns '' when it cannot be read, and the caller falls back to listening to the clip again."""
+    try:
+        f = REPO / "generated_content" / "clip_templates" / f"{slug}.transcript.json"
+        segs = json.loads(f.read_text(encoding="utf-8"))
+        s0, e0 = float(start), float(end)
+        words = [w["w"] for seg in segs for w in (seg.get("words") or []) if s0 - 0.05 <= float(w["s"]) < e0]
+        if not words:
+            words = [seg["text"] for seg in segs if float(seg["e"]) > s0 and float(seg["s"]) < e0]
+        return " ".join(words).strip()
+    except Exception:
+        return ""
+
+
+def personal_note(ld, clip_name, title, hook, text=""):
     """Reads the words spoken in the clip (the clipper's own transcript, the same one the clip editor shows), then asks DeepSeek for
     one specific note about it. Returns '' if anything is missing; the email still works without it."""
-    code, w = app_call("/api/clip-edit/words", {"id": f"opencut-exports/{clip_name}"}, timeout=900)
-    if code != 200 or not w.get("success"):
-        log(f"   (no personal note: could not read the clip's words: {(w or {}).get('error') or code})")
-        return ""
-    line = personalize.write_line(ld.get("name") or "", ld.get("epTitle") or "", title, hook, w.get("text", ""))
+    if len(text.split()) < 25:
+        code, w = app_call("/api/clip-edit/words", {"id": f"opencut-exports/{clip_name}"}, timeout=900)
+        if code != 200 or not w.get("success"):
+            log(f"   (no personal note: could not read the clip's words: {(w or {}).get('error') or code})")
+            return ""
+        text = w.get("text", "")
+    line = personalize.write_line(ld.get("name") or "", ld.get("epTitle") or "", title, hook, text)
     if not line:
         log("   (no personal note: not enough to say, or no DeepSeek key found)")
     return line
@@ -327,18 +372,27 @@ def run_personalize(leads):
 
 
 def run_find_emails(leads):
+    """Looks for public contact emails, three leads at a time (each browser search is mostly waiting on pages)."""
+    from concurrent.futures import ThreadPoolExecutor
     try:
-        for i, ld in enumerate(leads, 1):
+        def one(item):
+            i, ld = item
             if PIPE["stop"]:
-                log("[runner] stopped.")
-                break
-            got = email_finder.find_email(ld.get("name") or "", ld.get("url") or "", ld.get("web") or "", ld.get("episode") or "", log=log)
-            if got.get("email"):
-                log(f"[{i}/{len(leads)}] {ld.get('name')}: {got['email']} ({got['source']})")
-                log("EMAILFOUND " + json.dumps({"id": ld["id"], "email": got["email"], "source": got["source"]}))
-            else:
-                log(f"[{i}/{len(leads)}] {ld.get('name')}: no public contact email found")
-                log("EMAILNONE " + json.dumps({"id": ld["id"]}))
+                return i, ld, None
+            try:
+                return i, ld, email_finder.find_email(ld.get("name") or "", ld.get("url") or "", ld.get("web") or "", ld.get("episode") or "", log=lambda m: None)
+            except Exception as e:
+                return i, ld, {"email": "", "error": str(e)[:80]}
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            for i, ld, got in pool.map(one, list(enumerate(leads, 1))):
+                if got is None:
+                    continue
+                if got.get("email"):
+                    log(f"[{i}/{len(leads)}] {ld.get('name')}: {got['email']} ({got['source']})")
+                    log("EMAILFOUND " + json.dumps({"id": ld["id"], "email": got["email"], "source": got["source"]}))
+                else:
+                    log(f"[{i}/{len(leads)}] {ld.get('name')}: no public contact email found")
+                    log("EMAILNONE " + json.dumps({"id": ld["id"]}))
         log("[runner] email search finished.")
     finally:
         STATE["running"] = False
@@ -527,6 +581,27 @@ class H(BaseHTTPRequestHandler):
                 else:
                     errors.append(shared.get("error") or str(code))
             return self._send(200, {"links": links, "errors": errors})
+        if self.path in ("/unibox/drafts", "/unibox/replies", "/unibox/draft/update", "/unibox/draft/delete", "/unibox/draft/send"):
+            try:
+                if self.path == "/unibox/drafts":
+                    return self._send(200, cold_email.list_drafts(log_fn=lambda m: None))
+                if self.path == "/unibox/replies":
+                    return self._send(200, cold_email.list_replies(int(body.get("days") or 21)))
+                mid = str(body.get("mid") or "")
+                if self.path == "/unibox/draft/update":
+                    return self._send(200, {"mid": cold_email.update_draft(mid, str(body.get("subject") or ""), str(body.get("body") or ""))})
+                if self.path == "/unibox/draft/delete":
+                    return self._send(200, {"ok": cold_email.discard_draft(mid)})
+                return self._send(200, {"ok": cold_email.send_saved_reply(mid)})
+            except Exception as e:
+                return self._send(500, {"error": str(e)[:200]})
+        if self.path == "/notify":
+            title = clean(body.get("title") or "Clipper CRM", 60)
+            msg = clean(body.get("message") or "", 160)
+            if sys.platform == "darwin" and msg:
+                subprocess.run(["osascript", "-e", 'display notification "%s" with title "%s" sound name "Glass"' % (msg.replace('"', "'"), title.replace('"', "'"))],
+                               capture_output=True, timeout=10)
+            return self._send(200, {"ok": True})
         if self.path == "/email/stats":
             return self._send(200, cold_email.stats())
         if self.path == "/pipeline/stop":

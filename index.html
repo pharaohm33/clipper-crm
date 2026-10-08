@@ -42,7 +42,7 @@ const TIERS=[{n:'Starter',clips:20,fee:300},{n:'Growth',clips:50,fee:500},{n:'Sc
 const CNS='Contacted - no sample sent';
 const STATUSES=['New','Sample Sent',CNS,'Replied','Interested','Client','No Response','Not Interested','Removed'];
 const TPL=['{n} podcast full episode','{n} podcast interview','how to start a {n} podcast','{n} podcast new episode'];
-const DEF={settings:{key:'',goal:5000,daily:100,minSubs:0,maxSubs:150000,maxDays:45,minViews:0,needPay:0,onlyHot:1,hotScore:6,apMode:'drafts',apBatch:5,apEvery:60,apOn:0,payMin:1,followDays:3,templates:3,
+const DEF={settings:{key:'',goal:5000,daily:100,minSubs:0,maxSubs:150000,maxDays:45,minViews:0,needPay:0,onlyHot:1,hotScore:6,apMode:'drafts',apBatch:10,apEvery:15,apMax:25,apOn:0,payMin:1,followDays:3,templates:3,
  syncUrl:'',syncPw:'',geminiKey:'',geminiModel:'gemini-2.5-flash',skipNoContact:1,igOnly:0,useGeminiParse:0,maxShorts:70,emailLimit:20,
  emailSkipMS:true,emailSubjectB:"{name} clip you can post",emailBodyB:"",emailSubject:"made a clip from {name}",
  emailBody:"{Hey|Hi}, I {saw|came across} {name} and {really liked|loved} {topic}. It stuck with me, so I went ahead and made a short video clip out of it, ready for Reels, TikTok and YouTube Shorts.\n\nIt's already done and it's yours, no charge and no strings attached. {Want me to send it over?|Just reply yes and I'll send it right over.}\n\n{Thanks|Best|Cheers},\n{sender}",
@@ -80,8 +80,8 @@ const iso=d=>{const x=d||new Date();return x.getFullYear()+'-'+String(x.getMonth
 const today=()=>iso();const money=n=>'$'+Number(n||0).toLocaleString(undefined,{maximumFractionDigits:2});
 const addDays=(d,n)=>{const x=new Date(d+'T00:00');x.setDate(x.getDate()+n);return iso(x)};
 const monthKey=()=>today().slice(0,7);
-let tab='dash';const TABS=[['dash','Dashboard'],['today','Today'],['leads','Leads'],['email','Email'],['find','Find Podcasts'],['money','Money'],['settings','Settings']];
-function nav(){$('#nav').innerHTML=TABS.map(([k,l])=>`<button class="${k===tab?'on':''}" data-t="${k}">${l}</button>`).join('')}
+let tab='dash';const TABS=[['dash','Dashboard'],['today','Today'],['leads','Leads'],['email','Email'],['unibox','Unibox'],['find','Find Podcasts'],['money','Money'],['settings','Settings']];
+function nav(){const waiting=S.leads.filter(l=>l.draftedAt&&!l.emailedAt&&!l.approved&&l.status=='New').length;$('#nav').innerHTML=TABS.map(([k,l])=>`<button class="${k===tab?'on':''}" data-t="${k}">${l}${k==='unibox'&&waiting?` (${waiting})`:''}</button>`).join('')}
 $('#nav').onclick=e=>{if(e.target.dataset.t){tab=e.target.dataset.t;render()}};
 $('#nav').ondragover=e=>{if(e.target.dataset&&e.target.dataset.t==='today'){e.preventDefault();e.dataTransfer.dropEffect='move';e.target.classList.add('drop')}};
 $('#nav').ondragleave=e=>{if(e.target.classList)e.target.classList.remove('drop')};
@@ -100,7 +100,7 @@ function stats(){
  return{earned,owed,dl,remaining:Math.max(0,S.settings.goal-earned),sentToday:sentOn(today()),sentAll,rep,cl,
   fresh:S.leads.filter(l=>l.status=='New').length,fu:S.leads.filter(l=>l.status=='Sample Sent'&&l.follow&&l.follow<=today()).length,...mrrStats()}}
 function mrrStats(){const act=(S.retainers||[]).filter(r=>r.status=='Active'),mrr=act.reduce((a,r)=>a+(+r.fee||0),0);return{mrr,act:act.length,clipsM:act.reduce((a,r)=>a+(+r.clips||0),0),avgFee:act.length?mrr/act.length:0}}
-function render(){nav();({dash,today:todayV,leads,email:emailV,find,money:moneyV,settings})[tab]()}
+function render(){nav();({dash,today:todayV,leads,email:emailV,unibox:uniboxV,find,money:moneyV,settings})[tab]()}
 function dash(){const s=stats(),g=S.settings;const pct=Math.min(100,s.earned/g.goal*100);
  const days=[...Array(14)].map((_,i)=>{const d=iso(new Date(Date.now()-(13-i)*864e5));return[d,sentOn(d)]});const mx=Math.max(g.daily,...days.map(x=>x[1]));
  const byInf={};S.payments.forEach(p=>{(byInf[p.who]=byInf[p.who]||{all:0,mo:0}).all+=p.amount;if(p.date.startsWith(monthKey()))byInf[p.who].mo+=p.amount});
@@ -234,7 +234,7 @@ async function helperJob(path,body,onLine){
  let r;try{r=await (await fetch(RUNNER+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json()}
  catch(e){ES.busy=false;ES.msg='Helper not running. In Terminal: cd ~/clipper-crm && python3 tools/local_runner.py';emailDyn();return false}
  if(r.error){ES.busy=false;ES.msg=r.error;emailDyn();return false}
- let since=0,go=true;while(go){await new Promise(x=>setTimeout(x,2000));
+ let since=0,go=true;while(go){await new Promise(x=>setTimeout(x,1000));
   try{const j=await (await fetch(RUNNER+'/log?since='+since)).json();since=j.next;j.lines.forEach(t=>{ES.lines.push(t);onLine&&onLine(t)});go=j.running;save();emailDyn();if(tab=='today')todayV()}catch(e){ES.msg='Lost contact with the helper.';go=false}}
  ES.busy=false;save();emailDyn();if(tab=='today')todayV();return true}
 const parseTag=(t,tag)=>t.startsWith(tag+' ')?JSON.parse(t.slice(tag.length+1)):null;
@@ -244,14 +244,14 @@ function findEmails(n){const now=Date.now();
  return helperJob('/emails/find',{leads:todo},t=>{let r;
   if(r=parseTag(t,'EMAILFOUND')){const l=S.leads.find(x=>x.id==r.id);if(l){l.email=r.email;l.emailSource=r.source;l.emailChecked=Date.now()}}
   else if(r=parseTag(t,'EMAILNONE')){const l=S.leads.find(x=>x.id==r.id);if(l)l.emailChecked=Date.now()}})}
-function prepareClips(n,onlyWithEmail){
- const todo=S.leads.filter(l=>l.status=='New'&&isHot(l)&&!l.clipLink&&!l.clipFile&&ytLeads(l)&&(!onlyWithEmail||l.email)).slice(0,n).map(l=>({id:l.id,name:l.name,url:l.episode,epTitle:l.epTitle}));
+function prepareClips(n,onlyWithEmail,skipFailed){
+ const todo=S.leads.filter(l=>l.status=='New'&&isHot(l)&&!l.clipLink&&!l.clipFile&&!(skipFailed&&l.clipFail)&&ytLeads(l)&&(!onlyWithEmail||l.email)).slice(0,n).map(l=>({id:l.id,name:l.name,url:l.episode,epTitle:l.epTitle}));
  if(!todo.length){ES.msg=onlyWithEmail?'No leads with an email still need a clip. Find emails first, or untick the box.':'No leads need a clip.';return emailDyn()}
  return helperJob('/pipeline/start',{leads:todo,minutes:5,clips:1},t=>{let r;
   if(r=parseTag(t,'PERSONAL')){const l=S.leads.find(x=>x.id==r.id);if(l)l.personalLine=r.line||''}
   if(r=parseTag(t,'PIPE')){const l=S.leads.find(x=>x.id==r.id);if(l)Object.assign(l,{clipLink:r.link,clipFile:r.clip,clipTitle:r.title,clipHook:r.hook||'',personalLine:r.personal||'',sampleSlug:r.slug,sampleName:r.name,sampleFile:r.video,sampleDir:r.dir,clipFail:''})}
   else if(r=parseTag(t,'PIPEFAIL')){const l=S.leads.find(x=>x.id==r.id);if(l)l.clipFail=r.why}})}
-const emailPayload=l=>({id:l.id,name:l.name,niche:l.niche,epTitle:l.epTitle,email:l.email,clipLink:l.clipLink,clipReady:!!(l.clipFile||(l.clipFiles||[]).length),clipLinks:l.clipLinks||[],subject:l.emailSubject,personal:l.personalLine||''})
+const emailPayload=l=>({id:l.id,name:l.name,niche:l.niche,epTitle:l.epTitle,email:l.email,clipLink:l.clipLink,clipReady:!!(l.clipFile||(l.clipFiles||[]).length),clipLinks:l.clipLinks||[],subject:l.emailSubject,body_override:l.bodyOverride||'',subject_override:l.subjectOverride||'',personal:l.personalLine||''})
 const tpl=()=>({subject:S.settings.emailSubject,body:S.settings.emailBody,variants:(S.settings.emailSubjectB||S.settings.emailBodyB)?[{subject:S.settings.emailSubjectB,body:S.settings.emailBodyB}]:[],skip_providers:S.settings.emailSkipMS===false?[]:['microsoft']});
 async function previewEmails(){ES.msg='';const leads=S.leads.filter(isEmailReady).slice(0,+S.settings.emailLimit||20).map(emailPayload);
  if(!leads.length){ES.preview=null;ES.msg='Nothing is ready to email yet (a lead needs an email AND a prepared clip).';return emailDyn()}
@@ -294,33 +294,87 @@ const apLog=m=>{AP.msgs.push(new Date().toLocaleTimeString()+'  '+m);AP.msgs=AP.
 function apLock(){try{const L=JSON.parse(localStorage.getItem('clipperAP')||'{}');if(L.id&&L.id!==AP.id&&Date.now()-L.t<120000)return false;localStorage.setItem('clipperAP',JSON.stringify({id:AP.id,t:Date.now()}));return true}catch(e){return true}}
 function apRender(){const el=document.getElementById('email-ap');if(!el)return;const g=S.settings,on=!!AP.timer,mode=g.apMode==='send'?'send':'drafts';
  el.innerHTML=`<div class="card"><b>Autopilot</b> <span class=mut>Finds emails for motivated leads, makes their clips and topic lines, writes the emails, and ${mode=='send'?'<b style="color:var(--acc)">SENDS them</b>':'saves them as drafts in your sending inboxes (nothing is sent)'}, then checks replies. It runs while this tab stays open, with the helper and the clipper app running.</span>
-  <div class="row" style="margin-top:8px"><button class="b p" id="ap-run" ${AP.running?'disabled':''}>▶ Run once now</button><button class="b" id="ap-stop" ${AP.running?'':'disabled'}>Stop after this step</button><button class="b" id="ap-drip" ${AP.running||ES.busy?'disabled':''} title="Sends the emails you saved as drafts, one every 60 to 90 seconds, rotating across your inboxes within each inbox's daily cap">📤 Drip-send the saved drafts</button><button class="b" id="ap-toggle">${on?'⏸ Turn repeating off':'⟳ Repeat every '+(+g.apEvery||60)+' min'}</button>
+  <div class="row" style="margin-top:8px"><button class="b p" id="ap-run" ${AP.running?'disabled':''}>▶ Run once now</button><button class="b" id="ap-stop" ${AP.running?'':'disabled'}>Stop after this step</button><button class="b" id="ap-drip" ${AP.running||ES.busy?'disabled':''} title="Sends the emails you saved as drafts, one every 60 to 90 seconds, rotating across your inboxes within each inbox's daily cap">📤 Drip-send the approved drafts (${S.leads.filter(l=>isEmailReady(l)&&l.draftedAt&&l.approved).length})</button><button class="b" id="ap-toggle">${on?'⏸ Turn repeating off':'⟳ Keep going automatically'}</button>
    <label style="display:inline-flex;gap:4px;align-items:center">When done <select id="ap-mode"><option value="drafts" ${mode=='drafts'?'selected':''}>save to drafts</option><option value="send" ${mode=='send'?'selected':''}>send for real</option></select></label>
-   <label style="display:inline-flex;gap:4px;align-items:center">Leads per run <input id="ap-batch" type="number" min="1" max="30" value="${+g.apBatch||5}" style="width:60px"></label>
-   <label style="display:inline-flex;gap:4px;align-items:center">Every <input id="ap-every" type="number" min="10" max="1440" value="${+g.apEvery||60}" style="width:70px"> min</label></div>
+   <label style="display:inline-flex;gap:4px;align-items:center">Keep at most <input id="ap-max" type="number" min="5" max="100" value="${+g.apMax||25}" style="width:60px"> ready<\/label>
+   <label style="display:inline-flex;gap:4px;align-items:center">Clips per round <input id="ap-batch" type="number" min="5" max="30" value="${+g.apBatch||10}" style="width:60px"></label>
+   <label style="display:inline-flex;gap:4px;align-items:center">Check for new work every <input id="ap-every" type="number" min="5" max="1440" value="${+g.apEvery||15}" style="width:70px"> min</label></div>
   <pre style="margin-top:8px;max-height:200px">${esc(AP.msgs.slice(-14).join('\n')||'Not run yet.')}</pre></div>`;
- const on_=(id,fn)=>{const b=document.getElementById(id);if(b)b.onclick=fn};on_('ap-run',()=>autopilotRun());on_('ap-drip',async()=>{const n=S.leads.filter(l=>isEmailReady(l)&&l.draftedAt).length;if(!n)return apLog('There are no saved drafts waiting to be sent.');if(!confirm(`Send the ${n} drafted email(s) for real?\n\nThey go out one every 60 to 90 seconds, within each inbox's daily cap (today: about 5 per inbox). Anything over the cap waits for the next run.`))return;apLog(`Drip-sending ${n} drafted email(s)...`);const prev=S.settings.apMode;S.settings.apMode='send';try{await sendEmails('send',0,true,l=>!!l.draftedAt)}finally{S.settings.apMode=prev}apLog('Drip send finished.');apRender()});on_('ap-stop',()=>{AP.stop=true;apLog('Stopping after the current step...')});
+ const on_=(id,fn)=>{const b=document.getElementById(id);if(b)b.onclick=fn};on_('ap-run',()=>autopilotRun());on_('ap-drip',async()=>{const n=S.leads.filter(l=>isEmailReady(l)&&l.draftedAt&&l.approved).length;if(!n)return apLog('Nothing is approved yet. Open the Unibox, read the drafts, and approve the ones you want sent.');if(!confirm(`Send the ${n} drafted email(s) for real?\n\nThey go out one every 60 to 90 seconds, within each inbox's daily cap (today: about 5 per inbox). Anything over the cap waits for the next run.`))return;apLog(`Drip-sending ${n} drafted email(s)...`);const prev=S.settings.apMode;S.settings.apMode='send';try{await sendEmails('send',0,true,l=>!!(l.draftedAt&&l.approved))}finally{S.settings.apMode=prev}apLog('Drip send finished.');apRender()});on_('ap-stop',()=>{AP.stop=true;apLog('Stopping after the current step...')});
  on_('ap-toggle',()=>{if(AP.timer){clearInterval(AP.timer);AP.timer=null;g.apOn=0;apLog('Repeating is off.')}else{g.apOn=1;apStart()}save();apRender()});
  const m=document.getElementById('ap-mode');if(m)m.onchange=()=>{if(m.value==='send'&&!confirm('Autopilot will then SEND real emails by itself, with no further confirmation. Keep it on drafts until you have read a few drafts and are happy.')){m.value='drafts';return}g.apMode=m.value;save();apRender()};
- const b=document.getElementById('ap-batch');if(b)b.onchange=()=>{g.apBatch=Math.max(1,Math.min(30,+b.value||5));save()};const e2=document.getElementById('ap-every');if(e2)e2.onchange=()=>{g.apEvery=Math.max(10,Math.min(1440,+e2.value||60));save();if(AP.timer)apStart()}}
-function apStart(){clearInterval(AP.timer);AP.timer=setInterval(()=>autopilotRun(),(+S.settings.apEvery||60)*60000);apLog(`Repeating every ${+S.settings.apEvery||60} min while this tab is open.`);autopilotRun()}
+ const b=document.getElementById('ap-batch');if(b)b.onchange=()=>{g.apBatch=Math.max(5,Math.min(30,+b.value||10));save()};const mx=document.getElementById('ap-max');if(mx)mx.onchange=()=>{g.apMax=Math.max(5,Math.min(100,+mx.value||25));save()};const e2=document.getElementById('ap-every');if(e2)e2.onchange=()=>{g.apEvery=Math.max(10,Math.min(1440,+e2.value||60));save();if(AP.timer)apStart()}}
+function apQueue(){return S.leads.filter(l=>l.status=='New'&&(l.clipFile||l.clipLink)&&!l.emailedAt).length}
+function apWork(){const hot=S.leads.filter(l=>l.status=='New'&&isHot(l));const full=apQueue()>=(+S.settings.apMax||25);
+ const needEmail=full?0:hot.filter(l=>!l.email&&l.episode&&!(l.emailChecked&&Date.now()-l.emailChecked<14*DAY)).length;
+ const needClip=full?0:hot.filter(l=>l.email&&!l.clipFile&&!l.clipLink&&!l.clipFail&&ytLeads(l)).length;
+ const needDraft=S.leads.filter(l=>isEmailReady(l)&&!l.draftedAt).length;
+ return{needEmail,needClip,needDraft,total:needEmail+needClip+needDraft,waiting:S.leads.filter(l=>isEmailReady(l)&&l.draftedAt).length}}
+function apStart(){clearInterval(AP.timer);AP.timer=setInterval(()=>{if(!AP.running&&apWork().total>0)autopilotRun()},(+S.settings.apEvery||15)*60000);apLog(`On. It works through every motivated lead back to back, then checks for new work every ${+S.settings.apEvery||15} min while this tab is open.`);autopilotRun()}
 async function autopilotRun(){
- if(AP.running)return;if(ES.busy){apLog('The helper is busy with another job, trying again next time.');return}
+ if(AP.running)return;if(ES.busy){apLog('The helper is busy with another job, trying again shortly.');setTimeout(()=>autopilotRun(),15000);return}
  if(!apLock()){apLog('Another CRM tab is running autopilot. Skipping so nothing is done twice.');return}
- AP.running=true;AP.stop=false;apRender();const g=S.settings,batch=+g.apBatch||5,mode=g.apMode==='send'?'send':'drafts',hb=setInterval(apLock,30000);
- const step=async(name,fn)=>{if(AP.stop)throw new Error('stopped');apLog(name);const before=ES.msg;await fn();if(ES.msg&&ES.msg!==before)apLog('  '+ES.msg)};
+ AP.running=true;AP.stop=false;apRender();const g=S.settings,batch=Math.max(5,+g.apBatch||10),mode=g.apMode==='send'?'send':'drafts',hb=setInterval(apLock,30000);
+ const before=apWork(),draftedBefore=S.leads.filter(l=>l.draftedAt).length;
+ const step=async(name,fn)=>{if(AP.stop)throw new Error('stopped');apLog(name);const m0=ES.msg;await fn();if(ES.msg&&ES.msg!==m0)apLog('  '+ES.msg)};
+ let more=false;
  try{
   await pollClipper();const hp=pollClipper.last;if(!hp)throw new Error('The helper is not running. Start it: cd ~/clipper-crm && python3 tools/local_runner.py');
   const clipperOn=hp.state==='on';if(!clipperOn)apLog('The clipper app is '+hp.state+', so new clips are skipped this time.');
-  await step('1/5  Finding emails for motivated leads',()=>findEmails(batch));
-  if(clipperOn)await step('2/5  Making clips (up to 3 each) and topic lines',()=>prepareClips(Math.min(batch,5),true));
+  const w0=apWork();apLog(`Work to do: ${w0.needEmail} to find an email for, ${w0.needClip} to make clips for, ${w0.needDraft} to write.`);
+  const cap=+g.apMax||25,slots=Math.max(0,cap-apQueue());if(!slots)apLog(`The queue is full: ${apQueue()} emails are ready (one day's worth). Approve and drip-send some, then I will refill it.`);
+  if(w0.needEmail&&slots)await step('1/4  Finding emails (3 at a time)',()=>findEmails(Math.min(Math.max(batch,15),slots*2+5)));
+  if(clipperOn&&slots&&apWork().needClip)await step('2/4  Making clips (up to 3 each) and topic lines',()=>prepareClips(Math.min(batch,slots),true,true));
   const ready=S.leads.filter(l=>isEmailReady(l)&&(mode!='drafts'||!l.draftedAt)).length;
-  await step(`3/5  ${ready} lead(s) ready. ${mode=='send'?'Sending':'Saving as drafts'}`,()=>sendEmails(mode,0,true));
-  if(mode==='send'){await step('4/5  Follow-ups that are due',async()=>{await sendEmails('send',1,true);await sendEmails('send',2,true)})}
-  await step('5/5  Checking replies',()=>checkReplies());
-  apLog('Done. '+(mode=='send'?'Sent what was ready.':'Drafts are in your sending inboxes (Drafts folder). Read them, then send.'))
+  if(ready)await step(`3/4  ${ready} lead(s) ready. ${mode=='send'?'Sending':'Saving as drafts'}`,()=>sendEmails(mode,0,true));
+  if(mode==='send'){await step('Follow-ups that are due',async()=>{await sendEmails('send',1,true);await sendEmails('send',2,true)})}
+  await step('4/4  Checking replies',()=>checkReplies());
+  const w1=apWork();more=w1.total>0&&w1.total<before.total&&!AP.stop&&(AP.loops=(AP.loops||0)+1)<80;
  }catch(e){apLog('Stopped: '+(e&&e.message||e))}
- clearInterval(hb);AP.running=false;ES.busy=false;apRender();emailDyn()}
+ clearInterval(hb);AP.running=false;ES.busy=false;apRender();emailDyn();
+ if(more){apLog('More to do, continuing right away...');setTimeout(()=>autopilotRun(),2500);return}
+ AP.loops=0;const w=apWork(),made=S.leads.filter(l=>l.draftedAt).length-draftedBefore;
+ if(mode==='drafts'){const msg=w.waiting?`${w.waiting} draft email(s) are ready for your approval. Open the Unibox to read and approve them, then press "Drip-send the approved drafts".`:'Nothing waiting. Run more lead searches to find new leads.';apLog('All caught up. '+msg);
+  document.title=(w.waiting?`(${w.waiting} ready) `:'')+'Clipper CRM';
+  if(made>0||w.waiting){try{fetch(RUNNER+'/notify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:'Drafts ready',message:`${w.waiting} email draft(s) are waiting for your approval in the Unibox.`})})}catch(e){}}}
+ else apLog('All caught up.')}
+
+/* ---------- Unibox: every saved draft and every reply from all inboxes in one place ---------- */
+const UB={view:'drafts',drafts:[],replies:[],sel:'',loading:false,msg:'',errors:[]};
+const leadByEmail=e=>S.leads.find(l=>String(l.email||'').toLowerCase()===String(e||'').toLowerCase());
+async function ubLoad(){UB.loading=true;UB.msg='Reading your inboxes (this logs in to each one once)...';uniboxV();
+ try{const[d,r]=await Promise.all([fetch(RUNNER+'/unibox/drafts',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}).then(x=>x.json()),fetch(RUNNER+'/unibox/replies',{method:'POST',headers:{'Content-Type':'application/json'},body:'{"days":21}'}).then(x=>x.json())]);
+  UB.drafts=d.drafts||[];UB.replies=r.replies||[];UB.errors=[...(d.errors||[]),...(r.errors||[])];UB.msg='';
+  UB.drafts.forEach(x=>{const l=leadByEmail(x.to);if(l&&x.kind==='first'&&!l.draftedAt){l.draftedAt=Date.now()}});save();
+  if(!UB.sel||!UB.drafts.concat(UB.replies).some(x=>x.mid===UB.sel))UB.sel=(UB.drafts[0]||UB.replies[0]||{}).mid||''}
+ catch(e){UB.msg='Helper not running. In Terminal: cd ~/clipper-crm && python3 tools/local_runner.py'}
+ UB.loading=false;uniboxV()}
+async function ubPost(path,body){const r=await (await fetch(RUNNER+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();if(r.error)throw new Error(r.error);return r}
+function uniboxV(){const list=UB.view==='drafts'?UB.drafts:UB.replies,cur=list.find(x=>x.mid===UB.sel)||list[0];if(cur)UB.sel=cur.mid;
+ const approved=S.leads.filter(l=>isEmailReady(l)&&l.draftedAt&&l.approved).length,firsts=UB.drafts.filter(x=>x.kind==='first');
+ const row=x=>{const l=leadByEmail(x.to||x.from);const ok=l&&l.approved;return`<div class="ub-row ${x.mid===UB.sel?'on':''}" data-m="${esc(x.mid)}"><b>${esc(x.to||x.from)}</b>${x.kind==='reply'?' <span class=mut>(your reply)</span>':ok?' <span style="color:var(--ok)">✓ approved</span>':''}<br><span class=mut>${esc((x.subject||'').slice(0,70))}</span><br><span class=mut style="font-size:11px">${esc(x.inbox||x.from||'')}</span></div>`};
+ $('#main').innerHTML=`<style>.ub{display:grid;grid-template-columns:minmax(240px,340px) 1fr;gap:10px}.ub-list{max-height:70vh;overflow:auto}.ub-row{padding:8px;border:1px solid var(--bd,#e5e7eb);border-radius:8px;margin-bottom:6px;cursor:pointer}.ub-row.on{border-color:var(--acc)}@media(max-width:760px){.ub{grid-template-columns:1fr}}</style>
+ <div class="card"><b>Unibox</b> <span class=mut>Every draft and every reply from all your inboxes, in one place. Read, edit, approve. Nothing is sent from here until you drip-send.</span>
+  <div class="row" style="margin-top:8px"><button class="b ${UB.view==='drafts'?'p':''}" id="ub-d">Drafts (${UB.drafts.length})</button><button class="b ${UB.view==='replies'?'p':''}" id="ub-r">Replies (${UB.replies.length})</button><button class="b" id="ub-load" ${UB.loading?'disabled':''}>↻ Refresh</button>
+   ${UB.view==='drafts'?`<button class="b" id="ub-all" ${firsts.length?'':'disabled'}>✓ Approve all (${firsts.filter(x=>{const l=leadByEmail(x.to);return !(l&&l.approved)}).length})</button><button class="b p" id="ub-drip" ${approved&&!ES.busy?'':'disabled'}>📤 Drip-send the approved (${approved})</button>`:''}</div>
+  ${UB.msg?`<div style="color:var(--acc);margin-top:6px">${esc(UB.msg)}</div>`:''}${UB.errors.length?`<div class=mut style="margin-top:6px">Could not read: ${esc(UB.errors.join('; '))}</div>`:''}</div>
+ <div class="ub"><div class="card ub-list">${list.length?list.map(row).join(''):`<span class=mut>${UB.loading?'Loading...':'Nothing here yet. Press Refresh after the autopilot has made drafts.'}</span>`}</div>
+ <div class="card">${cur?(UB.view==='drafts'?`<div class=mut>To: <b>${esc(cur.to)}</b> · From inbox: <b>${esc(cur.inbox)}</b>${cur.kind==='reply'?' · <b>reply to someone who said yes</b>':''}</div>
+   <label>Subject</label><input id="ub-subj" value="${esc(cur.subject)}" style="width:100%"><label>Email (your name, address and the opt out line are part of the text, edit with care)</label><textarea id="ub-body" style="min-height:300px;width:100%">${esc(cur.body)}</textarea>
+   <div class="row" style="margin-top:8px">${cur.kind==='reply'?'<button class="b p" id="ub-sendreply">Send this reply now</button>':`<button class="b p" id="ub-ok">${(leadByEmail(cur.to)||{}).approved?'✓ Approved (click to undo)':'✓ Approve'}</button>`}<button class="b" id="ub-save">Save my edits</button><button class="b" id="ub-del">Remove${cur.kind==='reply'?'':' this lead'}</button></div>`
+   :`<div class=mut>From: <b>${esc(cur.from)}</b> · to inbox: ${esc(cur.inbox)} · ${esc(cur.date)}</div><h4 style="margin:6px 0">${esc(cur.subject)}</h4><pre style="white-space:pre-wrap;max-height:50vh">${esc(cur.text)}</pre>
+   <div class="row"><button class="b" id="ub-int">Mark Interested</button><button class="b" id="ub-no">Mark Not interested</button></div><div class=mut style="margin-top:6px">Press <b>6. Check replies</b> on the Email tab to have DeepSeek read replies and write the answer draft for clear yeses.</div>`):'<span class=mut>Pick an email on the left.</span>'}</div></div>`;
+ const on_=(id,fn)=>{const b=document.getElementById(id);if(b)b.onclick=fn};
+ document.querySelectorAll('.ub-row').forEach(r=>r.onclick=()=>{UB.sel=r.dataset.m;uniboxV()});
+ on_('ub-d',()=>{UB.view='drafts';UB.sel='';uniboxV()});on_('ub-r',()=>{UB.view='replies';UB.sel='';uniboxV()});on_('ub-load',ubLoad);
+ on_('ub-all',()=>{firsts.forEach(x=>{const l=leadByEmail(x.to);if(l)l.approved=true});save();uniboxV();nav()});
+ on_('ub-drip',()=>{tab='email';render();setTimeout(()=>document.getElementById('ap-drip')&&document.getElementById('ap-drip').click(),400)});
+ on_('ub-ok',()=>{const l=leadByEmail(cur.to);if(l){l.approved=!l.approved;save();uniboxV();nav()}});
+ on_('ub-save',async()=>{const s=document.getElementById('ub-subj').value,b=document.getElementById('ub-body').value;UB.msg='Saving...';uniboxV();
+  try{const r=await ubPost('/unibox/draft/update',{mid:cur.mid,subject:s,body:b});const l=leadByEmail(cur.to);if(l&&cur.kind==='first'){l.subjectOverride=s;l.bodyOverride=b.split('\n\n--\n')[0].trim()}save();UB.sel=r.mid;await ubLoad();UB.msg='Saved. The sent email will use your edit.'}catch(e){UB.msg='Could not save: '+e.message}uniboxV()});
+ on_('ub-del',async()=>{if(!confirm('Remove this draft'+(cur.kind==='first'?' and drop the lead':'')+'?'))return;try{await ubPost('/unibox/draft/delete',{mid:cur.mid});const l=leadByEmail(cur.to);if(l&&cur.kind==='first'){l.status='Removed';l.notes=((l.notes?l.notes+' | ':'')+'Removed from the Unibox')}save();await ubLoad()}catch(e){UB.msg='Could not remove: '+e.message;uniboxV()}});
+ on_('ub-sendreply',async()=>{if(!confirm('Send this reply to '+cur.to+' now?'))return;try{await ubPost('/unibox/draft/send',{mid:cur.mid});const l=leadByEmail(cur.to);if(l)l.status='Interested';save();UB.msg='Sent.';await ubLoad()}catch(e){UB.msg='Could not send: '+e.message;uniboxV()}});
+ const st=s=>()=>{const l=leadByEmail(cur.from);if(l){l.status=s;save();UB.msg='Marked '+s+'.';uniboxV()}else{UB.msg='No lead with that email in the CRM.';uniboxV()}};on_('ub-int',st('Interested'));on_('ub-no',st('Not Interested'))}
 async function loadEmailStats(){const el=document.getElementById('email-stats');if(!el)return;let st;try{st=await (await fetch(RUNNER+'/email/stats',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})).json()}catch(e){el.innerHTML='';return}
  const tbl=(title,o,names)=>{const k=Object.keys(o).sort();if(!k.length)return'';return`<table><tr><th>${title}</th><th>Sent</th><th>Replied</th><th>Asked to stop</th><th>Bounced</th><th>Reply rate</th></tr>${k.map(x=>{const r=o[x];return`<tr><td>${esc((names&&names[x])||x)}</td><td>${r.sent}</td><td>${r.replied}</td><td>${r.optout}</td><td>${r.bounced}</td><td>${r.reply_rate}%</td></tr>`}).join('')}</table>`};
  const v=tbl('Version',st.variant||{}),p=tbl('Recipient mail host',st.provider||{},{google:'Google / Gmail',microsoft:'Outlook / Microsoft',other:'Other (custom host)',unknown:'Unknown'});
