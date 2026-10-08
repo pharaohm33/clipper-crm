@@ -34,20 +34,24 @@ def dns_checks(acct):
     domain = acct["email"].split("@")[1].lower()
     host = (acct.get("smtp_host") or "").lower()
     google = "gmail" in host or "google" in host
+    # (name, text the SPF record must contain, the record to add). Zoho's include depends on your Zoho region (zoho.com, zoho.eu, zoho.in).
+    provider = (("Google", "_spf.google.com", "v=spf1 include:_spf.google.com ~all") if google else
+                ("Zoho", "zoho.", "v=spf1 include:zoho.com ~all") if "zoho" in host else
+                ("Microsoft", "spf.protection.outlook.com", "v=spf1 include:spf.protection.outlook.com ~all") if "office365" in host or "outlook" in host else None)
     out = []
     spf = txt(domain)
     if "v=spf1" in spf:
         out.append((GOOD, f"SPF record found for {domain}"))
-        if google and "_spf.google.com" not in spf:
-            out.append((WARN, f"SPF doesn't mention Google. Set the TXT record on {domain} to: v=spf1 include:_spf.google.com ~all"))
+        if provider and provider[1] not in spf:
+            out.append((WARN, f"SPF doesn't mention {provider[0]}. Set the TXT record on {domain} to: {provider[2]}"))
     else:
-        out.append((BAD, f"No SPF record on {domain}. Add a TXT record (host @): v=spf1 include:_spf.google.com ~all" if google else f"No SPF record on {domain}. Add the TXT record your mail provider lists for SPF."))
+        out.append((BAD, f"No SPF record on {domain}. Add a TXT record (host @): {provider[2]}" if provider else f"No SPF record on {domain}. Add the TXT record your mail provider lists for SPF."))
     if google:
         dkim = txt(f"google._domainkey.{domain}")
         out.append((GOOD, "DKIM record found") if "v=dkim1" in dkim else
                    (BAD, f"No DKIM record. In Google Admin: Apps > Google Workspace > Gmail > Authenticate email, generate the key, add the TXT record it shows (host google._domainkey), then press Start authentication."))
     else:
-        out.append((WARN, "DKIM not checked for this provider. Make sure your provider's DKIM record is set."))
+        out.append((WARN, "DKIM isn't auto-checked for this provider. In its admin panel, switch DKIM on and add the TXT record it shows."))
     dmarc = txt(f"_dmarc.{domain}")
     out.append((GOOD, "DMARC record found") if "v=dmarc1" in dmarc else
                (BAD, f"No DMARC record. Add a TXT record, host _dmarc: v=DMARC1; p=none; rua=mailto:{acct['email']}"))
