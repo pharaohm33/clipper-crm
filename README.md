@@ -69,8 +69,8 @@ The **Email** tab runs the whole chain for podcasts you haven't contacted:
 3. **Preview, Drafts or Send**: a short email with the link. Preview sends nothing.
 4. **Follow-ups** (3 and 7 days, same inbox, same thread) and **Check replies** (anyone who says no is added to the do-not-contact list).
 
-**Setup (once):** copy `tools/email_accounts.example.json` to `tools/email_accounts.json` and fill in your name, a real postal address, and one or more inboxes
-(app passwords, never your normal password). The file is git-ignored. Then `python3 tools/local_runner.py` and open the Email tab.
+**Setup (once):** follow `tools/EMAIL_SETUP.md`. In short: `python3 tools/setup_email.py` (passwords typed hidden into your own terminal), then
+`python3 tools/check_email_setup.py` (checks the domain records and logins), then `python3 tools/local_runner.py` and open the Email tab.
 
 **Protecting your sending reputation:** use separate sending domains (not your main one) with SPF, DKIM and DMARC set up, several inboxes, and keep the
 default slow ramp (5 a day, growing 3 a day, 30 max per inbox). The engine rotates inboxes, spaces sends randomly inside a 9 to 5 window,
