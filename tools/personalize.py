@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Writes one specific, honest sentence or two about the clip we made from a podcast's episode, using DeepSeek.
+Writes the short phrase that completes \"I really liked ____\" in the cold email, using DeepSeek.
 The line is built ONLY from the clip's own transcript, so it can point at something the host really said.
 
 The DeepSeek key is read (never printed) from, in order: the DEEPSEEK_API_KEY environment variable, tools/.env,
@@ -17,21 +17,23 @@ REPO = Path(os.getenv("CLIPPER_REPO") or Path.home() / "instagram-video-generato
 URL = os.getenv("DEEPSEEK_API_URL", "https://api.deepseek.com/chat/completions")
 MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 
-SYSTEM = """You write one short personal note inside a cold email from a video editor to a podcast host.
-The editor cut a short clip from the host's own episode and is giving it to them for free.
+SYSTEM = """You help a video editor write a cold email to a podcast host. The editor cut a short clip from the host's own episode.
+The email has this sentence: "I really liked ____, so I made a short clip out of it."
 
-Write 1 or 2 plain sentences (at most 45 words) that:
-- point to ONE specific idea, story or point the host actually makes in the clip transcript, in your own words
-- say why that moment works as a short clip (for example it is a complete thought, a surprising detail, or a strong opinion)
-- sound like a real person wrote it quickly: warm, specific, no hype
+Write ONLY the words that fill the blank: one short phrase (6 to 18 words) naming ONE specific idea, story or point the host makes in the clip transcript.
+
+Good fills, for the style only:
+- the part where you explain why you bought near Music Row before running the numbers
+- your story about the first deal that almost fell through
+- how you describe pricing a flip when the comps are thin
 
 Hard rules:
-- Use only what is in the transcript. Never invent facts, numbers, names or quotes, and never claim what other people or most people do. Do not quote more than 5 words in a row.
-- No flattery clichés ("amazing", "incredible", "game changer", "love your content").
-- Do not mention AI, transcripts, or that you are summarizing.
-- No hyphens, no em dashes, no emojis, no hashtags, no exclamation marks.
-- Do not greet and do not end with a question or a call to action.
-Reply with only the sentences."""
+- Use only what is in the transcript. Never invent facts, numbers, names or quotes, and never claim what other people or most people do.
+- Start with "the part where you", "your story about", "your point about", "how you" or "your take on".
+- Plain words, no hype, no flattery words ("amazing", "incredible", "game changer").
+- No hyphens, no em dashes, no quotation marks, no emojis, no hashtags, no exclamation marks.
+- No ending punctuation, no greeting, no extra sentences.
+Reply with only the phrase."""
 
 
 def deepseek_key():
@@ -51,10 +53,10 @@ def deepseek_key():
 
 def clean(text):
     """Keeps the note plain: no quotes around it, no dashes, no braces or pipes (those mean spintax in the email engine)."""
-    t = re.sub(r"\s+", " ", (text or "").strip().strip("\"'`“”"))
+    t = re.sub(r"\s+", " ", (text or "").strip().strip("\"'`“”")).rstrip(".,;:")
     t = re.sub(r"\s*[—–]\s*", ", ", t).replace("-", " ").replace("!", ".")
     t = re.sub(r"[{}|]", "", t)
-    return re.sub(r"\s+", " ", t).strip()[:320]
+    return re.sub(r"\s+", " ", t).strip()[:160]
 
 
 def write_line(podcast, episode_title, clip_title, hook, transcript, timeout=60):
@@ -65,7 +67,7 @@ def write_line(podcast, episode_title, clip_title, hook, transcript, timeout=60)
         return ""
     user = (f"Podcast: {podcast}\nEpisode: {episode_title or 'unknown'}\nClip title: {clip_title or 'unknown'}\n"
             f"On screen hook: {hook or 'none'}\n\nClip transcript:\n{transcript[:3500]}")
-    body = json.dumps({"model": MODEL, "temperature": 0.6, "max_tokens": 120,
+    body = json.dumps({"model": MODEL, "temperature": 0.6, "max_tokens": 60,
                        "messages": [{"role": "system", "content": SYSTEM}, {"role": "user", "content": user}]}).encode()
     req = urllib.request.Request(URL, data=body, headers={"Content-Type": "application/json", "Authorization": "Bearer " + key})
     try:
@@ -74,4 +76,4 @@ def write_line(podcast, episode_title, clip_title, hook, transcript, timeout=60)
     except Exception:
         return ""
     line = clean(out)
-    return line if 20 <= len(line) else ""
+    return line if len(line.split()) >= 4 else ""

@@ -21,10 +21,9 @@ Rules:
 |---|---|
 | `{name}` | the podcast's name |
 | `{niche}` | the niche, like "real estate" |
-| `{clip_link}` | the clip link, or all of them, one per line |
-| `{clips}` | "a short clip", "a few short clips" or "three short clips" |
-| `{they_are}` | "It is" for one clip, "They are" for several |
-| `{personal_line}` | the note DeepSeek wrote about the clip (empty if none) |
+| `{topic}` | a short phrase DeepSeek writes about one point in the clip, like "the part where you buy near Music Row before you move there" (falls back to "your recent episode") |
+| `{clip_link}` | clip links, one per line. The default email has NO links, on purpose |
+| `{clips}`, `{they_are}` | wording that adapts to how many links there are (only matter if you add links) |
 | `{sender}` | your name |
 | `{episode}` | the episode title (avoid: titles are long) |
 
@@ -38,11 +37,14 @@ Hyphens and long dashes are turned into commas or spaces automatically, so the e
 - Change ONE thing at a time, and wait for about 100 emails per version before picking a winner. The **Results** card shows replies, opt outs and bounces per version.
 - Short, specific subjects work best. Avoid "free", all caps, "!!", emojis, and "Re:" or "Fwd:".
 
-## The personal note
-- DeepSeek reads the words spoken in the clip and writes one or two sentences about one specific point.
-- It is only used where you put `{personal_line}`. If a lead has no note, that paragraph simply disappears.
-- Read every note in Preview. If one is wrong or odd, remove that lead for now or rewrite the line in the lead's data. The rules DeepSeek follows are at the top of `tools/personalize.py` (the `SYSTEM` text): change the tone there.
+## The topic phrase
+- DeepSeek reads the words spoken in the clip and writes the short phrase that fills "I really liked ____" in the email.
+- It is used where you put `{topic}`. If a lead has none, the email says "your recent episode" instead.
+- Read every phrase in Preview. If one is wrong or odd, skip that lead for now. The rules DeepSeek follows are at the top of `tools/personalize.py` (the `SYSTEM` text): change the tone there.
 - Button **2b. Write personal notes** fills in notes for leads that already have a clip.
+
+## No links in the first email
+The first email asks "Do you want me to send it over?" and has no links, because links are a spam signal. The clips are made as private drafts in the template's folder. When someone says yes, open the **Email** tab: the **They said yes** card (leads marked Replied or Interested) has **Get links + copy reply**. It makes view links for that lead's clips and copies a ready reply to paste.
 
 ## Follow ups
 They go out after 3 and 7 days if there was no reply, in the same email thread. Their wording is in `tools/cold_email.py` (the `FOLLOWUPS` list). Spintax and tokens work there too.

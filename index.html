@@ -44,14 +44,16 @@ const STATUSES=['New','Sample Sent',CNS,'Replied','Interested','Client','No Resp
 const TPL=['{n} podcast full episode','{n} podcast interview','how to start a {n} podcast','{n} podcast new episode'];
 const DEF={settings:{key:'',goal:5000,daily:100,minSubs:1000,maxSubs:150000,maxDays:60,followDays:3,templates:3,
  syncUrl:'',syncPw:'',geminiKey:'',geminiModel:'gemini-2.5-flash',skipNoContact:1,igOnly:0,useGeminiParse:0,maxShorts:20,emailLimit:20,
- emailSkipMS:true,emailSubjectB:"{name} clip you can post",emailBodyB:"",emailSubject:"made a clip from your {name} episode",
- emailBody:"{Hi|Hey|Hello} there,\n\n{I just watched|I caught|I watched} your recent episode on {niche} and {loved it|really enjoyed it}.\n\n{personal_line}\n\nI cut {clips} from it that I think could do well on Reels, TikTok and Shorts:\n\n{clip_link}\n\n{they_are} yours to post, free, no strings attached. If you'd like a few of these each week, just reply and I'll send you more.\n\n{Thanks|Best|Cheers},\n{sender}",
+ emailSkipMS:true,emailSubjectB:"{name} clip you can post",emailBodyB:"",emailSubject:"made a clip from {name}",
+ emailBody:"{Hey|Hi}, I {saw|came across} {name} and {really liked|loved} {topic}, so I made a short clip out of it. {Do you want me to send it over?|Want me to send it to you?} It doesn't cost you anything.\n\n{Thanks|Best|Cheers},\n{sender}",
  dm:"{Hey|Hey there|Hi}! {Just watched|Just finished|Caught} your {latest|recent|newest} episode on {niche} and {loved it|really enjoyed it|thought it was great}. I {made|cut|put together} a quick clip from it because {it deserved more eyes|it was too good not to share|I think it could do well on Reels}. {Totally free|No strings attached|No cost at all}, just thought you'd like to see it. Here's the full episode I pulled it from: {episode}"},
  niches:['real estate','personal finance','fitness','entrepreneurship','mental health','true crime','faith christian','sports betting','parenting','health longevity'],
  leads:[],payments:[],clients:[],team:[],retainers:[]};
 let S;try{S=JSON.parse(localStorage.getItem('clipperCRM'))}catch(e){}
 S=Object.assign({},DEF,S||{});S.settings=Object.assign({},DEF.settings,S.settings);
+if(S.settings.emailSubject==="made a clip from your {name} episode")S.settings.emailSubject=DEF.settings.emailSubject;
 if(S.settings.emailSubject==="{Quick clip|Short clip|Clip} from your {niche} episode"){S.settings.emailSubject=DEF.settings.emailSubject;if(!S.settings.emailSubjectB)S.settings.emailSubjectB=DEF.settings.emailSubjectB}
+if(S.settings.emailBody==="{Hi|Hey|Hello} there,\n\n{I just watched|I caught|I watched} your recent episode on {niche} and {loved it|really enjoyed it}.\n\n{personal_line}\n\nI cut {clips} from it that I think could do well on Reels, TikTok and Shorts:\n\n{clip_link}\n\n{they_are} yours to post, free, no strings attached. If you'd like a few of these each week, just reply and I'll send you more.\n\n{Thanks|Best|Cheers},\n{sender}")S.settings.emailBody=DEF.settings.emailBody;
 if(S.settings.emailBody==="{Hi|Hey|Hello} there,\n\n{I just watched|I caught|I watched} your recent episode on {niche} and {loved it|really enjoyed it}.\n\n{personal_line}\n\nI cut a short clip from it that I think could do well on Reels, TikTok and Shorts:\n\n{clip_link}\n\n{It is yours to post, free, no strings attached.|Feel free to post it, it is yours, no strings attached.} If you'd like a few of these each week, just reply and I'll send you more.\n\n{Thanks|Best|Cheers},\n{sender}")S.settings.emailBody=DEF.settings.emailBody;
 if(S.settings.emailBody==="{Hi|Hey|Hello} there,\n\n{I just watched|I caught|I watched} your recent episode on {niche} and {loved it|really enjoyed it}. I cut a short clip from it that I think could do well on Reels, TikTok and Shorts:\n\n{clip_link}\n\n{It is yours to post, free, no strings attached.|Feel free to post it, it is yours, no strings attached.} If you'd like a few of these each week, just reply and I'll send you more.\n\n{Thanks|Best|Cheers},\n{sender}")S.settings.emailBody=DEF.settings.emailBody;
 if(/[—–]/.test(S.settings.dm)||S.settings.dm.startsWith('Hey! Just watched your latest'))S.settings.dm=DEF.settings.dm;
@@ -212,11 +214,11 @@ function pinLead(id){const l=S.leads.find(x=>x.id==id);if(!l)return false;
 const ES={lines:[],busy:false,preview:null,status:null,msg:''};
 const DAY=86400000;
 const isSuppressed=e=>{const L=(ES.status&&ES.status.suppressed_list)||[],a=String(e||'').toLowerCase();return L.includes(a)||L.includes('@'+a.split('@')[1])};
-const isEmailReady=l=>l.status=='New'&&l.email&&l.clipLink&&!l.emailedAt&&!isSuppressed(l.email);
+const isEmailReady=l=>l.status=='New'&&l.email&&(l.clipFile||l.clipLink)&&!l.emailedAt&&!isSuppressed(l.email);
 const ytLeads=l=>/youtube\.com|youtu\.be/.test(l.episode||'');
 function emailFunnel(){const L=S.leads.filter(l=>l.status!='Removed'),now=Date.now();
  const emailed=L.filter(l=>l.emailedAt);
- return{fresh:L.filter(l=>l.status=='New').length,withEmail:L.filter(l=>l.status=='New'&&l.email).length,withClip:L.filter(l=>l.status=='New'&&l.email&&l.clipLink).length,
+ return{fresh:L.filter(l=>l.status=='New').length,withEmail:L.filter(l=>l.status=='New'&&l.email).length,withClip:L.filter(l=>l.status=='New'&&l.email&&(l.clipFile||l.clipLink)).length,
   ready:L.filter(isEmailReady).length,emailed:emailed.length,replied:L.filter(l=>l.emailedAt&&['Replied','Interested','Client'].includes(l.status)).length,
   followDue:emailed.filter(l=>l.status=='Sample Sent'&&(l.emailStep||0)<2&&now-(l.firstEmailedAt||l.emailedAt)>=(((l.emailStep||0)==0?3:7)*DAY)-3600000).length}}
 async function helperJob(path,body,onLine){
@@ -235,7 +237,7 @@ function findEmails(n){const now=Date.now();
   if(r=parseTag(t,'EMAILFOUND')){const l=S.leads.find(x=>x.id==r.id);if(l){l.email=r.email;l.emailSource=r.source;l.emailChecked=Date.now()}}
   else if(r=parseTag(t,'EMAILNONE')){const l=S.leads.find(x=>x.id==r.id);if(l)l.emailChecked=Date.now()}})}
 function prepareClips(n,onlyWithEmail){
- const todo=S.leads.filter(l=>l.status=='New'&&!l.clipLink&&ytLeads(l)&&(!onlyWithEmail||l.email)).slice(0,n).map(l=>({id:l.id,name:l.name,url:l.episode,epTitle:l.epTitle}));
+ const todo=S.leads.filter(l=>l.status=='New'&&!l.clipLink&&!l.clipFile&&ytLeads(l)&&(!onlyWithEmail||l.email)).slice(0,n).map(l=>({id:l.id,name:l.name,url:l.episode,epTitle:l.epTitle}));
  if(!todo.length){ES.msg=onlyWithEmail?'No leads with an email still need a clip. Find emails first, or untick the box.':'No leads need a clip.';return emailDyn()}
  return helperJob('/pipeline/start',{leads:todo,minutes:5,clips:1},t=>{let r;
   if(r=parseTag(t,'PERSONAL')){const l=S.leads.find(x=>x.id==r.id);if(l)l.personalLine=r.line||''}
@@ -244,7 +246,7 @@ function prepareClips(n,onlyWithEmail){
 const emailPayload=l=>({id:l.id,name:l.name,niche:l.niche,epTitle:l.epTitle,email:l.email,clipLink:l.clipLink,subject:l.emailSubject,personal:l.personalLine||''})
 const tpl=()=>({subject:S.settings.emailSubject,body:S.settings.emailBody,variants:(S.settings.emailSubjectB||S.settings.emailBodyB)?[{subject:S.settings.emailSubjectB,body:S.settings.emailBodyB}]:[],skip_providers:S.settings.emailSkipMS===false?[]:['microsoft']});
 async function previewEmails(){ES.msg='';const leads=S.leads.filter(isEmailReady).slice(0,+S.settings.emailLimit||20).map(emailPayload);
- if(!leads.length){ES.preview=null;ES.msg='Nothing is ready to email yet (a lead needs an email AND a clip link).';return emailDyn()}
+ if(!leads.length){ES.preview=null;ES.msg='Nothing is ready to email yet (a lead needs an email AND a prepared clip).';return emailDyn()}
  try{const r=await (await fetch(RUNNER+'/email/preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({leads,template:tpl(),limit:leads.length})})).json();ES.preview=r.items;ES.status=r.status}
  catch(e){ES.msg='Helper not running. In Terminal: cd ~/clipper-crm && python3 tools/local_runner.py'}emailDyn()}
 function applyEmailResult(r){const l=S.leads.find(x=>x.id==r.id);if(!l)return;
@@ -253,7 +255,7 @@ function applyEmailResult(r){const l=S.leads.find(x=>x.id==r.id);if(!l)return;
 async function sendEmails(mode,step){const n=+S.settings.emailLimit||20;let leads;
  if(step>0){const now=Date.now();leads=S.leads.filter(l=>l.emailedAt&&l.status=='Sample Sent'&&(l.emailStep||0)==step-1&&now-(l.firstEmailedAt||l.emailedAt)>=((step==1?3:7)*DAY)-3600000).slice(0,n).map(emailPayload)}
  else leads=S.leads.filter(isEmailReady).slice(0,n).map(emailPayload);
- if(!leads.length){ES.msg=step?'No follow-ups are due yet.':'Nothing is ready to email yet (a lead needs an email AND a clip link).';return emailDyn()}
+ if(!leads.length){ES.msg=step?'No follow-ups are due yet.':'Nothing is ready to email yet (a lead needs an email AND a prepared clip).';return emailDyn()}
  if(mode=='send'&&!confirm(`Send up to ${leads.length} REAL email${leads.length==1?'':'s'} now?\n\nThey go out one at a time from your inboxes (rotating, within each inbox's daily cap), with your name, your postal address and an opt out line. Previews are free; this is not.`))return;
  return helperJob('/email/run',{mode,confirm:mode=='send',leads,template:tpl(),limit:n,step},t=>{const r=parseTag(t,'EMAIL');if(r)applyEmailResult(r)})}
 async function checkReplies(){const sent=S.leads.filter(l=>l.emailedAt&&l.status=='Sample Sent').map(l=>({id:l.id,email:l.email,since_ts:Math.floor((l.firstEmailedAt||l.emailedAt)/1000)}));
@@ -267,6 +269,16 @@ async function writePersonal(){const todo=S.leads.filter(l=>l.clipFile&&!l.perso
  if(!todo.length){ES.msg='Every lead with a clip already has a personal note.';return emailDyn()}
  await helperJob('/email/personalize',{leads:todo},t=>{let r;if(r=parseTag(t,'PERSONAL')){const l=S.leads.find(x=>x.id==r.id);if(l)l.personalLine=r.line||''}});
  const made=todo.filter(x=>(S.leads.find(l=>l.id==x.id)||{}).personalLine).length;ES.msg=`Wrote ${made} of ${todo.length} personal notes. The rest had too little to say, or DeepSeek could not be reached. Preview shows each one.`;save();emailDyn()}
+function repliedPanel(){const el=document.getElementById('email-replied');if(!el)return;
+ const L=S.leads.filter(l=>['Replied','Interested'].includes(l.status)&&(l.clipFile||(l.clipFiles||[]).length));
+ if(!L.length){el.innerHTML='';return}
+ el.innerHTML=`<div class="card tw"><b>They said yes: send the clips</b> <span class=mut>The clips are private drafts until you press Get links. That makes a view link for each clip and copies a ready reply to paste.</span><table><tr><th>Lead</th><th>Email</th><th>Clips</th><th></th></tr>${L.map(l=>`<tr><td>${esc(l.name)}</td><td>${esc(l.email||'')}</td><td>${(l.clipFiles||[l.clipFile]).length}${l.clipLinks&&l.clipLinks.length?' (links made)':''}</td><td><button class="b p" data-gl="${l.id}">Get links + copy reply</button> <button class="b" data-sc="${l.id}">Show files</button></td></tr>`).join('')}</table><div class=mut id="rp-msg" style="margin-top:6px"></div></div>`;
+ el.querySelectorAll('[data-sc]').forEach(b=>b.onclick=async()=>{const l=S.leads.find(x=>x.id==b.dataset.sc);try{const r=await (await fetch(RUNNER+'/reveal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:(l.clipFiles||[l.clipFile])[0]})})).json();if(r.error)alert(r.error)}catch(e){alert('Helper not running.')}});
+ el.querySelectorAll('[data-gl]').forEach(b=>b.onclick=async()=>{const l=S.leads.find(x=>x.id==b.dataset.gl),m=document.getElementById('rp-msg');b.disabled=true;m.textContent='Making view links (this uploads the clips, it can take a minute)...';
+  try{let links=l.clipLinks&&l.clipLinks.length?l.clipLinks:null;
+   if(!links){const r=await (await fetch(RUNNER+'/clips/share',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({files:l.clipFiles||[l.clipFile],name:l.name})})).json();if(r.error)throw new Error(r.error);links=r.links||[];if(!links.length)throw new Error((r.errors||[]).join('; ')||'no links came back');l.clipLinks=links;save()}
+   const txt=`Here ${links.length==1?'is the clip':'are '+links.length+' clips'} from your episode:\n\n${links.join('\n')}\n\n${links.length==1?'It is yours':'They are yours'} to post anywhere, no strings attached. If you'd like a few of these each week, just say the word.`;
+   await navigator.clipboard.writeText(txt);repliedPanel();document.getElementById('rp-msg').textContent='Copied. Paste it as your reply.'}catch(e){m.textContent='Could not make links: '+e.message;b.disabled=false}})}
 async function loadEmailStats(){const el=document.getElementById('email-stats');if(!el)return;let st;try{st=await (await fetch(RUNNER+'/email/stats',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})).json()}catch(e){el.innerHTML='';return}
  const tbl=(title,o,names)=>{const k=Object.keys(o).sort();if(!k.length)return'';return`<table><tr><th>${title}</th><th>Sent</th><th>Replied</th><th>Asked to stop</th><th>Bounced</th><th>Reply rate</th></tr>${k.map(x=>{const r=o[x];return`<tr><td>${esc((names&&names[x])||x)}</td><td>${r.sent}</td><td>${r.replied}</td><td>${r.optout}</td><td>${r.bounced}</td><td>${r.reply_rate}%</td></tr>`}).join('')}</table>`};
  const v=tbl('Version',st.variant||{}),p=tbl('Recipient mail host',st.provider||{},{google:'Google / Gmail',microsoft:'Outlook / Microsoft',other:'Other (custom host)',unknown:'Unknown'});
@@ -274,7 +286,7 @@ async function loadEmailStats(){const el=document.getElementById('email-stats');
 async function loadEmailStatus(){try{ES.status=await (await fetch(RUNNER+'/email/status')).json()}catch(e){ES.status=null}emailDyn()}
 function emailDyn(){const el=document.getElementById('email-dyn');if(!el)return;const f=emailFunnel(),st=ES.status,dis=ES.busy?'disabled':'',canSend=st&&st.ready&&!ES.busy?'':'disabled';
  const bar=(k,v)=>`<div class="stat"><small>${k}</small><b>${v}</b></div>`;
- el.innerHTML=`<div class="grid">${bar('Fresh leads',f.fresh)}${bar('With an email',f.withEmail)}${bar('With a clip link',f.withClip)}${bar('Ready to email',f.ready)}${bar('Emailed',f.emailed)}${bar('Replied',f.replied)}${bar('Follow-ups due',f.followDue)}</div>
+ el.innerHTML=`<div class="grid">${bar('Fresh leads',f.fresh)}${bar('With an email',f.withEmail)}${bar('With a clip ready',f.withClip)}${bar('Ready to email',f.ready)}${bar('Emailed',f.emailed)}${bar('Replied',f.replied)}${bar('Follow-ups due',f.followDue)}</div>
  <div class="card" style="margin-top:14px"><b>Sending setup</b> ${st?(st.ready?'<span style="color:var(--ok)">ready</span>':'<span style="color:var(--acc)">not ready</span>'):'<span class=mut>helper not running</span>'}
   ${st?`<div class=mut style="margin-top:6px">${st.inboxes.length} inbox${st.inboxes.length==1?'':'es'}: ${st.inboxes.map(i=>`${esc(i.email)} (${i.sent_today}/${i.cap} today)`).join(', ')||'none yet'} · room left today: ${st.capacity_left} · do not contact list: ${st.suppressed} · send window ${st.window.start_hour}:00 to ${st.window.end_hour}:00 ${st.in_send_window?'(open now)':'(closed now)'}</div>
   ${(st.warnings||[]).map(w=>`<div style="margin-top:8px;color:var(--acc)">⚠ ${esc(w)}</div>`).join('')}
@@ -294,6 +306,7 @@ function emailDyn(){const el=document.getElementById('email-dyn');if(!el)return;
 function emailV(){const g=S.settings;
  $('#main').innerHTML=`<div class="card"><b>Cold email</b> <span class=mut>One short, honest email per podcast with a link to a clip made from their own episode. Rotates across your inboxes, keeps to daily caps that grow slowly, never emails the same address twice, and stops for anyone who says no.</span></div>
  <div id="email-dyn"></div>
+ <div id="email-replied"></div>
  <div id="email-stats"></div>
  <div class="card"><b>Your email</b> <span class=mut>Spintax like {Hi|Hey|Hello} picks one per lead. Tokens: {niche} {name} {episode} {clip_link} {sender}. Your name, postal address and an opt out line are added automatically.</span>
   <label>Subject</label><input data-e="emailSubject" value="${esc(g.emailSubject)}" style="width:100%">
@@ -305,7 +318,7 @@ function emailV(){const g=S.settings;
   <div class="row" style="margin-top:8px"><div><label>Emails per run</label><input data-e="emailLimit" type="number" min="1" max="60" value="${esc(g.emailLimit)}" style="width:90px"></div></div></div>`;
  $('#main').oninput=e=>{const k=e.target.dataset.e;if(!k)return;g[k]=e.target.type=='number'?+e.target.value:e.target.value;save()};
  $('#main').onchange=e=>{const k=e.target.dataset.ec;if(!k)return;g[k]=e.target.checked;save()};
- $('#main').onclick=null;emailDyn();loadEmailStatus();loadEmailStats()}
+ $('#main').onclick=null;emailDyn();loadEmailStatus();loadEmailStats();repliedPanel()}
 function markSent(l){(S.undo=S.undo||[]).push({id:l.id,status:l.status,sent:l.sent||'',follow:l.follow||'',at:Date.now()});S.undo=S.undo.slice(-30);l.status='Sample Sent';if(!l.sent)l.sent=today();l.follow=addDays(today(),+S.settings.followDays||3)}
 function leads(){const q=(leads.q||'').toLowerCase(),f=leads.f||'';
  const rows=S.leads.filter(l=>(f?l.status==f:l.status!='Removed')&&(!q||(l.name+l.niche).toLowerCase().includes(q)));

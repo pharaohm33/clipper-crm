@@ -34,7 +34,7 @@ LOG = HERE / "email_log.jsonl"
 SUPPRESS = HERE / "suppression.txt"
 OPT_OUT = re.compile(r"\b(unsubscribe|remove me|take me off|stop (emailing|sending|contacting)|do not (email|contact)|don't (email|contact)|no thanks|not interested|please stop)\b", re.I)
 
-DEFAULT_SUBJECT = "made a clip from your {name} episode"
+DEFAULT_SUBJECT = "made a clip from {name}"
 DEFAULT_BODY = """{Hi|Hey|Hello} there,
 
 {I just watched|I caught|I watched} your recent episode on {niche} and {loved it|really enjoyed it}. I cut a short clip from it that I think could do well on Reels, TikTok and Shorts:
@@ -46,8 +46,8 @@ DEFAULT_BODY = """{Hi|Hey|Hello} there,
 {Thanks|Best|Cheers},
 {sender}"""
 FOLLOWUPS = [
-    (3, "Just floating this back up in case it got buried. The clip is yours to keep either way, and I'm happy to cut a few more from your recent episodes if that would help.\n\n{sender}"),
-    (7, "Last note from me. If clips for your channel aren't a fit right now, no problem at all, just reply \"no thanks\" and I won't reach out again.\n\n{clip_link}\n\n{sender}"),
+    (3, "Just floating this back up in case it got buried. I'm still happy to send the clip over if you want it, and it costs you nothing.\n\n{sender}"),
+    (7, "Last note from me. If clips aren't a fit right now, no problem at all, just reply \"no thanks\" and I won't reach out again.\n\n{sender}"),
 ]
 
 
@@ -221,6 +221,7 @@ def render(template, lead, cfg, step=0, subject_for_reply=None):
                       .replace("{clips}", "a short clip" if len(links) < 2 else ("three" if len(links) == 3 else "a few") + " short clips")
                       .replace("{they_are}", "It is" if len(links) < 2 else "They are")
                       .replace("{clip_link}", "\n".join(links))
+                      .replace("{topic}", _prose(str(lead.get("personal") or "")) or "your recent episode")
                       .replace("{personal_line}", _prose(str(lead.get("personal") or "")))
                       .replace("{sender}", str(cfg.get("sender_name") or "")))
     if step == 0:
@@ -305,8 +306,8 @@ def plan(leads, template, mode="preview", limit=20, ignore_window=False, step=0)
         if step == 0 and provider in (template.get("skip_providers") if "skip_providers" in template else cfg.get("skip_providers", ["microsoft"])):
             yield {**base, "status": "skip", "why": f"mailbox is hosted by {provider.title()} (skipped for now)"}
             continue
-        if step == 0 and not (ld.get("clipLink") or ld.get("link")):
-            yield {**base, "status": "skip", "why": "no clip link yet (prepare the clip first)"}
+        if step == 0 and not (ld.get("clipReady") or ld.get("clipLink") or ld.get("link")):
+            yield {**base, "status": "skip", "why": "no clip prepared yet (prepare the clip first)"}
             continue
         if n >= limit:
             yield {**base, "status": "skip", "why": f"over this run's limit of {limit}"}

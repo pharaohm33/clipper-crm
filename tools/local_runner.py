@@ -223,7 +223,7 @@ def _mmss(sec):
     return f"{sec // 3600}:{sec % 3600 // 60:02d}:{sec % 60:02d}" if sec >= 3600 else f"{sec // 60}:{sec % 60:02d}"
 
 
-def run_pipeline(leads, minutes=5, clips=1, after=None, folder=None):
+def run_pipeline(leads, minutes=5, clips=1, after=None, folder=None, share=False):
     """For each lead in turn: pick a slice, download it, make the template, generate the clip, put it on a shareable
     link. One 'PIPE {json}' line per finished lead; the website saves it on the lead. Contact is still up to you."""
     try:
@@ -271,11 +271,13 @@ def run_pipeline(leads, minutes=5, clips=1, after=None, folder=None):
                 infos = list(raw.get("clips") or [])
                 files, links, titles = [], [], []
                 for k, out in enumerate(outs):
+                    files.append(str(REPO / "opencut-exports" / out))
+                    titles.append((infos[k] if k < len(infos) else {}).get("title", ""))
+                    if not share:
+                        continue  # the clips stay private drafts in the template's folder; links are made on request (/clips/share)
                     c3, shared = app_call("/api/outreach/share-clip", {"id": f"opencut-exports/{out}", "name": f"{ld.get('name')} - clip {k + 1}"}, timeout=300)
                     if c3 == 200 and shared.get("success"):
-                        files.append(str(REPO / "opencut-exports" / out))
                         links.append(shared.get("link", ""))
-                        titles.append((infos[k] if k < len(infos) else {}).get("title", ""))
                     else:
                         log(f"   (could not make a share link for clip {k + 1}: {shared.get('error') or c3})")
                 first = infos[0] if infos else {}
@@ -505,6 +507,23 @@ class H(BaseHTTPRequestHandler):
                 PIPE["stop"] = False
                 threading.Thread(target=run_personalize, args=(leads,), daemon=True).start()
             return self._send(200, {"ok": True, "leads": len(leads)})
+        if self.path == "/clips/share":
+            root = (REPO / "opencut-exports").resolve()
+            names = []
+            for f in body.get("files") or []:
+                p = Path(str(f)).resolve()
+                if root in p.parents and p.suffix.lower() == ".mp4" and p.exists():
+                    names.append(p.name)
+            if not names:
+                return self._send(400, {"error": "no clip files found to share"})
+            links, errors = [], []
+            for k, n in enumerate(names):
+                code, shared = app_call("/api/outreach/share-clip", {"id": f"opencut-exports/{n}", "name": f"{(body.get('name') or 'clip')} - clip {k + 1}"}, timeout=300)
+                if code == 200 and shared.get("success"):
+                    links.append(shared.get("link", ""))
+                else:
+                    errors.append(shared.get("error") or str(code))
+            return self._send(200, {"links": links, "errors": errors})
         if self.path == "/email/stats":
             return self._send(200, cold_email.stats())
         if self.path == "/pipeline/stop":
