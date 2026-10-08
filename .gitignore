@@ -4,3 +4,6 @@
 .DS_Store
 tools/runs/
 tools/.env
+tools/email_accounts.json
+tools/email_log.jsonl
+tools/suppression.txt

@@ -1,0 +1,19 @@
+{
+  "sender_name": "Your Name",
+  "postal_address": "Your real mailing address, City, ST 00000",
+  "reply_to": "",
+  "send_window": {"start_hour": 9, "end_hour": 17},
+  "min_delay_seconds": 90,
+  "max_delay_seconds": 240,
+  "warmup": {"start": 5, "add_per_day": 3, "max": 30},
+  "accounts": [
+    {
+      "email": "you@yourdomain.com",
+      "smtp_host": "smtp.gmail.com", "smtp_port": 587, "tls": true,
+      "imap_host": "imap.gmail.com",
+      "username": "you@yourdomain.com",
+      "password": "APP PASSWORD, not your normal password",
+      "daily_limit": 20
+    }
+  ]
+}

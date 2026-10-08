@@ -61,3 +61,20 @@ If the clipper is busy it waits (up to 15 minutes); if it is off, the file is ke
 Every template the helper creates starts with the clipper settings in `tools/outreach_settings.json` (captions on, High quality, auto silence cut
 at 0.8s, quote on, reuse off, virality filter off, complete idea on, hook title on, DeepSeek on, and save all as drafts). Edit that file to change them.
 To re-apply them to the templates already in the Podcast Outreach folder: `python3 tools/apply_outreach_settings.py` (add `--dry-run` to preview).
+
+## Cold email system (find, clip, email)
+The **Email** tab runs the whole chain for podcasts you haven't contacted:
+1. **Find emails**: a podcast's public contact email, taken from its RSS feed, its YouTube description, or its own website. Never guessed.
+2. **Prepare clips**: for each lead, the helper downloads a slice of their episode (skipping the intro), makes one clip with your template settings, and puts it on a Drive link anyone can open.
+3. **Preview, Drafts or Send**: a short email with the link. Preview sends nothing.
+4. **Follow-ups** (3 and 7 days, same inbox, same thread) and **Check replies** (anyone who says no is added to the do-not-contact list).
+
+**Setup (once):** copy `tools/email_accounts.example.json` to `tools/email_accounts.json` and fill in your name, a real postal address, and one or more inboxes
+(app passwords, never your normal password). The file is git-ignored. Then `python3 tools/local_runner.py` and open the Email tab.
+
+**Protecting your sending reputation:** use separate sending domains (not your main one) with SPF, DKIM and DMARC set up, several inboxes, and keep the
+default slow ramp (5 a day, growing 3 a day, 30 max per inbox). The engine rotates inboxes, spaces sends randomly inside a 9 to 5 window,
+and never emails the same address twice in 90 days.
+
+**The law:** every email carries your real name, postal address and an opt-out line, and anyone who opts out is never emailed again (CAN-SPAM requires this).
+If you email people in the EU, UK or Canada, those places have stricter rules for cold email. Check them first.

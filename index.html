@@ -43,7 +43,9 @@ const CNS='Contacted - no sample sent';
 const STATUSES=['New','Sample Sent',CNS,'Replied','Interested','Client','No Response','Not Interested','Removed'];
 const TPL=['{n} podcast full episode','{n} podcast interview','how to start a {n} podcast','{n} podcast new episode'];
 const DEF={settings:{key:'',goal:5000,daily:100,minSubs:1000,maxSubs:150000,maxDays:60,followDays:3,templates:3,
- syncUrl:'',syncPw:'',geminiKey:'',geminiModel:'gemini-2.5-flash',skipNoContact:1,igOnly:0,useGeminiParse:0,maxShorts:20,
+ syncUrl:'',syncPw:'',geminiKey:'',geminiModel:'gemini-2.5-flash',skipNoContact:1,igOnly:0,useGeminiParse:0,maxShorts:20,emailLimit:20,
+ emailSubject:"{Quick clip|Short clip|Clip} from your {niche} episode",
+ emailBody:"{Hi|Hey|Hello} there,\n\n{I just watched|I caught|I watched} your recent episode on {niche} and {loved it|really enjoyed it}. I cut a short clip from it that I think could do well on Reels, TikTok and Shorts:\n\n{clip_link}\n\n{It is yours to post, free, no strings attached.|Feel free to post it, it is yours, no strings attached.} If you'd like a few of these each week, just reply and I'll send you more.\n\n{Thanks|Best|Cheers},\n{sender}",
  dm:"{Hey|Hey there|Hi}! {Just watched|Just finished|Caught} your {latest|recent|newest} episode on {niche} and {loved it|really enjoyed it|thought it was great}. I {made|cut|put together} a quick clip from it because {it deserved more eyes|it was too good not to share|I think it could do well on Reels}. {Totally free|No strings attached|No cost at all}, just thought you'd like to see it. Here's the full episode I pulled it from: {episode}"},
  niches:['real estate','personal finance','fitness','entrepreneurship','mental health','true crime','faith christian','sports betting','parenting','health longevity'],
  leads:[],payments:[],clients:[],team:[],retainers:[]};
@@ -65,7 +67,7 @@ const iso=d=>{const x=d||new Date();return x.getFullYear()+'-'+String(x.getMonth
 const today=()=>iso();const money=n=>'$'+Number(n||0).toLocaleString(undefined,{maximumFractionDigits:2});
 const addDays=(d,n)=>{const x=new Date(d+'T00:00');x.setDate(x.getDate()+n);return iso(x)};
 const monthKey=()=>today().slice(0,7);
-let tab='dash';const TABS=[['dash','Dashboard'],['today','Today'],['leads','Leads'],['find','Find Podcasts'],['money','Money'],['settings','Settings']];
+let tab='dash';const TABS=[['dash','Dashboard'],['today','Today'],['leads','Leads'],['email','Email'],['find','Find Podcasts'],['money','Money'],['settings','Settings']];
 function nav(){$('#nav').innerHTML=TABS.map(([k,l])=>`<button class="${k===tab?'on':''}" data-t="${k}">${l}</button>`).join('')}
 $('#nav').onclick=e=>{if(e.target.dataset.t){tab=e.target.dataset.t;render()}};
 $('#nav').ondragover=e=>{if(e.target.dataset&&e.target.dataset.t==='today'){e.preventDefault();e.dataTransfer.dropEffect='move';e.target.classList.add('drop')}};
@@ -85,7 +87,7 @@ function stats(){
  return{earned,owed,dl,remaining:Math.max(0,S.settings.goal-earned),sentToday:sentOn(today()),sentAll,rep,cl,
   fresh:S.leads.filter(l=>l.status=='New').length,fu:S.leads.filter(l=>l.status=='Sample Sent'&&l.follow&&l.follow<=today()).length,...mrrStats()}}
 function mrrStats(){const act=(S.retainers||[]).filter(r=>r.status=='Active'),mrr=act.reduce((a,r)=>a+(+r.fee||0),0);return{mrr,act:act.length,clipsM:act.reduce((a,r)=>a+(+r.clips||0),0),avgFee:act.length?mrr/act.length:0}}
-function render(){nav();({dash,today:todayV,leads,find,money:moneyV,settings})[tab]()}
+function render(){nav();({dash,today:todayV,leads,email:emailV,find,money:moneyV,settings})[tab]()}
 function dash(){const s=stats(),g=S.settings;const pct=Math.min(100,s.earned/g.goal*100);
  const days=[...Array(14)].map((_,i)=>{const d=iso(new Date(Date.now()-(13-i)*864e5));return[d,sentOn(d)]});const mx=Math.max(g.daily,...days.map(x=>x[1]));
  const byInf={};S.payments.forEach(p=>{(byInf[p.who]=byInf[p.who]||{all:0,mo:0}).all+=p.amount;if(p.date.startsWith(monthKey()))byInf[p.who].mo+=p.amount});
@@ -103,14 +105,14 @@ function dash(){const s=stats(),g=S.settings;const pct=Math.min(100,s.earned/g.g
  <div class="card"><b>Earnings per influencer</b><div class="tw"><table><tr><th>Influencer</th><th>All-time</th><th>This month</th></tr>
  ${Object.entries(byInf).sort((a,b)=>b[1].all-a[1].all).map(([k,v])=>`<tr><td>${esc(k)}</td><td>${money(v.all)}</td><td>${money(v.mo)}</td></tr>`).join('')||'<tr><td colspan=3 class=mut>No payments yet — log them on the Money tab.</td></tr>'}</table></div></div>`}
 function todayV(){const want=Math.max(1,S.settings.daily-sentOn(today()));
- const list=S.leads.filter(l=>l.status=='New'&&(l.pin||(S.settings.igOnly?l.ig:(l.ig||l.x||l.tt)))).sort((a,b)=>(b.pin||0)-(a.pin||0)||(a.ig?0:1)-(b.ig?0:1)||(a.shortsPct??50)-(b.shortsPct??50)||(a.subs||0)-(b.subs||0)).slice(0,want);
+ const list=S.leads.filter(l=>l.status=='New'&&(l.pin||(S.settings.igOnly?l.ig:(l.ig||l.x||l.tt)))).sort((a,b)=>(b.pin||0)-(a.pin||0)||(b.clipFile?1:0)-(a.clipFile?1:0)||(a.ig?0:1)-(b.ig?0:1)||(a.shortsPct??50)-(b.shortsPct??50)||(a.subs||0)-(b.subs||0)).slice(0,want);
  const skip=todayV.skip=todayV.skip||new Set(),sko=todayV.skipOrder=todayV.skipOrder||[],q=list.filter(l=>!skip.has(l.id));
  // The lead you are working on stays put through redraws (a sync, an edit, switching tabs) until YOU move on.
  const cur=(todayV.cur&&S.leads.find(x=>x.id==todayV.cur&&x.status=='New'&&!skip.has(x.id)))||q[0];todayV.cur=cur?cur.id:null;
  const ctUrl=l=>l.ig||l.x||l.tt||l.web;
- $('#main').innerHTML=`<div class="card"><b>${sentOn(today())}/${S.settings.daily}</b> sent today · ${list.length} fresh leads queued.${(S.undo||[]).length?` <button class="b" data-undo="1" title="Puts the last lead you marked as sent back where it was">↩ Undo sent: ${esc((S.leads.find(x=>x.id==S.undo[S.undo.length-1].id)||{}).name||'last lead')}</button>`:''}${sko.length?` <button class="b" data-back="1">◀ Back to ${esc((S.leads.find(x=>x.id==sko[sko.length-1])||{}).name||'last skipped')} (${sko.length} skipped)</button>`:''} Open the profile, paste the DM, attach your clip, send.</div>
+ $('#main').innerHTML=`<div class="card"><b>${sentOn(today())}/${S.settings.daily}</b> sent today · ${list.length} fresh leads queued. <button class="b" data-prep="1" ${ES.busy?'disabled':''} title="For the next 5 leads: downloads a slice of their episode, makes one clip with your template settings, and puts it on a shareable link. Needs the helper running.">⚙ Prepare clips for the next 5</button>${ES.busy?` <span class=mut>working: ${esc((ES.lines.filter(t=>!/^[A-Z]+ /.test(t)).slice(-1)[0]||'starting...').slice(0,80))}</span>`:''}${(S.undo||[]).length?` <button class="b" data-undo="1" title="Puts the last lead you marked as sent back where it was">↩ Undo sent: ${esc((S.leads.find(x=>x.id==S.undo[S.undo.length-1].id)||{}).name||'last lead')}</button>`:''}${sko.length?` <button class="b" data-back="1">◀ Back to ${esc((S.leads.find(x=>x.id==sko[sko.length-1])||{}).name||'last skipped')} (${sko.length} skipped)</button>`:''} Open the profile, paste the DM, attach your clip, send.</div>
  ${cur?`<div class="card" style="border-color:var(--acc)"><b>Next up: ${esc(cur.name)}</b> <span class=mut>${(cur.subs||0).toLocaleString()} subs · ${cur.ig?'Instagram':cur.x?'X':cur.tt?'TikTok':'link'}</span>
- ${cur.epTitle?`<div class=mut>Episode: ${esc(cur.epTitle)}</div>`:''}${cur.notes&&/Clip idea/.test(cur.notes)?`<div class=mut>${esc(cur.notes.split(' | ').filter(x=>/Clip idea/.test(x))[0])}</div>`:''}<p class="dm" style="max-width:none">${esc(dm(cur))}</p>
+ ${cur.epTitle?`<div class=mut>Episode: ${esc(cur.epTitle)}</div>`:''}${cur.clipFile?`<div class=mut>🎬 Clip ready${cur.clipTitle?': '+esc(cur.clipTitle):''} <button class="b" data-revealclip="${cur.id}">Show clip file</button>${cur.clipLink?` <button class="b" data-cplink="${cur.id}">Copy clip link</button>`:''}</div>`:(cur.clipFail?`<div class=mut>Clip could not be made: ${esc(cur.clipFail)}</div>`:'')}${cur.notes&&/Clip idea/.test(cur.notes)?`<div class=mut>${esc(cur.notes.split(' | ').filter(x=>/Clip idea/.test(x))[0])}</div>`:''}<p class="dm" style="max-width:none">${esc(dm(cur))}</p>
  <div class="row"><button class="b p" data-open="${cur.id}">Open profile + copy DM</button>
  ${cur.ig&&cur.x?`<button class="b" data-openu="${esc(cur.x)}" data-id="${cur.id}">Open X + copy</button>`:''}${cur.ig&&cur.tt?`<button class="b" data-openu="${esc(cur.tt)}" data-id="${cur.id}">Open TikTok + copy</button>`:''}<button class="b" data-ep="${cur.id}">Open episode</button><button class="b" data-next="${cur.id}">Sent, next</button><button class="b" data-cns="${cur.id}" title="You reached out but did not send a sample (for example an inactive podcast that looks like a real business)">Contacted, no sample</button><button class="b" data-shuf="${cur.id}">Reshuffle DM</button><button class="b" data-skip="${cur.id}">Skip</button><button class="b p" data-gc="${cur.id}">Send clip range to clipper</button>${cur.sampleFile?`<button class="b" data-reveal="${cur.id}" title="${esc(cur.sampleFile)}">Show sample file</button>`:''}<button class="b" data-edc="${cur.id}">Edit contact</button><button class="b" data-ede="${cur.id}">Edit episode</button><button class="b" data-rm="${cur.id}" title="Remove for good, never added back">Remove</button></div>
  <span class=mut>Opens in a new tab. If you're logged into Instagram there, it lands on their profile. Hit Message, paste, attach the clip.</span></div>`:''}
@@ -126,6 +128,8 @@ function todayV(){const want=Math.max(1,S.settings.daily-sentOn(today()));
   if(d.next){markSent(get(d.next));todayV.cur=null;save();todayV()}
   if(d.cns){markContacted(get(d.cns));todayV.cur=null;save();todayV()}
   if(d.shuf){const l=get(d.shuf);l.spin=(l.spin||0)+1;save();todayV()}
+  if(d.prep)prepareClips(5,false);if(d.revealclip){const l=get(d.revealclip);fetch(RUNNER+'/reveal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:l.clipFile})}).catch(()=>alert('Start the helper first: python3 tools/local_runner.py'))}
+  if(d.cplink){navigator.clipboard.writeText(get(d.cplink).clipLink);e.target.textContent='Copied ✓'}
   if(d.ed)editLead(d.ed);if(d.edc)editLead(d.edc,'contact');if(d.ede)editLead(d.ede,'episode');if(d.gc)sendToClipper(d.gc);if(d.reveal)revealSample(d.reveal);
   if(d.rm){get(d.rm).status='Removed';todayV.cur=null;save();todayV()}
   if(d.skip){todayV.skip.add(d.skip);todayV.skipOrder.push(d.skip);todayV.cur=null;todayV()}
@@ -137,19 +141,19 @@ function normEpisode(v){v=(v||'').trim();if(!v)return '';let m=v.match(/[?&]v=([
 function normChannel(v){v=(v||'').trim();if(!v)return '';if(/^UC[\w-]{20,}$/.test(v))return 'https://www.youtube.com/channel/'+v;if(/^@[\w.-]+$/.test(v))return 'https://www.youtube.com/'+v;return v}
 function applyEdit(l,v){const has=k=>Object.prototype.hasOwnProperty.call(v,k);
  if(has('name')&&(v.name||'').trim())l.name=v.name.trim();if(has('niche'))l.niche=(v.niche||'').trim();if(has('url'))l.url=normChannel(v.url);if(has('episode'))l.episode=normEpisode(v.episode);if(has('epTitle'))l.epTitle=(v.epTitle||'').trim();
- if(has('ig'))l.ig=normSocial(v.ig,'https://instagram.com/');if(has('x'))l.x=normSocial(v.x,'https://x.com/');if(has('tt'))l.tt=normSocial(v.tt,'https://tiktok.com/@');if(has('web'))l.web=(v.web||'').trim();if(has('notes'))l.notes=(v.notes||'').trim();return l}
+ if(has('ig'))l.ig=normSocial(v.ig,'https://instagram.com/');if(has('x'))l.x=normSocial(v.x,'https://x.com/');if(has('tt'))l.tt=normSocial(v.tt,'https://tiktok.com/@');if(has('web'))l.web=(v.web||'').trim();if(has('email'))l.email=(v.email||'').trim().toLowerCase();if(has('notes'))l.notes=(v.notes||'').trim();return l}
 function editLead(id,mode){const l=S.leads.find(x=>x.id==id);if(!l)return;const ov=$('#ov');
  const f=(k,lab,ph)=>`<label>${lab}</label><div class="row" style="margin:0;flex-wrap:nowrap"><input data-f="${k}" value="${esc(l[k]||'')}" placeholder="${ph||''}">${l[k]&&/^https?:/.test(l[k])?`<a target=_blank rel=noopener href="${esc(l[k])}">open</a>`:''}</div>`;
  const g=q=>'https://www.google.com/search?q='+encodeURIComponent(q);
  const title=mode=='contact'?'Edit contact':mode=='episode'?'Edit episode':'Edit lead';
  let body='';
- if(mode=='contact'){body=`${f('ig','Instagram (@handle or link)')}${f('x','X / Twitter (@handle or link)')}${f('tt','TikTok (@handle or link)')}${f('web','Website / link in bio')}
+ if(mode=='contact'){body=`${f('email','Email')}${f('ig','Instagram (@handle or link)')}${f('x','X / Twitter (@handle or link)')}${f('tt','TikTok (@handle or link)')}${f('web','Website / link in bio')}
   <p class=mut style="margin:8px 0 0">Find the right one: <a target=_blank rel=noopener href="${g('site:instagram.com "'+l.name+'" podcast')}">Instagram</a> · <a target=_blank rel=noopener href="${g('site:x.com "'+l.name+'" podcast')}">X</a> · <a target=_blank rel=noopener href="${g('site:tiktok.com "'+l.name+'" podcast')}">TikTok</a> · <a target=_blank rel=noopener href="${g(l.name+' podcast linktree OR beacons')}">link in bio</a></p>`}
  else if(mode=='episode'){const ch=l.url&&/^https?:/.test(l.url)?l.url.replace(/\/$/,'')+'/videos':g(l.name+' podcast full episode youtube');
   body=`${f('episode','Episode link (or 11 character video id)','https://www.youtube.com/watch?v=')}${f('epTitle','Episode title')}
   <div class="row" style="margin-top:8px"><button class="b" data-edpick="${esc(l.id)}">Pick a long episode automatically</button><a target=_blank rel=noopener href="${esc(ch)}">Browse their videos</a><span class=mut id="edmsg"></span></div>`}
  else{body=`${f('name','Podcast name')}${f('niche','Niche')}${f('url','YouTube channel link (or @handle)','https://www.youtube.com/@name')}${f('episode','Episode link (or video id)','https://www.youtube.com/watch?v=')}${f('epTitle','Episode title')}
-  ${f('ig','Instagram (@handle or link)')}${f('x','X / Twitter (@handle or link)')}${f('tt','TikTok (@handle or link)')}${f('web','Website / link in bio')}${f('notes','Notes')}`}
+  ${f('email','Email')}${f('ig','Instagram (@handle or link)')}${f('x','X / Twitter (@handle or link)')}${f('tt','TikTok (@handle or link)')}${f('web','Website / link in bio')}${f('notes','Notes')}`}
  ov.className='ov';ov.innerHTML=`<div class="card"><b>${title}</b> <span class=mut>${esc(l.name)}. Handles like @name are fine.</span>${body}
  <div class="row" style="margin-top:12px"><button class="b p" data-edsave="${esc(l.id)}">Save</button><button class="b" data-edcancel="1">Cancel</button><button class="b" data-edremove="${esc(l.id)}" style="margin-left:auto">Remove lead</button></div></div>`;
  const close=()=>{ov.className='hide';ov.innerHTML=''};
@@ -201,13 +205,95 @@ function pinLead(id){const l=S.leads.find(x=>x.id==id);if(!l)return false;
  if(l.status!='New'){l.status='New';l.sent='';l.follow='';l.contacted=''}
  l.pin=Date.now();todayV.cur=l.id;if(todayV.skip)todayV.skip.delete(l.id);todayV.skipOrder=(todayV.skipOrder||[]).filter(x=>x!=l.id);
  save();tab='today';render();return true}
+/* ---------------- Email: find contact emails, prepare clips, preview, drafts, send, follow-ups, replies ---------------- */
+const ES={lines:[],busy:false,preview:null,status:null,msg:''};
+const DAY=86400000;
+const isSuppressed=e=>{const L=(ES.status&&ES.status.suppressed_list)||[],a=String(e||'').toLowerCase();return L.includes(a)||L.includes('@'+a.split('@')[1])};
+const isEmailReady=l=>l.status=='New'&&l.email&&l.clipLink&&!l.emailedAt&&!isSuppressed(l.email);
+const ytLeads=l=>/youtube\.com|youtu\.be/.test(l.episode||'');
+function emailFunnel(){const L=S.leads.filter(l=>l.status!='Removed'),now=Date.now();
+ const emailed=L.filter(l=>l.emailedAt);
+ return{fresh:L.filter(l=>l.status=='New').length,withEmail:L.filter(l=>l.status=='New'&&l.email).length,withClip:L.filter(l=>l.status=='New'&&l.email&&l.clipLink).length,
+  ready:L.filter(isEmailReady).length,emailed:emailed.length,replied:L.filter(l=>l.emailedAt&&['Replied','Interested','Client'].includes(l.status)).length,
+  followDue:emailed.filter(l=>l.status=='Sample Sent'&&(l.emailStep||0)<2&&now-(l.firstEmailedAt||l.emailedAt)>=(((l.emailStep||0)==0?3:7)*DAY)-3600000).length}}
+async function helperJob(path,body,onLine){
+ ES.lines=[];ES.busy=true;ES.msg='';emailDyn();
+ let r;try{r=await (await fetch(RUNNER+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json()}
+ catch(e){ES.busy=false;ES.msg='Helper not running. In Terminal: cd ~/clipper-crm && python3 tools/local_runner.py';emailDyn();return false}
+ if(r.error){ES.busy=false;ES.msg=r.error;emailDyn();return false}
+ let since=0,go=true;while(go){await new Promise(x=>setTimeout(x,2000));
+  try{const j=await (await fetch(RUNNER+'/log?since='+since)).json();since=j.next;j.lines.forEach(t=>{ES.lines.push(t);onLine&&onLine(t)});go=j.running;save();emailDyn();if(tab=='today')todayV()}catch(e){ES.msg='Lost contact with the helper.';go=false}}
+ ES.busy=false;save();emailDyn();if(tab=='today')todayV();return true}
+const parseTag=(t,tag)=>t.startsWith(tag+' ')?JSON.parse(t.slice(tag.length+1)):null;
+function findEmails(n){const now=Date.now();
+ const todo=S.leads.filter(l=>l.status=='New'&&!l.email&&l.name&&!(l.emailChecked&&now-l.emailChecked<14*DAY)).slice(0,n).map(l=>({id:l.id,name:l.name,url:l.url,web:l.web}));
+ if(!todo.length){ES.msg='Every fresh lead already has an email, or was checked in the last 14 days.';return emailDyn()}
+ return helperJob('/emails/find',{leads:todo},t=>{let r;
+  if(r=parseTag(t,'EMAILFOUND')){const l=S.leads.find(x=>x.id==r.id);if(l){l.email=r.email;l.emailSource=r.source;l.emailChecked=Date.now()}}
+  else if(r=parseTag(t,'EMAILNONE')){const l=S.leads.find(x=>x.id==r.id);if(l)l.emailChecked=Date.now()}})}
+function prepareClips(n,onlyWithEmail){
+ const todo=S.leads.filter(l=>l.status=='New'&&!l.clipLink&&ytLeads(l)&&(!onlyWithEmail||l.email)).slice(0,n).map(l=>({id:l.id,name:l.name,url:l.episode}));
+ if(!todo.length){ES.msg=onlyWithEmail?'No leads with an email still need a clip. Find emails first, or untick the box.':'No leads need a clip.';return emailDyn()}
+ return helperJob('/pipeline/start',{leads:todo,minutes:5,clips:1},t=>{let r;
+  if(r=parseTag(t,'PIPE')){const l=S.leads.find(x=>x.id==r.id);if(l)Object.assign(l,{clipLink:r.link,clipFile:r.clip,clipTitle:r.title,sampleSlug:r.slug,sampleName:r.name,sampleFile:r.video,sampleDir:r.dir,clipFail:''})}
+  else if(r=parseTag(t,'PIPEFAIL')){const l=S.leads.find(x=>x.id==r.id);if(l)l.clipFail=r.why}})}
+const emailPayload=l=>({id:l.id,name:l.name,niche:l.niche,epTitle:l.epTitle,email:l.email,clipLink:l.clipLink,subject:l.emailSubject})
+const tpl=()=>({subject:S.settings.emailSubject,body:S.settings.emailBody});
+async function previewEmails(){ES.msg='';const leads=S.leads.filter(isEmailReady).slice(0,+S.settings.emailLimit||20).map(emailPayload);
+ if(!leads.length){ES.preview=null;ES.msg='Nothing is ready to email yet (a lead needs an email AND a clip link).';return emailDyn()}
+ try{const r=await (await fetch(RUNNER+'/email/preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({leads,template:tpl(),limit:leads.length})})).json();ES.preview=r.items;ES.status=r.status}
+ catch(e){ES.msg='Helper not running. In Terminal: cd ~/clipper-crm && python3 tools/local_runner.py'}emailDyn()}
+function applyEmailResult(r){const l=S.leads.find(x=>x.id==r.id);if(!l)return;
+ if(r.status=='sent'){if((r.step||0)==0){markSent(l);l.firstEmailedAt=Date.now()}l.emailedAt=Date.now();l.emailStep=r.step||0;l.emailSubject=l.emailSubject||r.subject;l.emailFrom=r.from;l.via='email'}
+ else if(r.status=='drafted')l.draftedAt=Date.now()}
+async function sendEmails(mode,step){const n=+S.settings.emailLimit||20;let leads;
+ if(step>0){const now=Date.now();leads=S.leads.filter(l=>l.emailedAt&&l.status=='Sample Sent'&&(l.emailStep||0)==step-1&&now-(l.firstEmailedAt||l.emailedAt)>=((step==1?3:7)*DAY)-3600000).slice(0,n).map(emailPayload)}
+ else leads=S.leads.filter(isEmailReady).slice(0,n).map(emailPayload);
+ if(!leads.length){ES.msg=step?'No follow-ups are due yet.':'Nothing is ready to email yet (a lead needs an email AND a clip link).';return emailDyn()}
+ if(mode=='send'&&!confirm(`Send up to ${leads.length} REAL email${leads.length==1?'':'s'} now?\n\nThey go out one at a time from your inboxes (rotating, within each inbox's daily cap), with your name, your postal address and an opt out line. Previews are free; this is not.`))return;
+ return helperJob('/email/run',{mode,confirm:mode=='send',leads,template:tpl(),limit:n,step},t=>{const r=parseTag(t,'EMAIL');if(r)applyEmailResult(r)})}
+async function checkReplies(){const sent=S.leads.filter(l=>l.emailedAt&&l.status=='Sample Sent').map(l=>({id:l.id,email:l.email,since_ts:Math.floor((l.firstEmailedAt||l.emailedAt)/1000)}));
+ if(!sent.length){ES.msg='No sent emails to check.';return emailDyn()}ES.busy=true;ES.msg='Checking your inboxes for replies...';emailDyn();
+ try{const r=await (await fetch(RUNNER+'/email/check-replies',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sent})})).json();
+  if(r.error)ES.msg=r.error;else{let rep=0,out=0;for(const f of r.found||[]){const l=S.leads.find(x=>x.id==f.id);if(!l)continue;
+   if(f.kind=='optout'){l.status='Not Interested';l.notes=((l.notes?l.notes+' | ':'')+'Asked not to be contacted: do not email again');out++}else{l.status='Replied';l.notes=((l.notes?l.notes+' | ':'')+'Replied by email: '+f.snippet);rep++}}
+   ES.msg=(r.errors&&r.errors.length?`Could not read: ${r.errors.join('; ')}. Check imap_host, username and app password in tools/email_accounts.json. `:'')+`Checked ${sent.length} sent email${sent.length==1?'':'s'}: ${rep} ${rep==1?'reply':'replies'}, ${out} asked to stop (added to the do not contact list).`;save()}}
+ catch(e){ES.msg='Helper not running. In Terminal: cd ~/clipper-crm && python3 tools/local_runner.py'}ES.busy=false;emailDyn()}
+async function loadEmailStatus(){try{ES.status=await (await fetch(RUNNER+'/email/status')).json()}catch(e){ES.status=null}emailDyn()}
+function emailDyn(){const el=document.getElementById('email-dyn');if(!el)return;const f=emailFunnel(),st=ES.status,dis=ES.busy?'disabled':'',canSend=st&&st.ready&&!ES.busy?'':'disabled';
+ const bar=(k,v)=>`<div class="stat"><small>${k}</small><b>${v}</b></div>`;
+ el.innerHTML=`<div class="grid">${bar('Fresh leads',f.fresh)}${bar('With an email',f.withEmail)}${bar('With a clip link',f.withClip)}${bar('Ready to email',f.ready)}${bar('Emailed',f.emailed)}${bar('Replied',f.replied)}${bar('Follow-ups due',f.followDue)}</div>
+ <div class="card" style="margin-top:14px"><b>Sending setup</b> ${st?(st.ready?'<span style="color:var(--ok)">ready</span>':'<span style="color:var(--acc)">not ready</span>'):'<span class=mut>helper not running</span>'}
+  ${st?`<div class=mut style="margin-top:6px">${st.inboxes.length} inbox${st.inboxes.length==1?'':'es'}: ${st.inboxes.map(i=>`${esc(i.email)} (${i.sent_today}/${i.cap} today)`).join(', ')||'none yet'} · room left today: ${st.capacity_left} · do not contact list: ${st.suppressed} · send window ${st.window.start_hour}:00 to ${st.window.end_hour}:00 ${st.in_send_window?'(open now)':'(closed now)'}</div>
+  ${st.ready?'':`<ul style="margin:8px 0 0 18px">${st.problems.map(p=>`<li>${esc(p)}</li>`).join('')}</ul><div class=mut>Edit <code>tools/email_accounts.json</code> on your computer (copy <code>tools/email_accounts.example.json</code>). Preview works without it; drafts and sending do not.</div>`}`:`<div class=mut style="margin-top:6px">Start the helper: <code>python3 tools/local_runner.py</code></div>`}</div>
+ <div class="card"><b>Run the pipeline</b> <span class=mut>(each step uses your computer and takes a while; a log shows below)</span>
+  <div class="row" style="margin-top:8px"><button class="b" id="e-find" ${dis}>1. Find emails (15)</button><button class="b" id="e-prep" ${dis}>2. Prepare clips for leads with an email (5)</button><button class="b" id="e-prev" ${dis}>3. Preview emails</button>
+  <button class="b" id="e-draft" ${canSend}>4a. Save as Gmail drafts</button><button class="b p" id="e-send" ${canSend}>4b. Send today's batch</button>
+  <button class="b" id="e-fu" ${canSend}>5. Send follow-ups (${f.followDue})</button><button class="b" id="e-rep" ${dis}>6. Check replies</button>${ES.busy?'<button class="b" id="e-stop">Stop</button>':''}</div>
+  ${ES.msg?`<div style="color:var(--acc);margin-top:6px">${esc(ES.msg)}</div>`:''}
+  ${ES.lines.length?`<pre style="margin-top:8px;max-height:180px">${esc(ES.lines.filter(t=>!/^(PIPE|PIPEFAIL|EMAIL|EMAILFOUND|EMAILNONE|RESULT) /.test(t)).slice(-14).join('\n'))}</pre>`:''}</div>
+ ${ES.preview?`<div class="card tw"><b>Preview</b> <span class=mut>nothing has been sent</span><table><tr><th>To</th><th>From inbox</th><th>Subject</th><th></th></tr>${ES.preview.map((p,i)=>`<tr><td>${esc(p.to||p.name)}</td><td>${esc(p.from||'')}</td><td>${p.status=='ready'?esc(p.subject):`<span class=mut>skipped: ${esc(p.why)}</span>`}</td><td>${p.status=='ready'?`<button class="b" data-pv="${i}">Read</button>`:''}</td></tr>`).join('')}</table></div>`:''}`;
+ const on=(id,fn)=>{const b=document.getElementById(id);if(b)b.onclick=fn};
+ on('e-find',()=>findEmails(15));on('e-prep',()=>prepareClips(5,true));on('e-prev',previewEmails);on('e-draft',()=>sendEmails('drafts',0));on('e-send',()=>sendEmails('send',0));
+ on('e-fu',()=>{const now=Date.now(),due=k=>S.leads.some(l=>l.emailedAt&&l.status=='Sample Sent'&&(l.emailStep||0)==k-1&&now-(l.firstEmailedAt||l.emailedAt)>=((k==1?3:7)*DAY)-3600000);sendEmails('send',due(1)?1:2)});on('e-rep',checkReplies);
+ on('e-stop',async()=>{try{await fetch(RUNNER+'/pipeline/stop',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})}catch(e){}});
+ el.querySelectorAll('[data-pv]').forEach(b=>b.onclick=()=>{const p=ES.preview[+b.dataset.pv];alert(`To: ${p.to}\nFrom: ${p.from}\nSubject: ${p.subject}\n\n${p.body}`)})}
+function emailV(){const g=S.settings;
+ $('#main').innerHTML=`<div class="card"><b>Cold email</b> <span class=mut>One short, honest email per podcast with a link to a clip made from their own episode. Rotates across your inboxes, keeps to daily caps that grow slowly, never emails the same address twice, and stops for anyone who says no.</span></div>
+ <div id="email-dyn"></div>
+ <div class="card"><b>Your email</b> <span class=mut>Spintax like {Hi|Hey|Hello} picks one per lead. Tokens: {niche} {name} {episode} {clip_link} {sender}. Your name, postal address and an opt out line are added automatically.</span>
+  <label>Subject</label><input data-e="emailSubject" value="${esc(g.emailSubject)}" style="width:100%">
+  <label>Body</label><textarea data-e="emailBody" style="min-height:230px">${esc(g.emailBody)}</textarea>
+  <div class="row" style="margin-top:8px"><div><label>Emails per run</label><input data-e="emailLimit" type="number" min="1" max="60" value="${esc(g.emailLimit)}" style="width:90px"></div></div></div>`;
+ $('#main').oninput=e=>{const k=e.target.dataset.e;if(!k)return;g[k]=e.target.type=='number'?+e.target.value:e.target.value;save()};
+ $('#main').onclick=null;emailDyn();loadEmailStatus()}
 function markSent(l){(S.undo=S.undo||[]).push({id:l.id,status:l.status,sent:l.sent||'',follow:l.follow||'',at:Date.now()});S.undo=S.undo.slice(-30);l.status='Sample Sent';if(!l.sent)l.sent=today();l.follow=addDays(today(),+S.settings.followDays||3)}
 function leads(){const q=(leads.q||'').toLowerCase(),f=leads.f||'';
  const rows=S.leads.filter(l=>(f?l.status==f:l.status!='Removed')&&(!q||(l.name+l.niche).toLowerCase().includes(q)));
  $('#main').innerHTML=`<div class="row"><input id="q" placeholder="Search" value="${esc(leads.q||'')}"><select id="f"><option value="">All statuses</option>${STATUSES.map(s=>`<option ${s==f?'selected':''}>${s}</option>`).join('')}</select><span class=mut>${rows.length} leads</span><button class="b" id="cl">Remove no-contact leads</button><button class="b p" id="fi">Find missing Instagrams</button><button class="b p" id="fe">Fill episodes + Shorts %</button><button class="b" id="rs2">Remove Shorts-heavy leads</button><button class="b" id="ms">Match existing samples</button><button class="b" id="ri">Remove leads without Instagram</button></div>
  <div class="card tw"><table><tr><th>Podcast</th><th>Niche</th><th>Subs</th><th>Contact</th><th>Status</th><th>Sent / Follow-up</th><th>Notes</th></tr>
  ${rows.slice(0,300).map(l=>`<tr><td><span class="grip" draggable="true" data-grip="${l.id}" title="Drag onto the Today tab to use this lead next">⠿</span> <a target=_blank rel=noopener href="${esc(l.url)}">${esc(l.name)}</a> <button class="b" data-ed="${l.id}" title="Edit everything">✎</button> <button class="b" data-pin="${l.id}" title="Put this lead at the top of Today, ready to use next (also brings back a sent, skipped or removed lead)">▶ Today</button></td><td>${esc(l.niche)}${l.episode?` <a target=_blank rel=noopener href="${esc(l.episode)}">▶</a>`:''}${l.sampleSlug?` <span title="Sample template: ${esc(l.sampleName||'')}\n${esc(l.sampleDir||'')}">🎬</span>`:''} <button class="b" data-ede="${l.id}" title="Edit episode">✎</button></td><td>${(l.subs||0).toLocaleString()}${l.shortsPct!=null?`<br><span class=mut>${l.shortsPct}% Shorts</span>`:''}</td>
- <td>${[l.ig&&`<a target=_blank rel=noopener href="${esc(l.ig)}">IG</a>`,l.x&&`<a target=_blank rel=noopener href="${esc(l.x)}">X</a>`,l.tt&&`<a target=_blank rel=noopener href="${esc(l.tt)}">TT</a>`,l.web&&`<a target=_blank rel=noopener href="${esc(l.web)}">Link</a>`].filter(Boolean).join(' · ')||'<span class=mut>none</span>'} <button class="b" data-edc="${l.id}" title="Edit contact">✎</button></td>
+ <td>${[l.email&&`<a href="mailto:${esc(l.email)}" title="${esc(l.email)}">✉</a>`,l.ig&&`<a target=_blank rel=noopener href="${esc(l.ig)}">IG</a>`,l.x&&`<a target=_blank rel=noopener href="${esc(l.x)}">X</a>`,l.tt&&`<a target=_blank rel=noopener href="${esc(l.tt)}">TT</a>`,l.web&&`<a target=_blank rel=noopener href="${esc(l.web)}">Link</a>`].filter(Boolean).join(' · ')||'<span class=mut>none</span>'} <button class="b" data-edc="${l.id}" title="Edit contact">✎</button></td>
  <td><select data-st="${l.id}">${STATUSES.map(s=>`<option ${s==l.status?'selected':''}>${s}</option>`).join('')}</select></td><td>${l.sent||''}<br><span class=mut>${l.follow||''}</span></td>
  <td><input data-nt="${l.id}" value="${esc(l.notes||'')}"></td></tr>`).join('')}</table></div>${rows.length>300?'<p class=mut>Showing first 300 — use search/filter.</p>':''}`;
  $('#cl').onclick=()=>{const bad=S.leads.filter(l=>l.status=='New'&&!(l.ig||l.x||l.tt||l.web));if(!bad.length)return alert('No no-contact leads to remove.');if(!confirm(`Remove ${bad.length} untouched leads with no contact info? They stay hidden so they never come back.`))return;const ids=new Set(bad.map(l=>l.id));S.leads.forEach(l=>{if(ids.has(l.id))l.status='Removed'});save();leads()};

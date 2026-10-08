@@ -15,6 +15,8 @@ from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import cold_email, email_finder
 SCRIPT = os.getenv("RUNNER_SCRIPT", str(HERE / "google_ai_to_crm.py"))
 PORT = int(os.getenv("RUNNER_PORT", "8765"))
 APP_URL = os.getenv("CLIPPER_URL", "http://127.0.0.1:5001").rstrip("/")
@@ -121,64 +123,214 @@ def log(msg):
     STATE["log"].append(msg)
 
 
+def _prepare(url, start, end, name, folder=None):
+    """Downloads a slice of a YouTube video and saves it as a NEW template in the clipper (transcribes it once).
+    Waits while the clipper is busy. Returns (video_path, slug) or None after logging why it could not."""
+    log(f"[runner] downloading {start} to {end} ...")
+    env = {**os.environ, "NO_OPEN": "1"}
+    p = subprocess.run(["bash", GRAB, url, start, end, SAMPLES], capture_output=True, text=True, env=env, timeout=1800)
+    saved = [l[6:].strip() for l in p.stdout.splitlines() if l.startswith("Saved: ")]
+    if p.returncode != 0 or not saved:
+        log("[runner] download failed. " + (p.stderr.strip().splitlines() or ["yt-dlp gave no details"])[-1])
+        return None
+    video = saved[-1]
+    log(f"[runner] saved {video}")
+    waited, announced = 0, False
+    while True:
+        st = clipper_status()
+        if st["state"] == "off":
+            log(f"[runner] the clipper app is off ({APP_URL}). The clip source is saved here, start the app and click again:\n   {video}")
+            return None
+        if st["state"] == "on":
+            code, resp = app_call("/api/clip-templates/create", {**outreach_settings(), "name": name, "path": video, "folder": folder or OUT_FOLDER}, timeout=30)
+            if code == 200 and resp.get("success"):
+                break
+            if code != 409:
+                log(f"[runner] clipper rejected the template: {resp.get('error') or code}")
+                return None
+        if waited >= 900:
+            log("[runner] clipper stayed busy for 15 minutes, giving up. The file is saved:\n   " + video)
+            return None
+        if not announced or waited % 60 == 0:
+            log(f"[runner] clipper is busy ({st.get('message') or 'working'}), waiting for it to finish ...")
+            announced = True
+        time.sleep(10)
+        waited += 10
+    log("[runner] template is being created (transcribing the slice) ...")
+    last = ""
+    for _ in range(600):
+        time.sleep(3)
+        st = clipper_status()
+        if st["state"] == "off":
+            log("[runner] lost contact with the clipper app.")
+            return None
+        if st.get("message") and st["message"] != last:
+            last = st["message"]
+            log(f"   clipper: {last}")
+        if st["state"] == "on":
+            break
+    st = clipper_status()
+    if st.get("error"):
+        log(f"[runner] the clipper reported an error: {st['error']}")
+        return None
+    return video, (st.get("template_slug") or "")
+
+
 def run_send(url, start, end, name, folder=None):
     """Download a slice of a YouTube video, then save it as a NEW template in the clipper (no clips are generated:
     you change the rules there and press Generate yourself)."""
     try:
-        log(f"[runner] downloading {start} to {end} ...")
-        env = {**os.environ, "NO_OPEN": "1"}
-        p = subprocess.run(["bash", GRAB, url, start, end, SAMPLES], capture_output=True, text=True, env=env, timeout=1800)
-        saved = [l[6:].strip() for l in p.stdout.splitlines() if l.startswith("Saved: ")]
-        if p.returncode != 0 or not saved:
-            log("[runner] download failed. " + (p.stderr.strip().splitlines() or ["yt-dlp gave no details"])[-1])
-            return
-        video = saved[-1]
-        log(f"[runner] saved {video}")
-        waited, announced = 0, False
-        while True:
-            st = clipper_status()
-            if st["state"] == "off":
-                log(f"[runner] the clipper app is off ({APP_URL}). The clip source is saved here, start the app and click again:\n   {video}")
-                return
-            if st["state"] == "on":
-                code, resp = app_call("/api/clip-templates/create", {**outreach_settings(), "name": name, "path": video, "folder": folder or OUT_FOLDER}, timeout=30)
-                if code == 200 and resp.get("success"):
-                    break
-                if code != 409:
-                    log(f"[runner] clipper rejected the template: {resp.get('error') or code}")
-                    return
-            if waited >= 900:
-                log("[runner] clipper stayed busy for 15 minutes, giving up. The file is saved:\n   " + video)
-                return
-            if not announced or waited % 60 == 0:
-                log(f"[runner] clipper is busy ({st.get('message') or 'working'}), waiting for it to finish ...")
-                announced = True
-            time.sleep(10)
-            waited += 10
-        log("[runner] template is being created (transcribing the 5 minutes) ...")
-        last = ""
-        for _ in range(600):
-            time.sleep(3)
-            st = clipper_status()
-            if st["state"] == "off":
-                log("[runner] lost contact with the clipper app.")
-                return
-            if st.get("message") and st["message"] != last:
-                last = st["message"]
-                log(f"   clipper: {last}")
-            if st["state"] == "on":
-                break
-        st = clipper_status()
-        if st.get("error"):
-            log(f"[runner] the clipper reported an error: {st['error']}")
-            return
-        slug = st.get("template_slug") or ""
-        log("RESULT " + json.dumps({"slug": slug, "name": name, "video": video, "dir": str(Path(video).parent), "folder": folder or OUT_FOLDER}))
-        log(f"[runner] DONE. Template \"{name}\" is in the clipper (folder: {folder or OUT_FOLDER}). Open it, adjust the rules, then press Generate.")
+        got = _prepare(url, start, end, name, folder)
+        if got:
+            video, slug = got
+            log("RESULT " + json.dumps({"slug": slug, "name": name, "video": video, "dir": str(Path(video).parent), "folder": folder or OUT_FOLDER}))
+            log(f"[runner] DONE. Template \"{name}\" is in the clipper (folder: {folder or OUT_FOLDER}). Open it, adjust the rules, then press Generate.")
     except Exception as e:
         log(f"[runner] failed: {e}")
     finally:
         STATE["running"] = False
+
+
+# ----------------------------------------------------------------------------------- automatic sample-clip pipeline
+PIPE = {"stop": False}
+REPO = Path(os.getenv("CLIPPER_REPO", str(Path.home() / "instagram-video-generator")))
+
+
+def video_duration(url):
+    """Length of a YouTube video in seconds (None if it can't be read)."""
+    try:
+        out = subprocess.run([sys.executable, "-m", "yt_dlp", "--no-playlist", "-q", "--no-warnings", "--extractor-args",
+                              "youtube:player_client=android", "--print", "duration", url],
+                             capture_output=True, text=True, timeout=90).stdout.strip().splitlines()
+        return float(out[-1]) if out else None
+    except Exception:
+        return None
+
+
+def pick_range(duration, minutes=5):
+    """A slice that skips the intro and ad reads: about 20 percent in (never before 2:00), kept inside the episode."""
+    length = int(minutes * 60)
+    if not duration or duration < 120:
+        return 600, 600 + length
+    if duration < length + 90:
+        return 0, int(duration) - 2
+    start = int(max(120, min(duration * 0.2, duration - length - 30)))
+    return start, int(min(duration - 5, start + length))
+
+
+def _mmss(sec):
+    sec = int(sec)
+    return f"{sec // 3600}:{sec % 3600 // 60:02d}:{sec % 60:02d}" if sec >= 3600 else f"{sec // 60}:{sec % 60:02d}"
+
+
+def run_pipeline(leads, minutes=5, clips=1, after=None, folder=None):
+    """For each lead in turn: pick a slice, download it, make the template, generate the clip, put it on a shareable
+    link. One 'PIPE {json}' line per finished lead; the website saves it on the lead. Contact is still up to you."""
+    try:
+        PIPE["stop"] = False
+        for i, ld in enumerate(leads, 1):
+            if PIPE["stop"]:
+                log("[runner] stopped.")
+                break
+            name = f"Sample {ld.get('name') or ld['id']}"[:60]
+            log(f"[{i}/{len(leads)}] {ld.get('name')}")
+            try:
+                if ld.get("start") and ld.get("end"):
+                    s0, e0 = ld["start"], ld["end"]
+                else:
+                    s_sec, e_sec = pick_range(video_duration(ld["url"]), minutes)
+                    s0, e0 = _mmss(s_sec), _mmss(e_sec)
+                got = _prepare(ld["url"], s0, e0, name, folder)
+                if not got:
+                    log(f"PIPEFAIL {json.dumps({'id': ld['id'], 'why': 'could not prepare the slice'})}")
+                    continue
+                video, slug = got
+                body = {"slug": slug, "count": max(1, int(clips))}
+                if after is not None:
+                    body["after"] = after
+                log("   generating the clip ...")
+                code, resp = app_call("/api/clip-templates/generate", body, timeout=60)
+                if code != 200 or not resp.get("success"):
+                    log(f"PIPEFAIL {json.dumps({'id': ld['id'], 'why': resp.get('error') or f'clipper said {code}'})}")
+                    continue
+                last = ""
+                for _ in range(900):
+                    time.sleep(3)
+                    c2, raw = app_call("/api/clipper/status", timeout=10)
+                    if c2 != 200:
+                        break
+                    if raw.get("message") and raw["message"] != last:
+                        last = raw["message"]
+                        log(f"   clipper: {last[:100]}")
+                    if not raw.get("running"):
+                        break
+                if raw.get("error") or not raw.get("outputs"):
+                    log(f"PIPEFAIL {json.dumps({'id': ld['id'], 'why': raw.get('error') or 'no clip came out (the slice may have no strong moment)'})}")
+                    continue
+                clip_file = str(REPO / "opencut-exports" / raw["outputs"][0])
+                first = (raw.get("clips") or [{}])[0]
+                link = ""
+                c3, shared = app_call("/api/outreach/share-clip", {"id": f"opencut-exports/{raw['outputs'][0]}", "name": f"{ld.get('name')} - clip"}, timeout=300)
+                if c3 == 200 and shared.get("success"):
+                    link = shared.get("link", "")
+                else:
+                    log(f"   (could not make a share link: {shared.get('error') or c3})")
+                log("PIPE " + json.dumps({"id": ld["id"], "slug": slug, "video": video, "dir": str(Path(video).parent), "clip": clip_file,
+                                          "title": first.get("title", ""), "hook": first.get("hook", ""), "link": link,
+                                          "range": f"{s0}-{e0}", "name": name}))
+            except Exception as e:
+                log(f"PIPEFAIL {json.dumps({'id': ld.get('id'), 'why': str(e)[:200]})}")
+        log("[runner] pipeline finished.")
+    finally:
+        STATE["running"] = False
+
+
+def run_find_emails(leads):
+    try:
+        for i, ld in enumerate(leads, 1):
+            if PIPE["stop"]:
+                log("[runner] stopped.")
+                break
+            got = email_finder.find_email(ld.get("name") or "", ld.get("url") or "", ld.get("web") or "")
+            if got.get("email"):
+                log(f"[{i}/{len(leads)}] {ld.get('name')}: {got['email']} ({got['source']})")
+                log("EMAILFOUND " + json.dumps({"id": ld["id"], "email": got["email"], "source": got["source"]}))
+            else:
+                log(f"[{i}/{len(leads)}] {ld.get('name')}: no public contact email found")
+                log("EMAILNONE " + json.dumps({"id": ld["id"]}))
+        log("[runner] email search finished.")
+    finally:
+        STATE["running"] = False
+
+
+def run_email(leads, template, mode, limit, ignore_window, step):
+    try:
+        PIPE["stop"] = False
+        cold_email_sleep = lambda secs: [time.sleep(1) for _ in range(int(secs)) if not PIPE["stop"]]
+        results = cold_email.run(leads, template, mode, limit=limit, ignore_window=ignore_window, step=step, log_fn=log, sleep=cold_email_sleep)
+        for r in results:
+            log("EMAIL " + json.dumps({k: r.get(k) for k in ("id", "to", "from", "status", "why", "subject", "step", "message_id")}))
+        log(f"[runner] done: {sum(1 for r in results if r['status'] in ('sent', 'drafted'))} {mode} / {sum(1 for r in results if r['status'] == 'skip')} skipped / {sum(1 for r in results if r['status'] == 'failed')} failed")
+    except Exception as e:
+        log(f"[runner] email run stopped: {e}")
+    finally:
+        STATE["running"] = False
+
+
+def email_status():
+    cfg = cold_email.load_config()
+    log_ = cold_email.read_log()
+    problems = []
+    if not cfg.get("accounts"):
+        problems.append("add at least one sending inbox in tools/email_accounts.json (copy email_accounts.example.json)")
+    if not (cfg.get("postal_address") or "").strip() or "mailing address" in cfg.get("postal_address", ""):
+        problems.append("add your real postal address (cold email law requires it in every email)")
+    if not (cfg.get("sender_name") or "").strip() or cfg.get("sender_name") == "Your Name":
+        problems.append("add your name as sender_name")
+    caps = cold_email.capacity(cfg, log_)
+    return {"ready": not problems, "problems": problems, "inboxes": caps, "capacity_left": sum(max(0, c["cap"] - c["sent_today"]) for c in caps),
+            "suppressed": len(cold_email.suppressed()), "suppressed_list": sorted(cold_email.suppressed())[:2000], "in_send_window": cold_email.in_window(cfg),
+            "window": cfg.get("send_window") or {"start_hour": 9, "end_hour": 17}}
 
 
 class H(BaseHTTPRequestHandler):
@@ -220,6 +372,8 @@ class H(BaseHTTPRequestHandler):
         elif u.path == "/clipper/templates":
             t = sample_templates()
             self._send(200 if t is not None else 503, {"templates": t or [], "folder": OUT_FOLDER, **({} if t is not None else {"error": "clipper is off"})})
+        elif u.path == "/email/status":
+            self._send(200, email_status())
         elif u.path == "/clipper/status":
             self._send(200, clipper_status())
         elif u.path == "/log":
@@ -244,9 +398,59 @@ class H(BaseHTTPRequestHandler):
         if self.path == "/reveal":
             p = str(body.get("path", ""))
             known = {t["video_path"] for t in (sample_templates() or [])}
-            if not p or not os.path.isfile(p) or not (p in known or os.path.realpath(p).startswith(os.path.realpath(SAMPLES) + os.sep)):
+            allowed = (os.path.realpath(SAMPLES), os.path.realpath(REPO / "opencut-exports"))
+            if not p or not os.path.isfile(p) or not (p in known or any(os.path.realpath(p).startswith(a + os.sep) for a in allowed)):
                 return self._send(400, {"error": "that file is not one of your samples"})
             subprocess.Popen([*REVEAL_CMD, p])
+            return self._send(200, {"ok": True})
+        if self.path == "/pipeline/start":
+            leads = [l for l in (body.get("leads") or []) if isinstance(l, dict) and l.get("id") and YT_RE.match(str(l.get("url", "")))][:25]
+            if not leads:
+                return self._send(400, {"error": "no leads with a YouTube episode link"})
+            with LOCK:
+                if STATE["running"]:
+                    return self._send(409, {"error": "a run is already in progress"})
+                STATE.update(running=True, log=[f"[runner] preparing clips for {len(leads)} lead(s)"])
+                threading.Thread(target=run_pipeline, args=(leads, float(body.get("minutes") or 5), int(body.get("clips") or 1),
+                                 body.get("after"), clean(body.get("folder") or "", 80) or None), daemon=True).start()
+            return self._send(200, {"ok": True, "leads": len(leads)})
+        if self.path == "/emails/find":
+            leads = [l for l in (body.get("leads") or []) if isinstance(l, dict) and l.get("id") and l.get("name")][:60]
+            if not leads:
+                return self._send(400, {"error": "no leads to search"})
+            with LOCK:
+                if STATE["running"]:
+                    return self._send(409, {"error": "a run is already in progress"})
+                STATE.update(running=True, log=[f"[runner] looking for public contact emails for {len(leads)} podcast(s)"])
+                PIPE["stop"] = False
+                threading.Thread(target=run_find_emails, args=(leads,), daemon=True).start()
+            return self._send(200, {"ok": True, "leads": len(leads)})
+        if self.path == "/email/preview":
+            items = list(cold_email.plan(body.get("leads") or [], body.get("template") or {}, "preview", int(body.get("limit") or 20), True, int(body.get("step") or 0)))
+            return self._send(200, {"items": items, "status": email_status()})
+        if self.path == "/email/run":
+            mode = body.get("mode")
+            if mode not in ("drafts", "send"):
+                return self._send(400, {"error": "mode must be drafts or send"})
+            if mode == "send" and body.get("confirm") is not True:
+                return self._send(400, {"error": "sending needs confirm: true"})
+            st = email_status()
+            if not st["ready"]:
+                return self._send(400, {"error": "; ".join(st["problems"])})
+            with LOCK:
+                if STATE["running"]:
+                    return self._send(409, {"error": "a run is already in progress"})
+                STATE.update(running=True, log=[f"[runner] email run ({mode})"])
+                threading.Thread(target=run_email, args=(body.get("leads") or [], body.get("template") or {}, mode, min(60, int(body.get("limit") or 20)),
+                                 bool(body.get("ignore_window")), int(body.get("step") or 0)), daemon=True).start()
+            return self._send(200, {"ok": True})
+        if self.path == "/email/check-replies":
+            try:
+                return self._send(200, cold_email.check_replies(body.get("sent") or [], log_fn=lambda m: None))
+            except Exception as e:
+                return self._send(500, {"error": str(e)[:200]})
+        if self.path == "/pipeline/stop":
+            PIPE["stop"] = True
             return self._send(200, {"ok": True})
         if self.path == "/clipper/send":
             url, start, end = str(body.get("url", "")).strip(), str(body.get("start", "")).strip(), str(body.get("end", "")).strip()
