@@ -289,6 +289,7 @@ def plan(leads, template, mode="preview", limit=20, ignore_window=False, step=0)
     """Decides, for each lead in order, what would happen. No sending. Yields dicts (status: ready/skip)."""
     cfg, log = load_config(), read_log()
     used, recent = {}, {e["to"].lower() for e in sent_entries(log) if e.get("ts", 0) > time.time() - 90 * 86400 and e.get("step", 0) == step}
+    drafted = {e["to"].lower() for e in log if e.get("status") == "drafted" and e.get("ts", 0) > time.time() - 14 * 86400}
     n = 0
     for ld in leads:
         to = (ld.get("email") or "").strip().lower()
@@ -301,6 +302,9 @@ def plan(leads, template, mode="preview", limit=20, ignore_window=False, step=0)
             continue
         if to in recent:
             yield {**base, "status": "skip", "why": "already emailed in the last 90 days"}
+            continue
+        if mode == "drafts" and step == 0 and to in drafted:
+            yield {**base, "status": "skip", "why": "already saved as a draft"}
             continue
         provider = mx_provider(to.split("@", 1)[1]) if step == 0 else ((first_mail_for(log, to) or {}).get("provider") or "unknown")
         if step == 0 and provider in (template.get("skip_providers") if "skip_providers" in template else cfg.get("skip_providers", ["microsoft"])):
