@@ -552,7 +552,7 @@ function find(){$('#main').innerHTML=`<div class="card" style="border-color:var(
  $('#rl').onclick=async()=>{$('#log').textContent='';let st;
   try{st=await rc('/status')}catch(e){log('Helper not running. Open Terminal and run:\n   cd ~/clipper-crm && python3 tools/local_runner.py\nleave that window open, then click this again.');$('#rs').textContent='Helper not detected';return}
   if(st.running)return log('A run is already in progress.');
-  const dry=$('#rdry').checked;if(!dry&&!st.configured)return log('The helper has no CRM link yet. Copy tools/.env.example to tools/.env, fill in CRM_SYNC_URL and CRM_SYNC_PASSWORD, restart the helper. Or tick "preview only".');
+  const dry=$('#rdry').checked;
   const one=$('#pgn').value.trim(),niches=one?[one]:S.niches;
   const r=await rc('/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({niches,focus:($('#pgf').value||'').trim(),count:+$('#pgc').value||10,dry,emit:!dry})});
   if(r.error)return log('Could not start: '+r.error);
