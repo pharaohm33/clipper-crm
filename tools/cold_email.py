@@ -218,6 +218,7 @@ def render(template, lead, cfg, step=0, subject_for_reply=None):
                       .replace("{name}", str(lead.get("name") or "your podcast"))
                       .replace("{episode}", str(lead.get("epTitle") or "your recent episode"))
                       .replace("{clip_link}", str(lead.get("clipLink") or lead.get("link") or ""))
+                      .replace("{personal_line}", _prose(str(lead.get("personal") or "")))
                       .replace("{sender}", str(cfg.get("sender_name") or "")))
     if step == 0:
         subject, body = fill(template.get("subject") or DEFAULT_SUBJECT), fill(template.get("body") or DEFAULT_BODY)

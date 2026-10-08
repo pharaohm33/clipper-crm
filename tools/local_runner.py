@@ -16,7 +16,7 @@ from urllib.parse import urlparse, parse_qs
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-import cold_email, email_finder
+import cold_email, email_finder, personalize
 SCRIPT = os.getenv("RUNNER_SCRIPT", str(HERE / "google_ai_to_crm.py"))
 PORT = int(os.getenv("RUNNER_PORT", "8765"))
 APP_URL = os.getenv("CLIPPER_URL", "http://127.0.0.1:5001").rstrip("/")
@@ -275,12 +275,44 @@ def run_pipeline(leads, minutes=5, clips=1, after=None, folder=None):
                     link = shared.get("link", "")
                 else:
                     log(f"   (could not make a share link: {shared.get('error') or c3})")
+                personal = personal_note(ld, raw["outputs"][0], first.get("title", ""), first.get("hook", ""))
                 log("PIPE " + json.dumps({"id": ld["id"], "slug": slug, "video": video, "dir": str(Path(video).parent), "clip": clip_file,
-                                          "title": first.get("title", ""), "hook": first.get("hook", ""), "link": link,
+                                          "title": first.get("title", ""), "hook": first.get("hook", ""), "link": link, "personal": personal,
                                           "range": f"{s0}-{e0}", "name": name}))
             except Exception as e:
                 log(f"PIPEFAIL {json.dumps({'id': ld.get('id'), 'why': str(e)[:200]})}")
         log("[runner] pipeline finished.")
+    finally:
+        STATE["running"] = False
+
+
+def personal_note(ld, clip_name, title, hook):
+    """Reads the words spoken in the clip (the clipper's own transcript, the same one the clip editor shows), then asks DeepSeek for
+    one specific note about it. Returns '' if anything is missing; the email still works without it."""
+    code, w = app_call("/api/clip-edit/words", {"id": f"opencut-exports/{clip_name}"}, timeout=900)
+    if code != 200 or not w.get("success"):
+        log(f"   (no personal note: could not read the clip's words: {(w or {}).get('error') or code})")
+        return ""
+    line = personalize.write_line(ld.get("name") or "", ld.get("epTitle") or "", title, hook, w.get("text", ""))
+    if not line:
+        log("   (no personal note: not enough to say, or no DeepSeek key found)")
+    return line
+
+
+def run_personalize(leads):
+    """For leads that already have a clip: writes the personal note. One 'PERSONAL {json}' line each."""
+    try:
+        for ld in leads:
+            if PIPE["stop"]:
+                log("[runner] stopped.")
+                break
+            name = Path(str(ld.get("clipFile") or "")).name
+            if not name:
+                continue
+            log(f"[runner] writing a personal note for {ld.get('name')}")
+            line = personal_note(ld, name, ld.get("clipTitle") or "", ld.get("clipHook") or "")
+            log("PERSONAL " + json.dumps({"id": ld["id"], "line": line}))
+        log("[runner] personal notes finished.")
     finally:
         STATE["running"] = False
 
@@ -327,8 +359,12 @@ def email_status():
         problems.append("add your real postal address (cold email law requires it in every email)")
     if not (cfg.get("sender_name") or "").strip() or cfg.get("sender_name") == "Your Name":
         problems.append("add your name as sender_name")
+    warnings = []
+    rt = (cfg.get("reply_to") or "").lower()
+    if rt and rt.split("@")[-1] in ("gmail.com","googlemail.com","yahoo.com","outlook.com","hotmail.com","live.com","icloud.com","aol.com","proton.me","protonmail.com"):
+        warnings.append(f"Replies go to a free address ({rt}). Spam filters penalize a Gmail/Yahoo Reply-To on a different From domain (mail-tester: -2.5). Before real outreach, set Reply-To to a mailbox on a domain you own (python3 tools/setup_email.py, option 4).")
     caps = cold_email.capacity(cfg, log_)
-    return {"ready": not problems, "problems": problems, "inboxes": caps, "capacity_left": sum(max(0, c["cap"] - c["sent_today"]) for c in caps),
+    return {"warnings": warnings, "ready": not problems, "problems": problems, "inboxes": caps, "capacity_left": sum(max(0, c["cap"] - c["sent_today"]) for c in caps),
             "suppressed": len(cold_email.suppressed()), "suppressed_list": sorted(cold_email.suppressed())[:2000], "in_send_window": cold_email.in_window(cfg),
             "window": cfg.get("send_window") or {"start_hour": 9, "end_hour": 17}}
 
@@ -451,6 +487,17 @@ class H(BaseHTTPRequestHandler):
                 return self._send(200, {**res, "bounced": b["bounced"], "errors": (res.get("errors") or []) + b["errors"]})
             except Exception as e:
                 return self._send(500, {"error": str(e)[:200]})
+        if self.path == "/email/personalize":
+            leads = [l for l in (body.get("leads") or []) if l.get("clipFile")]
+            if not leads:
+                return self._send(400, {"error": "no leads with a clip yet"})
+            with LOCK:
+                if STATE["running"]:
+                    return self._send(409, {"error": "a run is already in progress"})
+                STATE.update(running=True, log=[f"[runner] writing personal notes for {len(leads)} lead(s)"])
+                PIPE["stop"] = False
+                threading.Thread(target=run_personalize, args=(leads,), daemon=True).start()
+            return self._send(200, {"ok": True, "leads": len(leads)})
         if self.path == "/email/stats":
             return self._send(200, cold_email.stats())
         if self.path == "/pipeline/stop":

@@ -173,6 +173,9 @@ def main():
     if not accounts:
         print(BAD + "no inboxes. Run python3 tools/setup_email.py")
         bad += 1
+    rt = (cfg.get("reply_to") or "").lower()
+    if rt and rt.split("@")[-1] in ("gmail.com","googlemail.com","yahoo.com","outlook.com","hotmail.com","live.com","icloud.com","aol.com","proton.me","protonmail.com"):
+        print(WARN + f"Reply-To is a free address ({rt}). Before real outreach, switch it to a mailbox on a domain you own (setup_email.py option 4): a Gmail Reply-To costs about 2.5 spam points.")
     domains = [a["email"].split("@")[1].lower() for a in accounts]
     if len(accounts) > 1 and len(set(domains)) == 1:
         print(WARN + "all inboxes share one domain. Spreading them over 2 or 3 domains protects you if one domain gets a bad reputation.")
