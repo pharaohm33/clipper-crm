@@ -44,7 +44,7 @@ const STATUSES=['New','Sample Sent',CNS,'Replied','Interested','Client','No Resp
 const TPL=['{n} podcast full episode','{n} podcast interview','how to start a {n} podcast','{n} podcast new episode'];
 const DEF={settings:{key:'',goal:5000,daily:100,minSubs:1000,maxSubs:150000,maxDays:60,followDays:3,templates:3,
  syncUrl:'',syncPw:'',geminiKey:'',geminiModel:'gemini-2.5-flash',skipNoContact:1,igOnly:0,useGeminiParse:0,maxShorts:20,emailLimit:20,
- emailSubject:"{Quick clip|Short clip|Clip} from your {niche} episode",
+ emailSkipMS:true,emailSubjectB:"",emailBodyB:"",emailSubject:"{Quick clip|Short clip|Clip} from your {niche} episode",
  emailBody:"{Hi|Hey|Hello} there,\n\n{I just watched|I caught|I watched} your recent episode on {niche} and {loved it|really enjoyed it}. I cut a short clip from it that I think could do well on Reels, TikTok and Shorts:\n\n{clip_link}\n\n{It is yours to post, free, no strings attached.|Feel free to post it, it is yours, no strings attached.} If you'd like a few of these each week, just reply and I'll send you more.\n\n{Thanks|Best|Cheers},\n{sender}",
  dm:"{Hey|Hey there|Hi}! {Just watched|Just finished|Caught} your {latest|recent|newest} episode on {niche} and {loved it|really enjoyed it|thought it was great}. I {made|cut|put together} a quick clip from it because {it deserved more eyes|it was too good not to share|I think it could do well on Reels}. {Totally free|No strings attached|No cost at all}, just thought you'd like to see it. Here's the full episode I pulled it from: {episode}"},
  niches:['real estate','personal finance','fitness','entrepreneurship','mental health','true crime','faith christian','sports betting','parenting','health longevity'],
@@ -238,7 +238,7 @@ function prepareClips(n,onlyWithEmail){
   if(r=parseTag(t,'PIPE')){const l=S.leads.find(x=>x.id==r.id);if(l)Object.assign(l,{clipLink:r.link,clipFile:r.clip,clipTitle:r.title,sampleSlug:r.slug,sampleName:r.name,sampleFile:r.video,sampleDir:r.dir,clipFail:''})}
   else if(r=parseTag(t,'PIPEFAIL')){const l=S.leads.find(x=>x.id==r.id);if(l)l.clipFail=r.why}})}
 const emailPayload=l=>({id:l.id,name:l.name,niche:l.niche,epTitle:l.epTitle,email:l.email,clipLink:l.clipLink,subject:l.emailSubject})
-const tpl=()=>({subject:S.settings.emailSubject,body:S.settings.emailBody});
+const tpl=()=>({subject:S.settings.emailSubject,body:S.settings.emailBody,variants:(S.settings.emailSubjectB||S.settings.emailBodyB)?[{subject:S.settings.emailSubjectB,body:S.settings.emailBodyB}]:[],skip_providers:S.settings.emailSkipMS===false?[]:['microsoft']});
 async function previewEmails(){ES.msg='';const leads=S.leads.filter(isEmailReady).slice(0,+S.settings.emailLimit||20).map(emailPayload);
  if(!leads.length){ES.preview=null;ES.msg='Nothing is ready to email yet (a lead needs an email AND a clip link).';return emailDyn()}
  try{const r=await (await fetch(RUNNER+'/email/preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({leads,template:tpl(),limit:leads.length})})).json();ES.preview=r.items;ES.status=r.status}
@@ -257,8 +257,12 @@ async function checkReplies(){const sent=S.leads.filter(l=>l.emailedAt&&l.status
  try{const r=await (await fetch(RUNNER+'/email/check-replies',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sent})})).json();
   if(r.error)ES.msg=r.error;else{let rep=0,out=0;for(const f of r.found||[]){const l=S.leads.find(x=>x.id==f.id);if(!l)continue;
    if(f.kind=='optout'){l.status='Not Interested';l.notes=((l.notes?l.notes+' | ':'')+'Asked not to be contacted: do not email again');out++}else{l.status='Replied';l.notes=((l.notes?l.notes+' | ':'')+'Replied by email: '+f.snippet);rep++}}
-   ES.msg=(r.errors&&r.errors.length?`Could not read: ${r.errors.join('; ')}. Check imap_host, username and app password in tools/email_accounts.json. `:'')+`Checked ${sent.length} sent email${sent.length==1?'':'s'}: ${rep} ${rep==1?'reply':'replies'}, ${out} asked to stop (added to the do not contact list).`;save()}}
+   ES.msg=(r.errors&&r.errors.length?`Could not read: ${r.errors.join('; ')}. Check imap_host, username and app password in tools/email_accounts.json. `:'')+`Checked ${sent.length} sent email${sent.length==1?'':'s'}: ${rep} ${rep==1?'reply':'replies'}, ${out} asked to stop (added to the do not contact list), ${(r.bounced||[]).length} bounced.`;save();loadEmailStats()}}
  catch(e){ES.msg='Helper not running. In Terminal: cd ~/clipper-crm && python3 tools/local_runner.py'}ES.busy=false;emailDyn()}
+async function loadEmailStats(){const el=document.getElementById('email-stats');if(!el)return;let st;try{st=await (await fetch(RUNNER+'/email/stats',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})).json()}catch(e){el.innerHTML='';return}
+ const tbl=(title,o,names)=>{const k=Object.keys(o).sort();if(!k.length)return'';return`<table><tr><th>${title}</th><th>Sent</th><th>Replied</th><th>Asked to stop</th><th>Bounced</th><th>Reply rate</th></tr>${k.map(x=>{const r=o[x];return`<tr><td>${esc((names&&names[x])||x)}</td><td>${r.sent}</td><td>${r.replied}</td><td>${r.optout}</td><td>${r.bounced}</td><td>${r.reply_rate}%</td></tr>`}).join('')}</table>`};
+ const v=tbl('Version',st.variant||{}),p=tbl('Recipient mail host',st.provider||{},{google:'Google / Gmail',microsoft:'Outlook / Microsoft',other:'Other (custom host)',unknown:'Unknown'});
+ el.innerHTML=(v||p)?`<div class="card tw"><b>Results</b> <span class=mut>First emails only. Click "Check replies" to refresh. With fewer than about 100 sent per version, differences can just be luck.</span>${v}${p}</div>`:''}
 async function loadEmailStatus(){try{ES.status=await (await fetch(RUNNER+'/email/status')).json()}catch(e){ES.status=null}emailDyn()}
 function emailDyn(){const el=document.getElementById('email-dyn');if(!el)return;const f=emailFunnel(),st=ES.status,dis=ES.busy?'disabled':'',canSend=st&&st.ready&&!ES.busy?'':'disabled';
  const bar=(k,v)=>`<div class="stat"><small>${k}</small><b>${v}</b></div>`;
@@ -281,12 +285,18 @@ function emailDyn(){const el=document.getElementById('email-dyn');if(!el)return;
 function emailV(){const g=S.settings;
  $('#main').innerHTML=`<div class="card"><b>Cold email</b> <span class=mut>One short, honest email per podcast with a link to a clip made from their own episode. Rotates across your inboxes, keeps to daily caps that grow slowly, never emails the same address twice, and stops for anyone who says no.</span></div>
  <div id="email-dyn"></div>
+ <div id="email-stats"></div>
  <div class="card"><b>Your email</b> <span class=mut>Spintax like {Hi|Hey|Hello} picks one per lead. Tokens: {niche} {name} {episode} {clip_link} {sender}. Your name, postal address and an opt out line are added automatically.</span>
   <label>Subject</label><input data-e="emailSubject" value="${esc(g.emailSubject)}" style="width:100%">
   <label>Body</label><textarea data-e="emailBody" style="min-height:230px">${esc(g.emailBody)}</textarea>
+  <label style="margin-top:10px;display:block"><b>Version B (optional split test)</b> <span class=mut>Leave both blank to send only the email above. Fill in either one to send B to about half your leads, and compare results below. Change one thing at a time.</span></label>
+  <label>Subject B</label><input data-e="emailSubjectB" value="${esc(g.emailSubjectB||'')}" style="width:100%" placeholder="blank = same as A">
+  <label>Body B</label><textarea data-e="emailBodyB" style="min-height:150px" placeholder="blank = same as A">${esc(g.emailBodyB||'')}</textarea>
+  <label style="margin-top:8px"><input type="checkbox" data-ec="emailSkipMS" ${g.emailSkipMS===false?'':'checked'}> Skip mailboxes hosted by Outlook / Microsoft 365 for now (checks each domain's mail host)</label>
   <div class="row" style="margin-top:8px"><div><label>Emails per run</label><input data-e="emailLimit" type="number" min="1" max="60" value="${esc(g.emailLimit)}" style="width:90px"></div></div></div>`;
  $('#main').oninput=e=>{const k=e.target.dataset.e;if(!k)return;g[k]=e.target.type=='number'?+e.target.value:e.target.value;save()};
- $('#main').onclick=null;emailDyn();loadEmailStatus()}
+ $('#main').onchange=e=>{const k=e.target.dataset.ec;if(!k)return;g[k]=e.target.checked;save()};
+ $('#main').onclick=null;emailDyn();loadEmailStatus();loadEmailStats()}
 function markSent(l){(S.undo=S.undo||[]).push({id:l.id,status:l.status,sent:l.sent||'',follow:l.follow||'',at:Date.now()});S.undo=S.undo.slice(-30);l.status='Sample Sent';if(!l.sent)l.sent=today();l.follow=addDays(today(),+S.settings.followDays||3)}
 function leads(){const q=(leads.q||'').toLowerCase(),f=leads.f||'';
  const rows=S.leads.filter(l=>(f?l.status==f:l.status!='Removed')&&(!q||(l.name+l.niche).toLowerCase().includes(q)));

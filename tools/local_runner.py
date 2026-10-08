@@ -446,9 +446,13 @@ class H(BaseHTTPRequestHandler):
             return self._send(200, {"ok": True})
         if self.path == "/email/check-replies":
             try:
-                return self._send(200, cold_email.check_replies(body.get("sent") or [], log_fn=lambda m: None))
+                res = cold_email.check_replies(body.get("sent") or [], log_fn=lambda m: None)
+                b = cold_email.check_bounces(log_fn=lambda m: None)
+                return self._send(200, {**res, "bounced": b["bounced"], "errors": (res.get("errors") or []) + b["errors"]})
             except Exception as e:
                 return self._send(500, {"error": str(e)[:200]})
+        if self.path == "/email/stats":
+            return self._send(200, cold_email.stats())
         if self.path == "/pipeline/stop":
             PIPE["stop"] = True
             return self._send(200, {"ok": True})

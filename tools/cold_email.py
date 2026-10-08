@@ -18,6 +18,8 @@ import email.utils
 import imaplib
 import json
 import random
+import subprocess
+import zlib
 import re
 import smtplib
 import time
@@ -89,6 +91,64 @@ def suppress(address, why=""):
 def is_suppressed(address):
     s, a = suppressed(), address.lower()
     return a in s or "@" + a.split("@")[-1] in s
+
+
+_mx_cache = {}
+
+
+def mx_provider(domain):
+    """Who hosts this domain's mail: 'google', 'microsoft', 'other' or 'unknown' (lookup failed). Cached per domain."""
+    domain = (domain or "").lower()
+    if domain in _mx_cache:
+        return _mx_cache[domain]
+    if domain in ("gmail.com", "googlemail.com"):
+        res = "google"
+    elif domain in ("outlook.com", "hotmail.com", "live.com", "msn.com") or domain.startswith(("outlook.", "hotmail.", "live.")):
+        res = "microsoft"
+    else:
+        try:
+            out = subprocess.run(["nslookup", "-type=mx", domain], capture_output=True, text=True, timeout=12).stdout.lower()
+            res = ("microsoft" if ("protection.outlook.com" in out or "mail.protection.outlook" in out) else
+                   "google" if ("google.com" in out or "googlemail.com" in out) else
+                   "other" if "mail exchanger" in out else "unknown")
+        except Exception:
+            res = "unknown"
+    _mx_cache[domain] = res
+    return res
+
+
+def pick_variant(template, lead_id):
+    """('A', subject, body) for this lead. template['variants'] is a list of {subject, body} that add to the base email (A).
+    The pick depends only on the lead id, so preview, send and follow-ups all agree."""
+    extra = [v for v in (template.get("variants") or []) if (v.get("subject") or v.get("body"))]
+    options = [{"subject": template.get("subject"), "body": template.get("body")}] + [
+        {"subject": v.get("subject") or template.get("subject"), "body": v.get("body") or template.get("body")} for v in extra]
+    i = zlib.crc32(str(lead_id).encode()) % len(options)
+    return chr(65 + i), options[i]["subject"], options[i]["body"]
+
+
+def stats(log=None):
+    """First-email results per variant and per recipient mail host: sent, replied, asked to stop, bounced, failed."""
+    log = read_log() if log is None else log
+    firsts = {}
+    for e in log:
+        if e.get("status") == "sent" and e.get("step", 0) == 0:
+            firsts[e.get("to", "").lower()] = e
+    outcome = {}
+    for e in log:
+        if e.get("status") in ("replied", "optout", "bounced"):
+            outcome.setdefault(e.get("to", "").lower(), set()).add(e["status"])
+    out = {"variant": {}, "provider": {}}
+    for to, e in firsts.items():
+        for kind, key in (("variant", e.get("variant") or "A"), ("provider", e.get("provider") or "unknown")):
+            row = out[kind].setdefault(key, {"sent": 0, "replied": 0, "optout": 0, "bounced": 0})
+            row["sent"] += 1
+            for st in outcome.get(to, ()):
+                row[st] += 1
+    for kind in out:
+        for row in out[kind].values():
+            row["reply_rate"] = round(100 * row["replied"] / row["sent"], 1) if row["sent"] else 0
+    return out
 
 
 def sent_entries(log=None):
@@ -216,6 +276,10 @@ def save_draft(acct, msg):
 
 
 # ----------------------------------------------------------------------------------------- the run
+def first_mail_for(log, to):
+    return next((e for e in reversed(log) if e.get("to", "").lower() == to and e.get("step", 0) == 0 and e.get("status") == "sent"), None)
+
+
 def plan(leads, template, mode="preview", limit=20, ignore_window=False, step=0):
     """Decides, for each lead in order, what would happen. No sending. Yields dicts (status: ready/skip)."""
     cfg, log = load_config(), read_log()
@@ -232,6 +296,10 @@ def plan(leads, template, mode="preview", limit=20, ignore_window=False, step=0)
             continue
         if to in recent:
             yield {**base, "status": "skip", "why": "already emailed in the last 90 days"}
+            continue
+        provider = mx_provider(to.split("@", 1)[1]) if step == 0 else ((first_mail_for(log, to) or {}).get("provider") or "unknown")
+        if step == 0 and provider in (template.get("skip_providers") if "skip_providers" in template else cfg.get("skip_providers", ["microsoft"])):
+            yield {**base, "status": "skip", "why": f"mailbox is hosted by {provider.title()} (skipped for now)"}
             continue
         if step == 0 and not (ld.get("clipLink") or ld.get("link")):
             yield {**base, "status": "skip", "why": "no clip link yet (prepare the clip first)"}
@@ -266,12 +334,17 @@ def plan(leads, template, mode="preview", limit=20, ignore_window=False, step=0)
         if mode == "send" and not ignore_window and not in_window(cfg):
             yield {**base, "status": "skip", "why": "outside the send window"}
             continue
-        subject, body = render(template, ld, cfg, step, ld.get("subject"))
+        variant = first_mail.get("variant", "A") if first_mail else "A"
+        tpl_used = template
+        if step == 0:
+            variant, vs, vb = pick_variant(template, ld.get("id"))
+            tpl_used = {**template, "subject": vs, "body": vb}
+        subject, body = render(tpl_used, ld, cfg, step, ld.get("subject"))
         if acct:
             used[acct["email"]] = used.get(acct["email"], 0) + 1
         n += 1
         yield {**base, "status": "ready", "from": acct["email"] if acct else "(no inbox set up yet)", "subject": subject, "body": body,
-               "in_reply_to": (first_mail or {}).get("message_id")}
+               "in_reply_to": (first_mail or {}).get("message_id"), "variant": variant, "provider": provider}
 
 
 def run(leads, template, mode, limit=20, ignore_window=False, step=0, log_fn=print, sleep=time.sleep):
@@ -307,7 +380,8 @@ def run(leads, template, mode, limit=20, ignore_window=False, step=0, log_fn=pri
             append_log({"ts": time.time(), "id": item["id"], "to": item["to"], "from": item["from"], "status": "failed", "why": item["why"], "step": item["step"]})
             continue
         entry = {"ts": time.time(), "id": item["id"], "to": item["to"], "from": item["from"], "subject": item["subject"],
-                 "message_id": msg["Message-ID"], "status": status, "step": item["step"]}
+                 "message_id": msg["Message-ID"], "status": status, "step": item["step"],
+                 "variant": item.get("variant"), "provider": item.get("provider")}
         append_log(entry)
         results.append({**item, "status": status, "message_id": msg["Message-ID"]})
         log_fn(f"{status} {item['to']} via {item['from']}")
@@ -349,6 +423,10 @@ def check_replies(sent, log_fn=print):
                 if kind == "optout":
                     suppress(s["email"], "asked to stop")
                 seen_ids.add(s["id"])
+                if not any(e.get("to", "").lower() == s["email"].lower() and e.get("status") in ("replied", "optout") for e in read_log()):
+                    fm = first_mail_for(read_log(), s["email"].lower()) or {}
+                    append_log({"ts": time.time(), "id": s["id"], "to": s["email"].lower(), "status": kind, "step": 0,
+                                "variant": fm.get("variant"), "provider": fm.get("provider")})
                 found.append({"id": s["id"], "email": s["email"], "kind": kind, "snippet": re.sub(r"\s+", " ", text)[:160]})
                 log_fn(f"{kind}: {s['email']}")
             imap.logout()
@@ -356,3 +434,37 @@ def check_replies(sent, log_fn=print):
             errors.append(f"{acct['email']}: {str(e)[:120]}")
             log_fn(f"could not check {acct['email']}: {str(e)[:120]}")
     return {"found": found, "errors": errors}
+
+
+def check_bounces(log_fn=print):
+    """Looks in each sending inbox for delivery-failure notices and logs a 'bounced' entry for every address we emailed that failed.
+    Returns {bounced: [addresses], errors: [...]}."""
+    cfg, errors, bounced = load_config(), [], []
+    log = read_log()
+    sent_to = {e["to"].lower(): e for e in log if e.get("status") == "sent" and e.get("to")}
+    already = {e["to"].lower() for e in log if e.get("status") == "bounced"}
+    for acct in cfg.get("accounts", []):
+        mine = {a for a, e in sent_to.items() if e.get("from") == acct["email"] and a not in already}
+        if not mine:
+            continue
+        try:
+            imap = imaplib.IMAP4_SSL(acct.get("imap_host") or acct["smtp_host"].replace("smtp.", "imap."))
+            imap.login(acct.get("username") or acct["email"], acct["password"])
+            imap.select("INBOX", readonly=True)
+            since = (datetime.now() - timedelta(days=30)).strftime("%d-%b-%Y")
+            typ, data = imap.search(None, f'(OR FROM "mailer-daemon" FROM "postmaster" SINCE {since})')
+            for num in (data[0].split() if typ == "OK" and data and data[0] else [])[-200:]:
+                raw = imap.fetch(num, "(BODY.PEEK[TEXT]<0.4000>)")[1]
+                text = (raw[0][1].decode("utf-8", "ignore") if raw and raw[0] else "").lower()
+                for addr in list(mine):
+                    if addr in text:
+                        fm = sent_to[addr]
+                        append_log({"ts": time.time(), "id": fm.get("id"), "to": addr, "status": "bounced", "step": 0,
+                                    "variant": fm.get("variant"), "provider": fm.get("provider")})
+                        bounced.append(addr)
+                        mine.discard(addr)
+                        log_fn(f"bounced: {addr}")
+            imap.logout()
+        except Exception as e:
+            errors.append(f"{acct['email']}: {str(e)[:120]}")
+    return {"bounced": bounced, "errors": errors}
