@@ -21,6 +21,10 @@ APP_URL = os.getenv("CLIPPER_URL", "http://127.0.0.1:5001").rstrip("/")
 GRAB = os.getenv("GRAB_SCRIPT", str(HERE / "grab_sample.sh"))
 SAMPLES = os.getenv("SAMPLES_DIR", str(Path.home() / "Downloads" / "clip-samples"))
 OUT_FOLDER = os.getenv("SAMPLES_FOLDER", "Podcast Outreach")
+SETTINGS_FILE = Path(os.getenv("OUTREACH_SETTINGS_FILE", str(HERE / "outreach_settings.json")))
+_DEFAULT_SETTINGS = {"captions": True, "quality": "high", "silence_cut": True, "silence_secs": "0.8", "quote": True,
+                     "reuse": False, "viral": False, "full_thought": True, "host_question": False, "hook": True,
+                     "ai": True, "after": "draft"}
 REVEAL_CMD = os.getenv("REVEAL_CMD", "open -R").split()
 ALLOWED = {"https://pharaohm33.github.io"}
 STATE = {"running": False, "log": [], "proc": None}
@@ -61,6 +65,14 @@ def run_job(argv):
         STATE["log"].append(f"[runner] failed to start: {e}")
     finally:
         STATE["running"] = False
+
+
+def outreach_settings():
+    """The clipper settings every outreach template starts with (tools/outreach_settings.json; edit that file to change them)."""
+    try:
+        return {**_DEFAULT_SETTINGS, **json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))}
+    except (OSError, ValueError):
+        return dict(_DEFAULT_SETTINGS)
 
 
 def app_call(path, payload=None, timeout=5):
@@ -129,7 +141,7 @@ def run_send(url, start, end, name, folder=None):
                 log(f"[runner] the clipper app is off ({APP_URL}). The clip source is saved here, start the app and click again:\n   {video}")
                 return
             if st["state"] == "on":
-                code, resp = app_call("/api/clip-templates/create", {"name": name, "path": video, "folder": folder or OUT_FOLDER}, timeout=30)
+                code, resp = app_call("/api/clip-templates/create", {**outreach_settings(), "name": name, "path": video, "folder": folder or OUT_FOLDER}, timeout=30)
                 if code == 200 and resp.get("success"):
                     break
                 if code != 409:

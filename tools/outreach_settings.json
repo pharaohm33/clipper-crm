@@ -1,0 +1,14 @@
+{
+  "captions": true,
+  "quality": "high",
+  "silence_cut": true,
+  "silence_secs": "0.8",
+  "quote": true,
+  "reuse": false,
+  "viral": false,
+  "full_thought": true,
+  "host_question": false,
+  "hook": true,
+  "ai": true,
+  "after": "draft"
+}
