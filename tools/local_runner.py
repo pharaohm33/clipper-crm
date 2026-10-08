@@ -558,6 +558,8 @@ class H(BaseHTTPRequestHandler):
                 argv += ["--focus", focus]
             if body.get("dry"):
                 argv.append("--dry-run")
+            elif body.get("emit"):
+                argv.append("--emit")
             argv += niches
             STATE.update(running=True, log=[f"[runner] starting: {' '.join(argv)}"])
             threading.Thread(target=run_job, args=(argv,), daemon=True).start()

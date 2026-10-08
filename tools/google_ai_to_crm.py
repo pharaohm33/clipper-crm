@@ -48,9 +48,10 @@ def load_env():
 
 
 def build_prompt(niche, count, focus=""):
-    return (f"List {count} small {niche} podcasts{' ' + focus if focus else ''} on YouTube (1k to 150k subscribers) that mostly post full length episodes and few or no YouTube Shorts. For each one give the YouTube "
-            "channel link, a recent full length episode title with its direct YouTube watch link, and the show's "
-            "Instagram handle. Format it as a table.")
+    return (f"List {count} {niche} podcasts or YouTube shows{' ' + focus if focus else ''} that: post full length episodes (20 minutes or longer) at least every two weeks and posted in the last 30 days; "
+            "post few or no YouTube Shorts; and where the host runs a real business behind the show, selling a product or service that costs $1,000 or more (for example a coaching program, agency, "
+            "brokerage, builder, practice, dealership or course) or has sponsors. Prefer owner led channels, including newer channels under a year old, and skip big networks and media companies. "
+            "For each one give the show name, the YouTube channel link, a recent full length episode title with its direct YouTube watch link, the host's Instagram handle, and their website. Format it as a table.")
 
 
 def ask_google_ai(page, prompt, timeout=120):
@@ -248,6 +249,7 @@ def main():
     ap.add_argument("--count", type=int, default=10)
     ap.add_argument("--focus", default="", help='comma separated angles to vary results, e.g. "in Texas,in Florida,for first time buyers"')
     ap.add_argument("--dry-run", action="store_true", help="parse and print, don't send to the CRM")
+    ap.add_argument("--emit", action="store_true", help="print the parsed shows as AIITEMS lines for the website to filter with its own quality checks (no Sheet, no YouTube key needed here)")
     ap.add_argument("--max-shorts", type=int, default=20, help="skip channels whose recent uploads are more than this %% Shorts (needs YT_API_KEY)")
     ap.add_argument("--min-subs", type=int, default=1000)
     ap.add_argument("--max-subs", type=int, default=150000)
@@ -256,7 +258,7 @@ def main():
 
     from playwright.sync_api import sync_playwright
     url, pw, key = os.getenv("CRM_SYNC_URL"), os.getenv("CRM_SYNC_PASSWORD"), os.getenv("YT_API_KEY")
-    if not a.dry_run and not (url and pw):
+    if not (a.dry_run or a.emit) and not (url and pw):
         sys.exit("Set CRM_SYNC_URL and CRM_SYNC_PASSWORD (or use --dry-run).")
     if not a.niches:
         sys.exit("Give at least one niche, e.g.  python tools/google_ai_to_crm.py \"real estate\"")
@@ -267,7 +269,7 @@ def main():
         ctx = p.chromium.launch_persistent_context(str(PROFILE), channel="chrome", headless=False, viewport={"width": 1200, "height": 900})
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
         existing = set()
-        if url and pw and not a.dry_run:
+        if url and pw and not a.dry_run and not a.emit:
             for l in crm(url, pw, action="pull")["state"].get("leads", []):
                 existing.add(l["id"])
                 existing.add("n:" + str(l.get("name", "")).strip().lower())
@@ -285,6 +287,15 @@ def main():
             items = parse_tables(data)
             if not items:
                 print("  no table found. Raw answer saved in tools/runs/ (paste it into the website's Paste box).")
+                continue
+            if a.emit:
+                mapped = [{"name": it.get("name", ""), "youtube_url": it.get("channel", ""), "episode_url": it.get("episode_url", ""), "episode_title": it.get("episode_title", ""),
+                           "instagram_handle": it.get("ig", ""), "x_url": it.get("x", ""), "tiktok_url": it.get("tt", "")} for it in items]
+                print("AIITEMS " + json.dumps({"niche": niche, "items": mapped}))
+                print(f"  parsed {len(items)} shows for the website to check")
+                total += len(items)
+                if n < len(jobs) - 1:
+                    time.sleep(random.uniform(20, 40))
                 continue
             leads = to_leads(items, niche, yt, a.max_shorts)
             fresh = []

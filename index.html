@@ -436,7 +436,7 @@ async function addChannels(c,log,force,opts){opts=opts||{};const g=S.settings,ha
    S.leads.push({id:ch.id,name:ch.snippet.title,niche:k.niche||'',url:'https://www.youtube.com/channel/'+ch.id,subs,last,episode:(k.video||lastVid)?'https://www.youtube.com/watch?v='+(k.video||lastVid):'',epTitle:k.video?(k.epTitle||''):epTitle,shortsPct:pct,medianViews:med,longN,gapDays:gap,maxGap:mgap,sponsoredN:spN,liveN,medDurMin:medDur,ageDays,payScore:pay.score,payTags:pay.tags,
     ig:s.ig||(k.aiIg?'https://instagram.com/'+k.aiIg:''),x:s.x||k.aiX||'',tt:s.tt||k.aiTt||'',web:s.web||k.aiWeb||'',status:'New',added:today(),sent:'',follow:'',notes:[s.ig?'':(k.aiIg?'IG from Gemini, verify':''),k.aiNote||''].filter(Boolean).join(' | ')});added++}
   save();log(`  checked ${Math.min(i+50,c.length)}/${c.length} channels…`)}return added}
-function episodePrompt(niche,count,extra,json){const base=`Use Google Search. Find ${count} real podcasts in the niche "${niche}" that mostly post full length episodes on YouTube (few or no Shorts) and are small enough to want clipping help (roughly 1k to 150k subscribers). For EACH show, pick ONE specific episode (published in the last 90 days, 20 minutes or longer, not a Short) that has a strong clippable moment, like a surprising story, a hot take or a practical tip. ${extra||''}`;
+function episodePrompt(niche,count,extra,json){const base=`Use Google Search. Find ${count} real ${niche} podcasts or YouTube shows that post full length episodes (20 minutes or longer) at least every two weeks, posted in the last 30 days, post few or no YouTube Shorts, and where the host runs a real business behind the show selling a product or service that costs $1,000 or more (coaching program, agency, brokerage, builder, practice, dealership, course) or has sponsors. Prefer owner led channels, including newer channels under a year old, and skip big networks and media companies. For EACH show, pick ONE specific episode (published in the last 90 days, 20 minutes or longer, not a Short) that has a strong clippable moment. ${extra||''}`;
  return json?base+`\nReturn ONLY a JSON array. Each item: {"name":"podcast name","episode_title":"exact episode title","episode_url":"direct https://www.youtube.com/watch?v= link","clip_idea":"one line on the moment worth clipping, with a timestamp if known","youtube_url":"channel link","instagram_handle":"official show or host handle without @","x_url":"","tiktok_url":""}. Only include episodes you actually found in search results with a real watch link. Leave a field empty if unknown. Never guess or invent links or handles.`
  :`List ${count} small ${niche} podcasts${extra?' '+extra:''} on YouTube (1k to 150k subscribers) that mostly post full length episodes and few or no YouTube Shorts. For each one give the YouTube channel link, a recent full length episode title with its direct YouTube watch link, and the show's Instagram handle. Format it as a table.`}
 async function geminiModels(){if(geminiModels.c)return geminiModels.c;const g=S.settings;
@@ -497,7 +497,8 @@ function basicParse(text){const tp=tableParse(text);if(tp&&tp.length)return tp;
  return out.map(b=>blockItem(b.trim())).filter(Boolean)}
 async function ingestPasted(text,niche,log){let items=null;
  if(S.settings.geminiKey&&S.settings.useGeminiParse){try{items=await geminiParse(text,log)}catch(e){log('Gemini parse failed ('+e.message+') — using basic parser.')}}
- if(!items)items=basicParse(text);log(`Found ${items.length} podcast(s) in the text.`);
+ if(!items)items=basicParse(text);log(`Found ${items.length} podcast(s) in the text.`);return ingestItems(items,niche,log)}
+async function ingestItems(items,niche,log){
  const cands=[],have=new Set(S.leads.map(l=>l.id));let direct=0;skipped=0;
  for(const it of items){const ig=(it.instagram_handle||'').replace(/^@/,'').replace(/[^A-Za-z0-9._]/g,'');let rr=null;
   try{rr=await resolveAI(it)}catch(e){log('  YouTube lookup failed for '+it.name+': '+e.message)}
@@ -553,11 +554,12 @@ function find(){$('#main').innerHTML=`<div class="card" style="border-color:var(
   if(st.running)return log('A run is already in progress.');
   const dry=$('#rdry').checked;if(!dry&&!st.configured)return log('The helper has no CRM link yet. Copy tools/.env.example to tools/.env, fill in CRM_SYNC_URL and CRM_SYNC_PASSWORD, restart the helper. Or tick "preview only".');
   const one=$('#pgn').value.trim(),niches=one?[one]:S.niches;
-  const r=await rc('/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({niches,focus:($('#pgf').value||'').trim(),count:+$('#pgc').value||10,dry})});
+  const r=await rc('/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({niches,focus:($('#pgf').value||'').trim(),count:+$('#pgc').value||10,dry,emit:!dry})});
   if(r.error)return log('Could not start: '+r.error);
   $('#rs').textContent='Running…';log(`Running on ${niches.length} niche(s). A Chrome window will open. If Google asks you to verify, solve it there.`);
-  let since=0,go=true;while(go){await new Promise(x=>setTimeout(x,2000));try{const l=await rc('/log?since='+since);since=l.next;l.lines.forEach(t=>log(t));go=l.running}catch(e){log('Lost contact with the helper.');go=false}}
-  $('#rs').textContent='Finished';if(!dry){log('Merging new leads into the CRM…');await mergePull();log('Done. Check the Leads tab and Today.')}};
+  let since=0,go=true;while(go){await new Promise(x=>setTimeout(x,2000));try{const l=await rc('/log?since='+since);since=l.next;l.lines.forEach(t=>{log(t.startsWith('AIITEMS ')?'  (shows read, checking them next)':t);if(t.startsWith('AIITEMS ')){try{(window.__aiItems=window.__aiItems||[]).push(JSON.parse(t.slice(8)))}catch(e){}}});go=l.running}catch(e){log('Lost contact with the helper.');go=false}}
+  $('#rs').textContent='Finished';if(!dry){const batches=window.__aiItems||[];window.__aiItems=[];const before=new Set(S.leads.map(l=>l.id));let tot=0;try{for(const b of batches){log('Checking '+b.items.length+' shows for '+b.niche+' with your quality filters…');tot+=await ingestItems(b.items,b.niche,log)}}catch(e){log('Stopped: '+e.message)}
+ const fresh=S.leads.filter(l=>!before.has(l.id)&&l.status=='New'),weak=fresh.filter(l=>!(l.pin||isHot(l)));weak.forEach(l=>{l.status='Removed';l.notes=((l.notes?l.notes+' | ':'')+'Removed: did not meet standards')});save();log(`Done. ${fresh.length-weak.length} qualified lead(s) kept, ${weak.length} removed for not meeting the standards. Check Today.`)}};
  $('#pgb').onclick=()=>openAI($('#pgn').value||S.niches[0]);
  $('#main').onclick=e=>{if(e.target.dataset.ai)openAI(e.target.dataset.ai)};
  $('#pb2').onclick=async()=>{$('#log').textContent='';const t=$('#pt').value.trim();if(!t)return log('Paste some text first.');
