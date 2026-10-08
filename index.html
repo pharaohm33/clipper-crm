@@ -65,13 +65,15 @@ if(S.settings.emailBody==="{Hi|Hey|Hello} there,\n\n{I just watched|I caught|I w
 if(/[—–]/.test(S.settings.dm)||S.settings.dm.startsWith('Hey! Just watched your latest'))S.settings.dm=DEF.settings.dm;
 let syncT,syncMsg='';
 function setSync(m){syncMsg=m;const e=document.getElementById('sync');if(e)e.textContent=m}
-function save(){localStorage.setItem('clipperCRM',JSON.stringify(S));clearTimeout(syncT);if(S.settings.syncUrl&&S.settings.syncPw)syncT=setTimeout(()=>syncCall('push'),2500)}
+function adoptNewer(){try{const cur=JSON.parse(localStorage.getItem('clipperCRM')||'null');if(cur&&(cur._rev||0)>(S._rev||0)){const mine=S.leads||[],have=new Set((cur.leads||[]).map(l=>l.id));const next=Object.assign({},DEF,cur);next.settings=Object.assign({},DEF.settings,cur.settings);(mine).forEach(l=>{if(!have.has(l.id))next.leads.push(l)});S=next;return true}}catch(e){}return false}
+function save(){adoptNewer();S._rev=(S._rev||0)+1;localStorage.setItem('clipperCRM',JSON.stringify(S));clearTimeout(syncT);if(S.settings.syncUrl&&S.settings.syncPw)syncT=setTimeout(()=>syncCall('push'),2500)}
 async function syncCall(action){const g=S.settings;if(!g.syncUrl||!g.syncPw){setSync('Sync not set up');return null}
  setSync(action=='push'?'Syncing…':'Pulling…');
  const st={leads:S.leads,payments:S.payments,team:S.team,clients:S.clients,retainers:S.retainers||[],settings:{goal:g.goal,daily:g.daily}};
  try{const r=await fetch(g.syncUrl,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({secret:g.syncPw,action,state:action=='push'?st:undefined})});
   const j=await r.json();if(!j.ok)throw new Error(j.error);setSync(action=='push'?'Synced ✓ '+new Date().toLocaleTimeString():'Pulled ✓');return j}
  catch(e){setSync('Sync failed: '+e.message);return null}}
+window.addEventListener('storage',e=>{if(e.key==='clipperCRM'&&adoptNewer()){try{render()}catch(_){}}});
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const iso=d=>{const x=d||new Date();return x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0')};
@@ -382,6 +384,8 @@ function leadScore(l){let s=0;if(l.gapDays!=null){if(l.gapDays<=8)s+=2;else if(l
  if(l.ageDays!=null&&l.ageDays<=365&&l.gapDays!=null&&l.gapDays<=10&&canAfford(l))s+=2;
  if(l.maxGap!=null&&l.maxGap<=14&&(l.longN||0)>=6)s+=1;
  if((l.liveN||0)>=3&&(l.shortsPct==null||l.shortsPct<=40))s+=2;else if((l.medDurMin||0)>=60&&(l.shortsPct==null||l.shortsPct<=30))s+=1;
+ if((l.payTags||[]).includes('high ticket'))s+=1;
+ if(l.shortsPct!=null&&l.shortsPct<=15&&(l.medDurMin||0)>=20)s+=1;
  if((l.payTags||[]).includes('risky pitch'))s-=4;
  return s}
 const canAfford=l=>!(l.payTags||[]).includes('risky pitch')&&(l.payTags||[]).filter(t=>t!=='website'&&t!=='community'&&t!=='risky pitch').length>=(+S.settings.payMin||1);
