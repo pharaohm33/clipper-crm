@@ -27,6 +27,7 @@ textarea{width:100%;min-height:90px}button.b{cursor:pointer}button.p{background:
 a{color:var(--acc)}.hide{display:none}.mut{color:var(--mut)}pre{white-space:pre-wrap;max-height:200px;overflow:auto;background:var(--bg);padding:8px;border-radius:6px}
 .dm{max-width:420px;white-space:pre-wrap;font-size:12px}
 .ov{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:20;padding:12px}.ov .card{width:min(600px,100%);max-height:92vh;overflow:auto;margin:0}.ov label{margin-top:8px}.ov input,.ov textarea{width:100%}
+.grip{cursor:grab;color:var(--mut);font-size:16px;padding:0 4px;user-select:none}.grip:active{cursor:grabbing}nav button.drop{outline:2px dashed #fff;background:var(--acc)}
 .sh{display:flex;gap:2px;align-items:flex-end;height:60px}.sh div{flex:1;background:var(--acc);border-radius:3px 3px 0 0;min-height:2px}
 </style>
 </head>
@@ -67,6 +68,9 @@ const monthKey=()=>today().slice(0,7);
 let tab='dash';const TABS=[['dash','Dashboard'],['today','Today'],['leads','Leads'],['find','Find Podcasts'],['money','Money'],['settings','Settings']];
 function nav(){$('#nav').innerHTML=TABS.map(([k,l])=>`<button class="${k===tab?'on':''}" data-t="${k}">${l}</button>`).join('')}
 $('#nav').onclick=e=>{if(e.target.dataset.t){tab=e.target.dataset.t;render()}};
+$('#nav').ondragover=e=>{if(e.target.dataset&&e.target.dataset.t==='today'){e.preventDefault();e.dataTransfer.dropEffect='move';e.target.classList.add('drop')}};
+$('#nav').ondragleave=e=>{if(e.target.classList)e.target.classList.remove('drop')};
+$('#nav').ondrop=e=>{if(!(e.target.dataset&&e.target.dataset.t==='today'))return;e.preventDefault();const t=(e.dataTransfer.getData('text/plain')||'');if(t.startsWith('lead:'))pinLead(t.slice(5));else render()};
 function spin(t,seed){let h=0;for(const ch of seed)h=(Math.imul(31,h)+ch.charCodeAt(0))|0;
  const r=()=>{h=(h+0x6D2B79F5)|0;let x=Math.imul(h^(h>>>15),1|h);x=(x+Math.imul(x^(x>>>7),61|x))^x;return((x^(x>>>14))>>>0)/4294967296};
  const re=/\{([^{}]*\|[^{}]*)\}/;let p;while((p=re.exec(t))){const o=p[1].split('|');t=t.replace(re,()=>o[Math.floor(r()*o.length)])}return t}
@@ -99,8 +103,10 @@ function dash(){const s=stats(),g=S.settings;const pct=Math.min(100,s.earned/g.g
  <div class="card"><b>Earnings per influencer</b><div class="tw"><table><tr><th>Influencer</th><th>All-time</th><th>This month</th></tr>
  ${Object.entries(byInf).sort((a,b)=>b[1].all-a[1].all).map(([k,v])=>`<tr><td>${esc(k)}</td><td>${money(v.all)}</td><td>${money(v.mo)}</td></tr>`).join('')||'<tr><td colspan=3 class=mut>No payments yet — log them on the Money tab.</td></tr>'}</table></div></div>`}
 function todayV(){const want=Math.max(1,S.settings.daily-sentOn(today()));
- const list=S.leads.filter(l=>l.status=='New'&&(S.settings.igOnly?l.ig:(l.ig||l.x||l.tt))).sort((a,b)=>(b.pin||0)-(a.pin||0)||(a.ig?0:1)-(b.ig?0:1)||(a.shortsPct??50)-(b.shortsPct??50)||(a.subs||0)-(b.subs||0)).slice(0,want);
- const skip=todayV.skip=todayV.skip||new Set(),sko=todayV.skipOrder=todayV.skipOrder||[],q=list.filter(l=>!skip.has(l.id)),cur=q[0];
+ const list=S.leads.filter(l=>l.status=='New'&&(l.pin||(S.settings.igOnly?l.ig:(l.ig||l.x||l.tt)))).sort((a,b)=>(b.pin||0)-(a.pin||0)||(a.ig?0:1)-(b.ig?0:1)||(a.shortsPct??50)-(b.shortsPct??50)||(a.subs||0)-(b.subs||0)).slice(0,want);
+ const skip=todayV.skip=todayV.skip||new Set(),sko=todayV.skipOrder=todayV.skipOrder||[],q=list.filter(l=>!skip.has(l.id));
+ // The lead you are working on stays put through redraws (a sync, an edit, switching tabs) until YOU move on.
+ const cur=(todayV.cur&&S.leads.find(x=>x.id==todayV.cur&&x.status=='New'&&!skip.has(x.id)))||q[0];todayV.cur=cur?cur.id:null;
  const ctUrl=l=>l.ig||l.x||l.tt||l.web;
  $('#main').innerHTML=`<div class="card"><b>${sentOn(today())}/${S.settings.daily}</b> sent today · ${list.length} fresh leads queued.${(S.undo||[]).length?` <button class="b" data-undo="1" title="Puts the last lead you marked as sent back where it was">↩ Undo sent: ${esc((S.leads.find(x=>x.id==S.undo[S.undo.length-1].id)||{}).name||'last lead')}</button>`:''}${sko.length?` <button class="b" data-back="1">◀ Back to ${esc((S.leads.find(x=>x.id==sko[sko.length-1])||{}).name||'last skipped')} (${sko.length} skipped)</button>`:''} Open the profile, paste the DM, attach your clip, send.</div>
  ${cur?`<div class="card" style="border-color:var(--acc)"><b>Next up: ${esc(cur.name)}</b> <span class=mut>${(cur.subs||0).toLocaleString()} subs · ${cur.ig?'Instagram':cur.x?'X':cur.tt?'TikTok':'link'}</span>
@@ -117,14 +123,14 @@ function todayV(){const want=Math.max(1,S.settings.daily-sentOn(today()));
   if(d.open){const l=get(d.open);navigator.clipboard.writeText(dm(l));window.open(ctUrl(l),'_blank','noopener');e.target.textContent='Opened + copied ✓'}
   if(d.openu){navigator.clipboard.writeText(dm(get(d.id)));window.open(d.openu,'_blank','noopener');e.target.textContent='Opened + copied ✓'}
   if(d.ep){window.open(get(d.ep).episode,'_blank','noopener')}
-  if(d.next){markSent(get(d.next));save();todayV()}
-  if(d.cns){markContacted(get(d.cns));save();todayV()}
+  if(d.next){markSent(get(d.next));todayV.cur=null;save();todayV()}
+  if(d.cns){markContacted(get(d.cns));todayV.cur=null;save();todayV()}
   if(d.shuf){const l=get(d.shuf);l.spin=(l.spin||0)+1;save();todayV()}
   if(d.ed)editLead(d.ed);if(d.edc)editLead(d.edc,'contact');if(d.ede)editLead(d.ede,'episode');if(d.gc)sendToClipper(d.gc);if(d.reveal)revealSample(d.reveal);
-  if(d.rm){get(d.rm).status='Removed';save();todayV()}
-  if(d.skip){todayV.skip.add(d.skip);todayV.skipOrder.push(d.skip);todayV()}
+  if(d.rm){get(d.rm).status='Removed';todayV.cur=null;save();todayV()}
+  if(d.skip){todayV.skip.add(d.skip);todayV.skipOrder.push(d.skip);todayV.cur=null;todayV()}
   if(d.undo)undoSent();
-  if(d.back){const id=todayV.skipOrder.pop();if(id)todayV.skip.delete(id);todayV()}};
+  if(d.back){const id=todayV.skipOrder.pop();if(id){todayV.skip.delete(id);todayV.cur=id}todayV()}};
  $('#main').onchange=e=>{const id=e.target.dataset.sent;if(id&&e.target.checked){markSent(S.leads.find(x=>x.id==id));save();e.target.closest('tr').style.opacity=.4;$('.card b').textContent=sentOn(today())+'/'+S.settings.daily}}}
 function normSocial(v,base){v=(v||'').trim();if(!v)return '';if(/^https?:\/\//i.test(v))return v.replace(/\/+$/,'');v=v.replace(/^@/,'').replace(/\s+/g,'');return v?base+v:''}
 function normEpisode(v){v=(v||'').trim();if(!v)return '';let m=v.match(/[?&]v=([\w-]{11})/)||v.match(/youtu\.be\/([\w-]{11})/)||v.match(/youtube\.com\/(?:shorts|live|embed)\/([\w-]{11})/)||v.match(/^([\w-]{11})$/);return m?'https://www.youtube.com/watch?v='+m[1]:v}
@@ -190,13 +196,17 @@ async function matchSamples(){let j;try{j=await (await fetch(RUNNER+'/clipper/te
   if(hit){Object.assign(hit,{sampleSlug:t.slug,sampleName:t.name,sampleFile:t.video_path,sampleDir:t.dir});n++;lines.push(`${t.name}  ->  ${hit.name}`)}else lines.push(`${t.name}  ->  no matching lead`)}
  save();alert(`Matched ${n} of ${j.templates.length} samples in "${j.folder}".\n\n`+lines.join('\n'));render()}
 function markContacted(l){(S.undo=S.undo||[]).push({id:l.id,status:l.status,sent:l.sent||'',follow:l.follow||'',contacted:l.contacted||'',at:Date.now()});S.undo=S.undo.slice(-30);l.status=CNS;l.contacted=today()}
-function undoSent(){const u=(S.undo||[]).pop();if(!u)return;const l=S.leads.find(x=>x.id==u.id);if(l){l.status=u.status||'New';l.sent=u.sent;l.follow=u.follow;l.contacted=u.contacted||''}save();render()}
+function undoSent(){const u=(S.undo||[]).pop();if(!u)return;const l=S.leads.find(x=>x.id==u.id);if(l){l.status=u.status||'New';l.sent=u.sent;l.follow=u.follow;l.contacted=u.contacted||''}todayV.cur=u.id;save();render()}
+function pinLead(id){const l=S.leads.find(x=>x.id==id);if(!l)return false;
+ if(l.status!='New'){l.status='New';l.sent='';l.follow='';l.contacted=''}
+ l.pin=Date.now();todayV.cur=l.id;if(todayV.skip)todayV.skip.delete(l.id);todayV.skipOrder=(todayV.skipOrder||[]).filter(x=>x!=l.id);
+ save();tab='today';render();return true}
 function markSent(l){(S.undo=S.undo||[]).push({id:l.id,status:l.status,sent:l.sent||'',follow:l.follow||'',at:Date.now()});S.undo=S.undo.slice(-30);l.status='Sample Sent';if(!l.sent)l.sent=today();l.follow=addDays(today(),+S.settings.followDays||3)}
 function leads(){const q=(leads.q||'').toLowerCase(),f=leads.f||'';
  const rows=S.leads.filter(l=>(f?l.status==f:l.status!='Removed')&&(!q||(l.name+l.niche).toLowerCase().includes(q)));
  $('#main').innerHTML=`<div class="row"><input id="q" placeholder="Search" value="${esc(leads.q||'')}"><select id="f"><option value="">All statuses</option>${STATUSES.map(s=>`<option ${s==f?'selected':''}>${s}</option>`).join('')}</select><span class=mut>${rows.length} leads</span><button class="b" id="cl">Remove no-contact leads</button><button class="b p" id="fi">Find missing Instagrams</button><button class="b p" id="fe">Fill episodes + Shorts %</button><button class="b" id="rs2">Remove Shorts-heavy leads</button><button class="b" id="ms">Match existing samples</button><button class="b" id="ri">Remove leads without Instagram</button></div>
  <div class="card tw"><table><tr><th>Podcast</th><th>Niche</th><th>Subs</th><th>Contact</th><th>Status</th><th>Sent / Follow-up</th><th>Notes</th></tr>
- ${rows.slice(0,300).map(l=>`<tr><td><a target=_blank rel=noopener href="${esc(l.url)}">${esc(l.name)}</a> <button class="b" data-ed="${l.id}" title="Edit everything">✎</button> <button class="b" data-pin="${l.id}" title="Put this lead at the top of Today, ready to use next (also brings back a sent, skipped or removed lead)">▶ Today</button></td><td>${esc(l.niche)}${l.episode?` <a target=_blank rel=noopener href="${esc(l.episode)}">▶</a>`:''}${l.sampleSlug?` <span title="Sample template: ${esc(l.sampleName||'')}\n${esc(l.sampleDir||'')}">🎬</span>`:''} <button class="b" data-ede="${l.id}" title="Edit episode">✎</button></td><td>${(l.subs||0).toLocaleString()}${l.shortsPct!=null?`<br><span class=mut>${l.shortsPct}% Shorts</span>`:''}</td>
+ ${rows.slice(0,300).map(l=>`<tr><td><span class="grip" draggable="true" data-grip="${l.id}" title="Drag onto the Today tab to use this lead next">⠿</span> <a target=_blank rel=noopener href="${esc(l.url)}">${esc(l.name)}</a> <button class="b" data-ed="${l.id}" title="Edit everything">✎</button> <button class="b" data-pin="${l.id}" title="Put this lead at the top of Today, ready to use next (also brings back a sent, skipped or removed lead)">▶ Today</button></td><td>${esc(l.niche)}${l.episode?` <a target=_blank rel=noopener href="${esc(l.episode)}">▶</a>`:''}${l.sampleSlug?` <span title="Sample template: ${esc(l.sampleName||'')}\n${esc(l.sampleDir||'')}">🎬</span>`:''} <button class="b" data-ede="${l.id}" title="Edit episode">✎</button></td><td>${(l.subs||0).toLocaleString()}${l.shortsPct!=null?`<br><span class=mut>${l.shortsPct}% Shorts</span>`:''}</td>
  <td>${[l.ig&&`<a target=_blank rel=noopener href="${esc(l.ig)}">IG</a>`,l.x&&`<a target=_blank rel=noopener href="${esc(l.x)}">X</a>`,l.tt&&`<a target=_blank rel=noopener href="${esc(l.tt)}">TT</a>`,l.web&&`<a target=_blank rel=noopener href="${esc(l.web)}">Link</a>`].filter(Boolean).join(' · ')||'<span class=mut>none</span>'} <button class="b" data-edc="${l.id}" title="Edit contact">✎</button></td>
  <td><select data-st="${l.id}">${STATUSES.map(s=>`<option ${s==l.status?'selected':''}>${s}</option>`).join('')}</select></td><td>${l.sent||''}<br><span class=mut>${l.follow||''}</span></td>
  <td><input data-nt="${l.id}" value="${esc(l.notes||'')}"></td></tr>`).join('')}</table></div>${rows.length>300?'<p class=mut>Showing first 300 — use search/filter.</p>':''}`;
@@ -206,7 +216,8 @@ function leads(){const q=(leads.q||'').toLowerCase(),f=leads.f||'';
  $('#ms').onclick=matchSamples;
  $('#rs2').onclick=()=>{const mx=S.settings.maxShorts;const bad=S.leads.filter(l=>l.status=='New'&&l.shortsPct!=null&&l.shortsPct>mx);if(!bad.length)return alert(`No fresh leads above ${mx}% Shorts. Run "Fill episodes + Shorts %" first to measure older leads.`);if(!confirm(`Remove ${bad.length} untouched leads with more than ${mx}% Shorts? They stay hidden so they never come back.`))return;const ids=new Set(bad.map(l=>l.id));S.leads.forEach(l=>{if(ids.has(l.id))l.status='Removed'});save();leads()};
  $('#main').onclick=e=>{const d=e.target.dataset;if(d.ed)editLead(d.ed);if(d.edc)editLead(d.edc,'contact');if(d.ede)editLead(d.ede,'episode');if(d.reveal)revealSample(d.reveal);
-  if(d.pin){const l=S.leads.find(x=>x.id==d.pin);if(l){if(l.status!='New'){l.status='New';l.sent='';l.follow='';l.contacted=''}l.pin=Date.now();if(todayV.skip)todayV.skip.delete(l.id);todayV.skipOrder=(todayV.skipOrder||[]).filter(x=>x!=l.id);save();tab='today';render()}}};
+  if(d.pin)pinLead(d.pin)};
+ $('#main').ondragstart=e=>{const g=e.target&&e.target.dataset&&e.target.dataset.grip;if(g){e.dataTransfer.setData('text/plain','lead:'+g);e.dataTransfer.effectAllowed='move'}};
  $('#fi').onclick=async()=>{const need=S.leads.filter(l=>l.status=='New'&&!l.ig).slice(0,20);if(!need.length)return alert('Every fresh lead already has an Instagram.');
   $('#fi').disabled=true;$('#fi').textContent='Searching…';try{const n=await findInstagrams(need);alert(`Found ${n} Instagram handle(s) out of ${need.length}. They're flagged in Notes. Check them before DMing.`)}catch(e){alert('Stopped: '+e.message)}leads()};
  $('#ri').onclick=()=>{const bad=S.leads.filter(l=>l.status=='New'&&!l.ig);if(!bad.length)return alert('Nothing to remove.');if(!confirm(`Remove ${bad.length} untouched leads without an Instagram?`))return;const ids=new Set(bad.map(l=>l.id));S.leads.forEach(l=>{if(ids.has(l.id))l.status='Removed'});save();leads()};
