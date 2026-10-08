@@ -134,7 +134,7 @@ def phone_notify(title, message, key=None, every=600):
     if time.time() - PHONE_LAST.get(k, 0) < every:
         return False
     PHONE_LAST[k] = time.time()
-    text = f"{title}\n{message}"
+    text = f"ClipperCRM: {title}\n{message}"
     try:
         req = urllib.request.Request(f"https://api.telegram.org/bot{os.environ['PHONE_BOT_TOKEN']}/sendMessage",
                                      data=json.dumps({"chat_id": os.environ["PHONE_CHAT_ID"], "text": text[:900]}).encode(), headers={"Content-Type": "application/json"})
@@ -721,7 +721,7 @@ class H(BaseHTTPRequestHandler):
             title = clean(body.get("title") or "Clipper CRM", 60)
             msg = clean(body.get("message") or "", 160)
             if sys.platform == "darwin" and msg:
-                subprocess.run(["osascript", "-e", 'display notification "%s" with title "%s" sound name "Glass"' % (msg.replace('"', "'"), title.replace('"', "'"))],
+                subprocess.run(["osascript", "-e", 'display notification "%s" with title "%s" sound name "Glass"' % (msg.replace('"', "'"), ("ClipperCRM: " + title).replace('"', "'"))],
                                capture_output=True, timeout=10)
             sent = False
             if body.get("phone", True) and msg:
