@@ -231,6 +231,9 @@ def short_name(name):
     return " ".join(words) or "your podcast"
 
 
+SHOWLIKE = re.compile(r"podcast|\bshow\b|radio|\btalk\b|cast\b|\bhour\b|\blive\b", re.I)
+
+
 def _title_case(s):
     """Every word starts with a capital, so a subject line looks professional."""
     return " ".join(w[:1].upper() + w[1:] for w in s.split(" "))
