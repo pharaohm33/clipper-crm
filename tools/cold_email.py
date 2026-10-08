@@ -213,11 +213,14 @@ def _prose(text):
 def render(template, lead, cfg, step=0, subject_for_reply=None):
     """(subject, body) for one lead. Spintax picks are fixed per lead, so a re-preview shows the same email that will go out."""
     seed = f"{lead.get('id')}:{step}"
+    links = [x for x in (lead.get("clipLinks") or []) if x] or [x for x in [lead.get("clipLink") or lead.get("link")] if x]
     fill = lambda t: (_prose(spin(t, seed))
                       .replace("{niche}", str(lead.get("niche") or "your").replace("-", " "))
                       .replace("{name}", str(lead.get("name") or "your podcast"))
                       .replace("{episode}", str(lead.get("epTitle") or "your recent episode"))
-                      .replace("{clip_link}", str(lead.get("clipLink") or lead.get("link") or ""))
+                      .replace("{clips}", "a short clip" if len(links) < 2 else ("three" if len(links) == 3 else "a few") + " short clips")
+                      .replace("{they_are}", "It is" if len(links) < 2 else "They are")
+                      .replace("{clip_link}", "\n".join(links))
                       .replace("{personal_line}", _prose(str(lead.get("personal") or "")))
                       .replace("{sender}", str(cfg.get("sender_name") or "")))
     if step == 0:

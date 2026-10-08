@@ -267,17 +267,24 @@ def run_pipeline(leads, minutes=5, clips=1, after=None, folder=None):
                 if raw.get("error") or not raw.get("outputs"):
                     log(f"PIPEFAIL {json.dumps({'id': ld['id'], 'why': raw.get('error') or 'no clip came out (the slice may have no strong moment)'})}")
                     continue
-                clip_file = str(REPO / "opencut-exports" / raw["outputs"][0])
-                first = (raw.get("clips") or [{}])[0]
-                link = ""
-                c3, shared = app_call("/api/outreach/share-clip", {"id": f"opencut-exports/{raw['outputs'][0]}", "name": f"{ld.get('name')} - clip"}, timeout=300)
-                if c3 == 200 and shared.get("success"):
-                    link = shared.get("link", "")
-                else:
-                    log(f"   (could not make a share link: {shared.get('error') or c3})")
-                personal = personal_note(ld, raw["outputs"][0], first.get("title", ""), first.get("hook", ""))
+                outs = list(raw["outputs"])[:max(1, int(clips))]
+                infos = list(raw.get("clips") or [])
+                files, links, titles = [], [], []
+                for k, out in enumerate(outs):
+                    c3, shared = app_call("/api/outreach/share-clip", {"id": f"opencut-exports/{out}", "name": f"{ld.get('name')} - clip {k + 1}"}, timeout=300)
+                    if c3 == 200 and shared.get("success"):
+                        files.append(str(REPO / "opencut-exports" / out))
+                        links.append(shared.get("link", ""))
+                        titles.append((infos[k] if k < len(infos) else {}).get("title", ""))
+                    else:
+                        log(f"   (could not make a share link for clip {k + 1}: {shared.get('error') or c3})")
+                first = infos[0] if infos else {}
+                clip_file = files[0] if files else str(REPO / "opencut-exports" / outs[0])
+                link = links[0] if links else ""
+                personal = personal_note(ld, Path(clip_file).name, first.get("title", ""), first.get("hook", ""))
                 log("PIPE " + json.dumps({"id": ld["id"], "slug": slug, "video": video, "dir": str(Path(video).parent), "clip": clip_file,
                                           "title": first.get("title", ""), "hook": first.get("hook", ""), "link": link, "personal": personal,
+                                          "links": links, "files": files, "titles": titles,
                                           "range": f"{s0}-{e0}", "name": name}))
             except Exception as e:
                 log(f"PIPEFAIL {json.dumps({'id': ld.get('id'), 'why': str(e)[:200]})}")
