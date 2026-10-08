@@ -332,7 +332,7 @@ def run_find_emails(leads):
             if PIPE["stop"]:
                 log("[runner] stopped.")
                 break
-            got = email_finder.find_email(ld.get("name") or "", ld.get("url") or "", ld.get("web") or "")
+            got = email_finder.find_email(ld.get("name") or "", ld.get("url") or "", ld.get("web") or "", ld.get("episode") or "", log=log)
             if got.get("email"):
                 log(f"[{i}/{len(leads)}] {ld.get('name')}: {got['email']} ({got['source']})")
                 log("EMAILFOUND " + json.dumps({"id": ld["id"], "email": got["email"], "source": got["source"]}))

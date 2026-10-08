@@ -129,8 +129,10 @@ def from_website(site):
     return found
 
 
-def find_email(name, channel_url="", website=""):
-    """Best public contact email for a podcast: {'email','source','others':[...]} or {'email':'', 'tried':[...]}."""
+def find_email(name, channel_url="", website="", episode_url="", log=print):
+    """Best public contact email for a podcast: {'email','source','others':[...]} or {'email':'', 'tried':[...]}.
+    The quick lookups run first. Only a lead that already has an episode found through the YouTube API (so it passed the
+    filters) gets the slower browser search: its About page, its website, and the episode page."""
     tried = []
     for source, getter in (("podcast RSS feed", lambda: from_rss(name)[0]),
                            ("YouTube channel description", lambda: from_youtube(channel_url)),
@@ -142,6 +144,17 @@ def find_email(name, channel_url="", website=""):
         tried.append(source)
         if emails:
             return {"email": emails[0], "source": source, "others": emails[1:4]}
+    if episode_url and os.getenv("EMAIL_BROWSER", "1") != "0":
+        tried.append("browser: About page, website, episode page")
+        try:
+            import email_browser
+            log("   opening their pages in Chrome ...")
+            got = email_browser.find_in_browser(channel_url, website, episode_url, log=log)
+            emails = [e for e in ([got.get("email")] + got.get("others", [])) if e and has_mail_server(e)]
+            if emails:
+                return {"email": emails[0], "source": got["source"], "others": emails[1:4]}
+        except Exception as e:
+            log(f"   (browser search failed: {str(e)[:80]})")
     return {"email": "", "tried": tried}
 
 
