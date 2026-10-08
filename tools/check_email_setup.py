@@ -41,7 +41,8 @@ def dns_checks(acct):
     # (name, text the SPF record must contain, the record to add). Zoho's include depends on your Zoho region (zoho.com, zoho.eu, zoho.in).
     provider = (("Google", "_spf.google.com", "v=spf1 include:_spf.google.com ~all") if google else
                 ("Zoho", "zoho.", "v=spf1 include:zoho.com ~all") if "zoho" in host else
-                ("Microsoft", "spf.protection.outlook.com", "v=spf1 include:spf.protection.outlook.com ~all") if "office365" in host or "outlook" in host else None)
+                ("Microsoft", "spf.protection.outlook.com", "v=spf1 include:spf.protection.outlook.com ~all") if "office365" in host or "outlook" in host else
+                ("Namecheap", "spf.privateemail.com", "v=spf1 include:spf.privateemail.com ~all") if "privateemail" in host else None)
     out = []
     spf = txt(domain)
     if "v=spf1" in spf:
@@ -54,6 +55,10 @@ def dns_checks(acct):
         dkim = txt(f"google._domainkey.{domain}")
         out.append((GOOD, "DKIM record found") if "v=dkim1" in dkim else
                    (BAD, f"No DKIM record. In Google Admin: Apps > Google Workspace > Gmail > Authenticate email, generate the key, add the TXT record it shows (host google._domainkey), then press Start authentication."))
+    elif "privateemail" in host:
+        hit = next((sel for sel in ("default", "privateemail", "mail", "dkim") if "v=dkim1" in txt(f"{sel}._domainkey.{domain}")), None)
+        out.append((GOOD, f"DKIM record found (selector {hit})") if hit else
+                   (WARN, "No DKIM record found at the usual names. In the Private Email dashboard switch DKIM on and add the TXT record it shows (if the domain uses Namecheap DNS it may add it for you). It can take a few hours to appear."))
     else:
         out.append((WARN, "DKIM isn't auto-checked for this provider. In its admin panel, switch DKIM on and add the TXT record it shows."))
     dmarc = txt(f"_dmarc.{domain}")
