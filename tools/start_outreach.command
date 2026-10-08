@@ -1,5 +1,5 @@
 #!/bin/bash
-# Double click this file. It starts everything the outreach autopilot needs, keeps the Mac awake, and opens your CRM.
+# Double click this file. It starts everything the outreach autopilot needs and opens your CRM.
 # If the autopilot toggle was left on, it resumes about 10 seconds after the CRM opens.
 CRM="$(cd "$(dirname "$0")/.." && pwd)"
 GEN="$HOME/instagram-video-generator"
@@ -19,11 +19,7 @@ else
   echo "Helper already running."
 fi
 sleep 5
-HP="$(lsof -ti :8765 | head -1)"
-if [ -n "$HP" ]; then
-  nohup caffeinate -dimsu -w "$HP" >/dev/null 2>&1 &
-  echo "Keeping this Mac awake while the helper runs."
-fi
+echo "The Mac is NOT kept awake by this launcher. The CRM shows a coffee cup indicator and keeps it awake only while the autopilot works."
 open "https://pharaohm33.github.io/clipper-crm/"
 echo
 echo "Done. In the CRM: Email tab > Autopilot > turn Repeating on. Logs: $LOGS"

@@ -34,7 +34,7 @@ a{color:var(--acc)}.hide{display:none}.mut{color:var(--mut)}pre{white-space:pre-
 <body>
 <header><b>Clipper CRM</b>
 <nav id="nav"></nav>
-<span id="cp" style="margin-left:auto" class="mut"></span><span class="mut" id="sync"></span><span class="mut" id="clock"></span></header>
+<span id="cp" style="margin-left:auto" class="mut"></span><span id="aw" style="margin-left:12px;cursor:pointer" class="mut"></span><span class="mut" id="sync"></span><span class="mut" id="clock"></span></header>
 <main id="main"></main>
 <div id="ov" class="hide"></div>
 <script>
@@ -181,6 +181,14 @@ function editLead(id,mode){const l=S.leads.find(x=>x.id==id);if(!l)return;const 
    try{m.textContent='Checking…';const ep=await pickEpisode('UU'+l.id.slice(2));if(!ep){m.textContent='No uploads found.';return}
     ov.querySelector('[data-f="episode"]').value='https://www.youtube.com/watch?v='+ep.id;ov.querySelector('[data-f="epTitle"]').value=ep.title;m.textContent='Filled. Press Save.'}catch(x){m.textContent=x.message}}}}
 const RUNNER='http://127.0.0.1:8765';
+async function pollAwake(){const e=document.getElementById('aw');if(!e)return;
+ try{const j=await (await fetch(RUNNER+'/awake')).json();pollAwake.last=j;
+  const left=j.seconds_left>3600?Math.floor(j.seconds_left/3600)+'h '+Math.floor(j.seconds_left%3600/60)+'m':Math.ceil(j.seconds_left/60)+'m';
+  const lid=j.lid_sleep_disabled?'Closing the lid will NOT sleep this Mac (sleep is disabled).':(j.on_ac===false?'You are on battery: closing the lid WILL put the Mac to sleep and stop everything.':'Closing the lid will still sleep the Mac unless an external display is connected.');
+  e.innerHTML=j.on?`<span style="color:#16a34a">☕ Awake ${left}</span>`:'<span>☕ Mac can sleep</span>';
+  e.title=(j.on?`Keeping the Mac from sleeping for ${left} more. Click to let it sleep.\n`:'The Mac will sleep when idle. Click to keep it awake for 3 hours.\n')+lid+(j.battery!=null?`\nBattery ${j.battery}%${j.on_ac?' (plugged in)':''}`:'')+(j.lid_sleep_disabled?'\nSleep is disabled system wide. Turn it back on with: sudo pmset -a disablesleep 0':'')}
+ catch(x){e.innerHTML='';pollAwake.last=null}}
+async function awakeSet(on,min){try{await fetch(RUNNER+'/awake',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({on,minutes:min||180})})}catch(e){}pollAwake()}
 async function pollClipper(){const e=document.getElementById('cp');if(!e)return;
  try{const j=await (await fetch(RUNNER+'/clipper/status')).json();const c={on:['#16a34a','on'],busy:['#f59e0b','busy'],off:['#dc2626','off']}[j.state]||['#6b7280','?'];
   e.innerHTML=`Clipper: <b style="color:${c[0]}">● ${c[1]}</b>`;e.title=j.message||'';pollClipper.last=j}
@@ -299,6 +307,7 @@ function apRender(){const el=document.getElementById('email-ap');if(!el)return;c
  el.innerHTML=`<div class="card"><b>Autopilot</b> <span class=mut>Finds emails for motivated leads, makes their clips and topic lines, writes the emails, and ${mode=='send'?'<b style="color:var(--acc)">SENDS them</b>':'saves them as drafts in your sending inboxes (nothing is sent)'}, then checks replies. It runs while this tab stays open, with the helper and the clipper app running.</span>
   <div class="row" style="margin-top:8px"><button class="b p" id="ap-run" ${AP.running?'disabled':''}>▶ Run once now</button><button class="b" id="ap-stop" ${AP.running?'':'disabled'}>Stop after this step</button><button class="b" id="ap-drip" ${AP.running||ES.busy?'disabled':''} title="Sends the emails you saved as drafts, one every 60 to 90 seconds, rotating across your inboxes within each inbox's daily cap">📤 Drip-send the approved drafts (${S.leads.filter(l=>isEmailReady(l)&&l.draftedAt&&l.approved).length})</button><button class="b" id="ap-toggle">${on?'⏸ Turn repeating off':'⟳ Keep going automatically'}</button>
    <label style="display:inline-flex;gap:4px;align-items:center">When done <select id="ap-mode"><option value="drafts" ${mode=='drafts'?'selected':''}>save to drafts</option><option value="send" ${mode=='send'?'selected':''}>send for real</option></select></label>
+   <label style="display:inline-flex;gap:4px;align-items:center"><input type="checkbox" id="ap-awake" ${g.apAwake===0?'':'checked'}> Keep my Mac awake only while working</label>
    <label style="display:inline-flex;gap:4px;align-items:center">Keep at most <input id="ap-max" type="number" min="5" max="100" value="${+g.apMax||25}" style="width:60px"> ready<\/label>
    <label style="display:inline-flex;gap:4px;align-items:center">Clips per round <input id="ap-batch" type="number" min="5" max="30" value="${+g.apBatch||10}" style="width:60px"></label>
    <label style="display:inline-flex;gap:4px;align-items:center">Check for new work every <input id="ap-every" type="number" min="5" max="1440" value="${+g.apEvery||15}" style="width:70px"> min</label></div>
@@ -306,7 +315,7 @@ function apRender(){const el=document.getElementById('email-ap');if(!el)return;c
  const on_=(id,fn)=>{const b=document.getElementById(id);if(b)b.onclick=fn};on_('ap-run',()=>autopilotRun());on_('ap-drip',async()=>{const n=S.leads.filter(l=>isEmailReady(l)&&l.draftedAt&&l.approved).length;if(!n)return apLog('Nothing is approved yet. Open the Unibox, read the drafts, and approve the ones you want sent.');if(!confirm(`Send the ${n} drafted email(s) for real?\n\nThey go out one every 60 to 90 seconds, within each inbox's daily cap (today: about 5 per inbox). Anything over the cap waits for the next run.`))return;apLog(`Drip-sending ${n} drafted email(s)...`);const prev=S.settings.apMode;S.settings.apMode='send';try{await sendEmails('send',0,true,l=>!!(l.draftedAt&&l.approved))}finally{S.settings.apMode=prev}apLog('Drip send finished.');apRender()});on_('ap-stop',()=>{AP.stop=true;apLog('Stopping after the current step...')});
  on_('ap-toggle',()=>{if(AP.timer){clearInterval(AP.timer);AP.timer=null;g.apOn=0;apLog('Repeating is off.')}else{g.apOn=1;apStart()}save();apRender()});
  const m=document.getElementById('ap-mode');if(m)m.onchange=()=>{if(m.value==='send'&&!confirm('Autopilot will then SEND real emails by itself, with no further confirmation. Keep it on drafts until you have read a few drafts and are happy.')){m.value='drafts';return}g.apMode=m.value;save();apRender()};
- const b=document.getElementById('ap-batch');if(b)b.onchange=()=>{g.apBatch=Math.max(5,Math.min(30,+b.value||10));save()};const mx=document.getElementById('ap-max');if(mx)mx.onchange=()=>{g.apMax=Math.max(5,Math.min(100,+mx.value||25));save()};const e2=document.getElementById('ap-every');if(e2)e2.onchange=()=>{g.apEvery=Math.max(10,Math.min(1440,+e2.value||60));save();if(AP.timer)apStart()}}
+ const b=document.getElementById('ap-batch');if(b)b.onchange=()=>{g.apBatch=Math.max(5,Math.min(30,+b.value||10));save()};const aw=document.getElementById('ap-awake');if(aw)aw.onchange=()=>{g.apAwake=aw.checked?1:0;if(!aw.checked)awakeSet(false);save()};const mx=document.getElementById('ap-max');if(mx)mx.onchange=()=>{g.apMax=Math.max(5,Math.min(100,+mx.value||25));save()};const e2=document.getElementById('ap-every');if(e2)e2.onchange=()=>{g.apEvery=Math.max(10,Math.min(1440,+e2.value||60));save();if(AP.timer)apStart()}}
 function apQueue(){return S.leads.filter(l=>l.status=='New'&&(l.clipFile||l.clipLink)&&!l.emailedAt).length}
 function apWork(){const hot=S.leads.filter(l=>l.status=='New'&&isHot(l));const full=apQueue()>=(+S.settings.apMax||25);
  const needEmail=full?0:hot.filter(l=>!l.email&&l.episode&&!(l.emailChecked&&Date.now()-l.emailChecked<14*DAY)).length;
@@ -317,7 +326,7 @@ function apStart(){clearInterval(AP.timer);AP.timer=setInterval(()=>{if(!AP.runn
 async function autopilotRun(){
  if(AP.running)return;if(ES.busy){apLog('The helper is busy with another job, trying again shortly.');setTimeout(()=>autopilotRun(),15000);return}
  if(!apLock()){apLog('Another CRM tab is running autopilot. Skipping so nothing is done twice.');return}
- AP.running=true;AP.stop=false;apRender();const g=S.settings,batch=Math.max(5,+g.apBatch||10),mode=g.apMode==='send'?'send':'drafts',hb=setInterval(apLock,30000);
+ AP.running=true;AP.stop=false;apRender();const g=S.settings;if(g.apAwake!==0)awakeSet(true,240);const batch=Math.max(5,+g.apBatch||10),mode=g.apMode==='send'?'send':'drafts',hb=setInterval(apLock,30000);
  const before=apWork(),draftedBefore=S.leads.filter(l=>l.draftedAt).length;
  const step=async(name,fn)=>{if(AP.stop)throw new Error('stopped');apLog(name);const m0=ES.msg;await fn();if(ES.msg&&ES.msg!==m0)apLog('  '+ES.msg)};
  let more=false;
@@ -336,7 +345,7 @@ async function autopilotRun(){
  }catch(e){apLog('Stopped: '+(e&&e.message||e))}
  clearInterval(hb);AP.running=false;ES.busy=false;apRender();emailDyn();
  if(more){apLog('More to do, continuing right away...');setTimeout(()=>autopilotRun(),2500);return}
- AP.loops=0;const w=apWork(),made=S.leads.filter(l=>l.draftedAt).length-draftedBefore;
+ AP.loops=0;if(g.apAwake!==0)awakeSet(false);const w=apWork(),made=S.leads.filter(l=>l.draftedAt).length-draftedBefore;
  if(mode==='drafts'){const msg=w.waiting?`${w.waiting} draft email(s) are ready for your approval. Open the Unibox to read and approve them, then press "Drip-send the approved drafts".`:'Nothing waiting. Run more lead searches to find new leads.';apLog('All caught up. '+msg);
   document.title=(w.waiting?`(${w.waiting} ready) `:'')+'Clipper CRM';
   if(made>0||w.waiting){try{fetch(RUNNER+'/notify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:'Drafts ready',message:`${w.waiting} email draft(s) are waiting for your approval in the Unibox.`})})}catch(e){}}}
@@ -713,7 +722,7 @@ setInterval(()=>$('#clock').textContent=new Date().toLocaleString([],{weekday:'s
 async function mergePull(){if(!S.settings.syncUrl||!S.settings.syncPw)return;const j=await syncCall('pull');if(!j)return;
  const have=new Set(S.leads.map(l=>l.id));let n=0;for(const l of j.state.leads||[]){if(!have.has(l.id)){S.leads.push(l);have.add(l.id);n++}}
  if(n){save();render();setSync(`Merged ${n} new lead(s) from the Sheet`)}else setSync('Synced ✓ (up to date)')}
-render();setSync(S.settings.syncUrl?'Sync on':'');mergePull();pollClipper();setInterval(pollClipper,6000);if(S.settings.apOn)setTimeout(apStart,8000);
+render();setSync(S.settings.syncUrl?'Sync on':'');mergePull();pollClipper();setInterval(pollClipper,6000);pollAwake();setInterval(pollAwake,10000);{const a=document.getElementById('aw');if(a)a.onclick=()=>{const j=pollAwake.last;if(j&&j.on)awakeSet(false);else awakeSet(true,180)}}if(S.settings.apOn)setTimeout(apStart,8000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)mergePull()});
 </script>
 </body>

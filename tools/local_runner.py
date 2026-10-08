@@ -93,6 +93,41 @@ def app_call(path, payload=None, timeout=5):
         return 0, {}
 
 
+AWAKE = {"proc": None, "until": 0}
+
+
+def awake_status():
+    """Is this tool keeping the Mac from sleeping (a 'caffeinate' it started), how long is left, and will closing the lid still sleep it."""
+    p = AWAKE["proc"]
+    on = bool(p and p.poll() is None)
+    out = {"on": on, "seconds_left": max(0, int(AWAKE["until"] - time.time())) if on else 0, "on_ac": None, "battery": None, "lid_sleep_disabled": False}
+    if sys.platform == "darwin":
+        try:
+            b = subprocess.run(["pmset", "-g", "batt"], capture_output=True, text=True, timeout=5).stdout
+            out["on_ac"] = "AC Power" in b
+            m = re.search(r"(\d+)%", b)
+            out["battery"] = int(m.group(1)) if m else None
+            s = subprocess.run(["pmset", "-g"], capture_output=True, text=True, timeout=5).stdout
+            m = re.search(r"SleepDisabled\s+(\d)", s)
+            out["lid_sleep_disabled"] = bool(m and m.group(1) == "1")
+        except Exception:
+            pass
+    return out
+
+
+def awake_set(on, minutes=180):
+    """Starts or stops keeping the Mac awake. It always has an end time, so it cannot be left on forever by accident."""
+    p = AWAKE["proc"]
+    if p and p.poll() is None:
+        p.terminate()
+    AWAKE["proc"] = None
+    if on and sys.platform == "darwin":
+        minutes = max(5, min(int(minutes or 180), 720))
+        AWAKE["proc"] = subprocess.Popen(["caffeinate", "-dimsu", "-t", str(minutes * 60)])
+        AWAKE["until"] = time.time() + minutes * 60
+    return awake_status()
+
+
 def clipper_status():
     code, d = app_call("/api/clipper/status", timeout=2)
     if code != 200:
@@ -479,6 +514,8 @@ class H(BaseHTTPRequestHandler):
             self._send(200, {"ok": True, "running": STATE["running"], "lines": len(STATE["log"]),
                              "configured": bool(os.getenv("CRM_SYNC_URL") and os.getenv("CRM_SYNC_PASSWORD")),
                              "yt": bool(os.getenv("YT_API_KEY"))})
+        elif u.path == "/awake":
+            self._send(200, awake_status())
         elif u.path == "/clipper/templates":
             t = sample_templates()
             self._send(200 if t is not None else 503, {"templates": t or [], "folder": OUT_FOLDER, **({} if t is not None else {"error": "clipper is off"})})
@@ -609,6 +646,10 @@ class H(BaseHTTPRequestHandler):
                 return self._send(200, {"ok": cold_email.send_saved_reply(mid)})
             except Exception as e:
                 return self._send(500, {"error": str(e)[:200]})
+        if self.path == "/awake":
+            if "on" in body:
+                return self._send(200, awake_set(bool(body.get("on")), body.get("minutes") or 180))
+            return self._send(200, awake_status())
         if self.path == "/notify":
             title = clean(body.get("title") or "Clipper CRM", 60)
             msg = clean(body.get("message") or "", 160)
