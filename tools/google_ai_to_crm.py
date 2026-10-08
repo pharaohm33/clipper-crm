@@ -24,6 +24,8 @@ from urllib.parse import quote
 
 import requests
 
+import ai_browser as AB
+
 PROFILE = Path.home() / ".clipper_chrome_profile"
 RUNS = Path(__file__).resolve().parent / "runs"
 
@@ -93,8 +95,67 @@ def open_ai_mode(page, prompt):
         return False
 
 
+THREAD_FILE = PROFILE / "ai_thread.json"
+MAX_TURNS = 8        # after this many questions in one conversation, start a fresh one so old answers cannot bleed into new ones
+MAX_AGE = 30 * 60    # and never continue a conversation that has been idle for half an hour
+
+
+def _thread_load():
+    try:
+        return json.loads(THREAD_FILE.read_text())
+    except Exception:
+        return {"turns": 0, "t": 0}
+
+
+def _thread_save(d):
+    try:
+        PROFILE.mkdir(parents=True, exist_ok=True)
+        THREAD_FILE.write_text(json.dumps(d))
+    except Exception:
+        pass
+
+
+def follow_up(page, prompt):
+    """Types the question into the open conversation's follow up box, like a person continuing the chat. False if it cannot."""
+    try:
+        box = page.locator("textarea:visible, [contenteditable=true]:visible, input[type=text]:visible").last
+        box.click()
+        _pause(0.4, 1.0)
+        page.keyboard.type(prompt, delay=random.randint(6, 18))
+        _pause(0.6, 1.4)
+        page.keyboard.press("Enter")
+        return True
+    except Exception:
+        return False
+
+
+def _extract(page, n0, prompt):
+    """The page's answer to THIS question only: tables and text after the earlier questions in the same conversation are left out."""
+    data = page.evaluate(EXTRACT_JS)
+    data["tables"] = data["tables"][n0:]
+    t = data["text"]
+    i = t.rfind(prompt[:50])
+    data["text"] = t[i:] if i >= 0 else t
+    return data
+
+
 def ask_google_ai(page, prompt, timeout=120):
-    open_ai_mode(page, prompt)
+    th = _thread_load()
+    use_thread = os.getenv("AI_THREAD", "1") != "0" and "udm=50" in page.url and th.get("turns", 0) < MAX_TURNS and time.time() - th.get("t", 0) < MAX_AGE
+    baseline, n0 = None, 0
+    if use_thread:
+        try:
+            baseline, n0 = page.inner_text("body"), page.locator("table").count()
+        except Exception:
+            use_thread = False
+    if use_thread and follow_up(page, prompt):
+        th["turns"] = th.get("turns", 0) + 1
+        print("  (continuing the same Google AI conversation)")
+    else:
+        open_ai_mode(page, prompt)
+        th, baseline, n0 = {"turns": 1}, None, 0
+    th["t"] = time.time()
+    _thread_save(th)
     start, last_text, stable_since = time.time(), "", time.time()
     while time.time() - start < timeout:
         time.sleep(2)
@@ -105,17 +166,21 @@ def ask_google_ai(page, prompt, timeout=120):
                 time.sleep(2)
                 if not re.search(r"unusual traffic|not a robot|captcha", page.inner_text("body"), re.I):
                     break
+            _thread_save({"turns": MAX_TURNS, "t": 0})  # start a new conversation after a verification
             return ask_google_ai(page, prompt, timeout)
         if "no response available" in body:
+            _thread_save({"turns": MAX_TURNS, "t": 0})
             return None
-        if page.locator("table").count() > 0 and time.time() - start > 8:
+        if baseline is not None and body == baseline and time.time() - start < 45:
+            continue  # the follow up has not started answering yet
+        if page.locator("table").count() > n0 and time.time() - start > 8:
             time.sleep(3)  # let the table finish streaming
-            return page.evaluate(EXTRACT_JS)
+            return _extract(page, n0, prompt)
         if body != last_text:
             last_text, stable_since = body, time.time()
         elif time.time() - stable_since > 12 and time.time() - start > 20:
-            return page.evaluate(EXTRACT_JS)  # answer stopped changing, probably no table
-    return page.evaluate(EXTRACT_JS)
+            return _extract(page, n0, prompt)  # answer stopped changing, probably no table
+    return _extract(page, n0, prompt)
 
 
 _resolved = {}
@@ -305,8 +370,7 @@ def main():
     RUNS.mkdir(exist_ok=True)
 
     with sync_playwright() as p:
-        ctx = p.chromium.launch_persistent_context(str(PROFILE), channel="chrome", headless=False, viewport={"width": 1200, "height": 900})
-        page = ctx.pages[0] if ctx.pages else ctx.new_page()
+        browser, ctx, page = AB.get_page(p)
         existing = set()
         if url and pw and not a.dry_run and not a.emit:
             for l in crm(url, pw, action="pull")["state"].get("leads", []):
@@ -358,7 +422,7 @@ def main():
             if n < len(jobs) - 1:
                 time.sleep(random.uniform(20, 40))
         print(f"Done. {total} new leads.")
-        ctx.close()
+        AB.release(browser)
 
 
 if __name__ == "__main__":

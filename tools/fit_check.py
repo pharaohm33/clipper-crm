@@ -13,6 +13,7 @@ import re
 import sys
 import time
 
+import ai_browser as AB
 import google_ai_to_crm as G
 
 DECIDERS = {"owner", "team", "corporate", "unknown"}
@@ -45,8 +46,7 @@ def main():
     leads = json.load(open(sys.argv[1], encoding="utf-8"))
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
-        ctx = p.chromium.launch_persistent_context(str(G.PROFILE), channel="chrome", headless=False, viewport={"width": 1200, "height": 900})
-        page = ctx.pages[0] if ctx.pages else ctx.new_page()
+        browser, ctx, page = AB.get_page(p)
         for n, l in enumerate(leads):
             print(f"[{n + 1}/{len(leads)}] checking {l.get('name')} with Google AI ...")
             data = G.ask_google_ai(page, build_prompt(l))
@@ -59,7 +59,7 @@ def main():
                 print("FIT " + json.dumps(o))
             if n < len(leads) - 1:
                 time.sleep(random.uniform(8, 16))
-        ctx.close()
+        AB.release(browser)
     print("Done.")
 
 
