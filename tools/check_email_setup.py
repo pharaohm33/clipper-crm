@@ -4,6 +4,7 @@ Checks your sending setup BEFORE you send anything. Reads only; sends nothing un
 
     python3 tools/check_email_setup.py
     python3 tools/check_email_setup.py --send-test you@your-personal-address.com   # one real test email from each inbox, to YOU
+    python3 tools/check_email_setup.py --only world --send-test you@gmail.com     # limit everything to inboxes whose address contains "world"
     python3 tools/check_email_setup.py --read-results you@gmail.com               # then: did each test land in inbox or spam, and did SPF/DKIM/DMARC pass?
 
 For every inbox it checks: the domain's SPF, DKIM and DMARC records (what makes mail land in the inbox instead of spam), that the domain can receive mail
@@ -163,6 +164,12 @@ def main():
         print((GOOD if ok else BAD) + (f"{label}: {val}" if ok else f"{label} is missing (cold email law requires both in every email). Run python3 tools/setup_email.py"))
         bad += 0 if ok else 1
     accounts = cfg.get("accounts") or []
+    if "--only" in sys.argv:
+        want = sys.argv[sys.argv.index("--only") + 1].lower()
+        accounts = [a for a in accounts if want in a["email"].lower()]
+        print(f"\n(--only {want}: checking {len(accounts)} inbox{'es' if len(accounts) != 1 else ''})")
+        if not accounts:
+            sys.exit(f"No inbox matches '{want}'. Inboxes: " + ", ".join(a["email"] for a in cfg.get("accounts") or []))
     if not accounts:
         print(BAD + "no inboxes. Run python3 tools/setup_email.py")
         bad += 1
