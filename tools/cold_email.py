@@ -34,14 +34,10 @@ LOG = HERE / "email_log.jsonl"
 SUPPRESS = HERE / "suppression.txt"
 OPT_OUT = re.compile(r"\b(unsubscribe|remove me|take me off|stop (emailing|sending|contacting)|do not (email|contact)|don't (email|contact)|no thanks|not interested|please stop)\b", re.I)
 
-DEFAULT_SUBJECT = "made a clip from {name}"
-DEFAULT_BODY = """{Hi|Hey|Hello} there,
+DEFAULT_SUBJECT = "made clips from {name}"
+DEFAULT_BODY = """{Hi|Hey}, I {saw|caught|came across} {show_ref} and {really liked|loved|really enjoyed} {topic}. It stuck with me, so I went ahead and made {clips} out of it, ready for Reels, TikTok and YouTube Shorts.
 
-{I just watched|I caught|I watched} your recent episode on {niche} and {loved it|really enjoyed it}. I cut a short clip from it that I think could do well on Reels, TikTok and Shorts:
-
-{clip_link}
-
-{It is yours to post, free, no strings attached.|Feel free to post it, it is yours, no strings attached.} If you'd like a few of these each week, just reply and I'll send you more.
+{done_line} {Just reply yes and I'll send {them_it} right over.|Want me to send {them_it} over?}
 
 {Thanks|Best|Cheers},
 {sender}"""
@@ -222,30 +218,67 @@ def short_name(name):
     return name or "your podcast"
 
 
+SHOWLIKE = re.compile(r"podcast|\bshow\b|radio|\btalk\b|cast\b|\bhour\b|\blive\b", re.I)
+
+
+def _title_case(s):
+    """Every word starts with a capital, so a subject line looks professional."""
+    return " ".join(w[:1].upper() + w[1:] for w in s.split(" "))
+
+
+def _phrases(lead, seed, n_links):
+    """The pieces of the email that depend on the lead. Picks are fixed per lead so a re-preview shows what will go out."""
+    pick = lambda key, opts: random.Random(f"{seed}:{key}").choice(opts)
+    name = short_name(lead.get("name"))
+    n = int(lead.get("clipCount") or 0) or n_links or 1
+    show = (pick("show", [f"a new episode of {name}", f"a recent episode of {name}", f"an episode of {name}"]) if SHOWLIKE.search(name)
+            else pick("show", [f"your {name} videos on YouTube", f"your {name} channel on YouTube", f"a few of your {name} videos on YouTube"]))
+    if n >= 3:
+        clips = pick("clips", ["three short video clips", "a few short video clips"]) if n == 3 else "a few short video clips"
+    elif n == 2:
+        clips = pick("clips", ["two short video clips", "a couple of short video clips"])
+    else:
+        clips = "a short video clip"
+    if n >= 2:
+        done = pick("done", ["They're already done and they're yours, no charge and no strings attached.",
+                             "They're finished and they're yours, free with no strings attached.",
+                             "They're already done, and they're yours with no charge and no strings attached."])
+    else:
+        done = pick("done", ["It's already done and it's yours, no charge and no strings attached.",
+                             "It's finished and it's yours, free with no strings attached.",
+                             "It's already done, and it's yours with no charge and no strings attached."])
+    return {"@@SHOW@@": show, "@@CLIPS@@": clips, "@@DONE@@": done, "@@THEM@@": "them" if n >= 2 else "it"}
+
+
 def render(template, lead, cfg, step=0, subject_for_reply=None):
     """(subject, body) for one lead. Spintax picks are fixed per lead, so a re-preview shows the same email that will go out."""
     seed = f"{lead.get('id')}:{step}"
     links = [x for x in (lead.get("clipLinks") or []) if x] or [x for x in [lead.get("clipLink") or lead.get("link")] if x]
-    fill = lambda t: (_prose(spin(t, seed))
-                      .replace("{niche}", str(lead.get("niche") or "your").replace("-", " "))
-                      .replace("{name}", short_name(lead.get("name")))
-                      .replace("{episode}", str(lead.get("epTitle") or "your recent episode"))
-                      .replace("{clips}", "a short clip" if len(links) < 2 else ("three" if len(links) == 3 else "a few") + " short clips")
-                      .replace("{they_are}", "It is" if len(links) < 2 else "They are")
-                      .replace("{clip_link}", "\n".join(links))
-                      .replace("{topic}", _prose(str(lead.get("personal") or "")) or "your recent episode")
-                      .replace("{personal_line}", _prose(str(lead.get("personal") or "")))
-                      .replace("{sender}", str(cfg.get("sender_name") or "")))
+    ph = _phrases(lead, seed, len(links))
+
+    def fill(t):
+        t = (t.replace("{show_ref}", "@@SHOW@@").replace("{clips}", "@@CLIPS@@").replace("{done_line}", "@@DONE@@").replace("{them_it}", "@@THEM@@"))
+        t = _prose(spin(t, seed))
+        for k, v in ph.items():
+            t = t.replace(k, v)
+        return (t.replace("{niche}", str(lead.get("niche") or "your").replace("-", " "))
+                .replace("{name}", short_name(lead.get("name")))
+                .replace("{episode}", str(lead.get("epTitle") or "your recent episode"))
+                .replace("{they_are}", "It is" if len(links) < 2 else "They are")
+                .replace("{clip_link}", "\n".join(links))
+                .replace("{topic}", _prose(str(lead.get("personal") or "")) or "your recent episode")
+                .replace("{personal_line}", _prose(str(lead.get("personal") or "")))
+                .replace("{sender}", str(cfg.get("sender_name") or "")))
     if step == 0 and (lead.get("body_override") or "").strip():
-        subject = (lead.get("subject_override") or "").strip() or fill(template.get("subject") or DEFAULT_SUBJECT)
+        subject = (lead.get("subject_override") or "").strip() or _title_case(fill(template.get("subject") or DEFAULT_SUBJECT))
         body = lead["body_override"].strip()
     elif step == 0:
-        subject, body = fill(template.get("subject") or DEFAULT_SUBJECT), fill(template.get("body") or DEFAULT_BODY)
+        subject, body = _title_case(fill(template.get("subject") or DEFAULT_SUBJECT)), fill(template.get("body") or DEFAULT_BODY)
     else:
         days, text = FOLLOWUPS[min(step, len(FOLLOWUPS)) - 1]
         subject = "Re: " + (subject_for_reply or "your episode clip")
         body = fill(template.get(f"followup{step}") or text)
-    footer = f"\n\n--\n{cfg.get('sender_name', '')}\n{cfg.get('postal_address', '')}\nNot interested? Just reply \"no thanks\" and I won't email you again."
+    footer = f"\n\n{cfg.get('postal_address', '')}\nNot interested? Just reply \"no thanks\" and I won't email you again."
     return subject.strip(), re.sub(r"\n{3,}", "\n\n", body).strip() + footer
 
 

@@ -313,7 +313,7 @@ def run_pipeline(leads, minutes=5, clips=1, after=None, folder=None, share=False
                 personal = personal_note(ld, Path(clip_file).name, first.get("title", ""), first.get("hook", ""), ctext)
                 log("PIPE " + json.dumps({"id": ld["id"], "slug": slug, "video": video, "dir": str(Path(video).parent), "clip": clip_file,
                                           "title": first.get("title", ""), "hook": first.get("hook", ""), "link": link, "personal": personal,
-                                          "links": links, "files": files, "titles": titles,
+                                          "links": links, "files": files, "titles": titles, "yt_start": _yt_start(s0, first.get("start")),
                                           "range": f"{s0}-{e0}", "name": name}))
             except Exception as e:
                 log(f"PIPEFAIL {json.dumps({'id': ld.get('id'), 'why': str(e)[:200]})}")
@@ -336,6 +336,15 @@ def clip_text_from_template(slug, start, end):
         return " ".join(words).strip()
     except Exception:
         return ""
+
+
+def _yt_start(slice_start, clip_start):
+    """Seconds into the YouTube episode where the first clip begins (slice start like '7:01' plus the clip's offset inside the slice)."""
+    try:
+        base = sum(int(x) * 60 ** i for i, x in enumerate(reversed(str(slice_start).split(":"))))
+        return int(base + float(clip_start or 0))
+    except Exception:
+        return None
 
 
 def personal_note(ld, clip_name, title, hook, text=""):
@@ -581,6 +590,11 @@ class H(BaseHTTPRequestHandler):
                 else:
                     errors.append(shared.get("error") or str(code))
             return self._send(200, {"links": links, "errors": errors})
+        if self.path == "/unibox/yes":
+            try:
+                return self._send(200, auto_reply.preview(str(body.get("to") or ""), str(body.get("name") or ""), str(body.get("slug") or "")))
+            except Exception as e:
+                return self._send(500, {"error": str(e)[:200]})
         if self.path in ("/unibox/drafts", "/unibox/replies", "/unibox/draft/update", "/unibox/draft/delete", "/unibox/draft/send"):
             try:
                 if self.path == "/unibox/drafts":

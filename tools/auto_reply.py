@@ -45,6 +45,30 @@ def sheet_link(slug):
     return (d.get("link") or ""), ("" if d.get("link") else d.get("error") or "no link came back")
 
 
+def build_reply(cfg, to, name, link):
+    """The exact text sent when a prospect says yes (the wording picks are fixed per recipient, so a preview matches what goes out)."""
+    return (cold_email.spin(REPLY_BODY, f"reply:{to}")
+            .replace("{name}", cold_email.short_name(name))
+            .replace("{link}", link)
+            .replace("{sender}", str(cfg.get("sender_name") or ""))
+            .replace("{phone}", str(cfg.get("phone") or "")))
+
+
+def preview(to, name, slug):
+    """What the reply would say right now, and the handoff page link if that page already exists (it stays private until they say yes)."""
+    cfg = cold_email.load_config()
+    link = ""
+    try:
+        with urllib.request.urlopen(APP_URL + "/api/handoff/list", timeout=8) as r:
+            for s in json.loads(r.read()).get("sheets", []):
+                if s.get("slug") == slug and s.get("link"):
+                    link = s["link"]
+    except Exception:
+        pass
+    shown = link or "[link to their page of clips, made public only when they say yes]"
+    return {"text": build_reply(cfg, to.lower(), name, shown), "link": link, "phone_set": bool((cfg.get("phone") or "").strip())}
+
+
 def already_handled(log, to):
     return any(e.get("to", "").lower() == to and e.get("status") in ("auto_replied", "auto_drafted") for e in log)
 
@@ -87,11 +111,7 @@ def handle(found, log_fn=print):
             f["auto"] = f"needs you (could not make the link: {err})"
             log_fn(f"no link for {to}: {err}")
             continue
-        body = (cold_email.spin(REPLY_BODY, f"reply:{to}")
-                .replace("{name}", cold_email.short_name(f.get("name")))
-                .replace("{link}", link)
-                .replace("{sender}", str(cfg.get("sender_name") or ""))
-                .replace("{phone}", str(cfg.get("phone") or "")))
+        body = build_reply(cfg, to, f.get("name"), link)
         subject = "Re: " + (first.get("subject") or f.get("subject") or "your episode clip")
         msg = cold_email.compose(acct, cfg, to, subject, body, f.get("msgid") or first.get("message_id"))
         try:
