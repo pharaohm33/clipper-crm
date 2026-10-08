@@ -46,6 +46,15 @@ Hyphens and long dashes are turned into commas or spaces automatically, so the e
 ## No links in the first email
 The first email asks "Do you want me to send it over?" and has no links, because links are a spam signal. The clips are made as private drafts in the template's folder. When someone says yes, open the **Email** tab: the **They said yes** card (leads marked Replied or Interested) has **Get links + copy reply**. It makes view links for that lead's clips and copies a ready reply to paste.
 
+## When someone says yes (automatic reply)
+Press **6. Check replies**. For each reply, DeepSeek decides if they clearly said yes, no, asked a question, or something else.
+- **Clear yes (80%+ sure):** a reply is written from the same inbox that sent the first email, in the same thread, with a link to a page of their clips (named after their podcast), your phone number at the bottom, and a line inviting them to tell you if they like it and to ask for more. The clips only become public at this moment.
+- **Clear no:** they go on the do not contact list.
+- **Questions or anything unclear:** left for you, listed as "Needs you".
+- **Draft or send:** `python3 tools/setup_email.py`, option 3, asks. **draft** (the starting setting) saves the reply in that inbox's Drafts for you to look at and send. **send** sends it right away. Keep it on draft until a few replies have looked right.
+- **Your phone number** is set in the same place. Without it, nothing is written.
+- The reply wording is `REPLY_BODY` at the top of `tools/auto_reply.py` (spintax works).
+
 ## Follow ups
 They go out after 3 and 7 days if there was no reply, in the same email thread. Their wording is in `tools/cold_email.py` (the `FOLLOWUPS` list). Spintax and tokens work there too.
 

@@ -16,7 +16,7 @@ from urllib.parse import urlparse, parse_qs
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-import cold_email, email_finder, personalize
+import cold_email, email_finder, personalize, auto_reply
 SCRIPT = os.getenv("RUNNER_SCRIPT", str(HERE / "google_ai_to_crm.py"))
 PORT = int(os.getenv("RUNNER_PORT", "8765"))
 APP_URL = os.getenv("CLIPPER_URL", "http://127.0.0.1:5001").rstrip("/")
@@ -372,8 +372,10 @@ def email_status():
     rt = (cfg.get("reply_to") or "").lower()
     if rt and rt.split("@")[-1] in ("gmail.com","googlemail.com","yahoo.com","outlook.com","hotmail.com","live.com","icloud.com","aol.com","proton.me","protonmail.com"):
         warnings.append(f"Replies go to a free address ({rt}). Spam filters penalize a Gmail/Yahoo Reply-To on a different From domain (mail-tester: -2.5). Before real outreach, set Reply-To to a mailbox on a domain you own (python3 tools/setup_email.py, option 4).")
+    if not (cfg.get("phone") or "").strip():
+        warnings.append("Add your phone number (python3 tools/setup_email.py, option 3). Automatic replies to people who say yes need it, and nothing is written without it.")
     caps = cold_email.capacity(cfg, log_)
-    return {"warnings": warnings, "ready": not problems, "problems": problems, "inboxes": caps, "capacity_left": sum(max(0, c["cap"] - c["sent_today"]) for c in caps),
+    return {"warnings": warnings, "auto_reply": "send" if cfg.get("auto_reply") == "send" else "draft", "ready": not problems, "problems": problems, "inboxes": caps, "capacity_left": sum(max(0, c["cap"] - c["sent_today"]) for c in caps),
             "suppressed": len(cold_email.suppressed()), "suppressed_list": sorted(cold_email.suppressed())[:2000], "in_send_window": cold_email.in_window(cfg),
             "window": cfg.get("send_window") or {"start_hour": 9, "end_hour": 17}}
 
@@ -492,6 +494,7 @@ class H(BaseHTTPRequestHandler):
         if self.path == "/email/check-replies":
             try:
                 res = cold_email.check_replies(body.get("sent") or [], log_fn=lambda m: None)
+                res["found"] = [{k: v for k, v in f.items() if k != "text"} for f in auto_reply.handle(res.get("found") or [], log_fn=log)]
                 b = cold_email.check_bounces(log_fn=lambda m: None)
                 return self._send(200, {**res, "bounced": b["bounced"], "errors": (res.get("errors") or []) + b["errors"]})
             except Exception as e:

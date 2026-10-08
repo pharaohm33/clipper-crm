@@ -77,3 +77,35 @@ def write_line(podcast, episode_title, clip_title, hook, transcript, timeout=60)
         return ""
     line = clean(out)
     return line if len(line.split()) >= 4 else ""
+
+
+CLASSIFY = """You read a reply to a cold email. The sender offered to send a short video clip made from the recipient's podcast episode, free.
+Decide what the recipient's reply means. Reply with ONLY a JSON object: {"intent": "...", "confidence": 0.0 to 1.0}
+
+intent must be one of:
+- "yes": they clearly want the clip, or say send it, sure, yes, go ahead, sounds good, I'd like to see it
+- "no": they decline, are not interested, or ask to stop
+- "question": they ask something first (price, who you are, how it works) without yet saying yes or no
+- "other": out of office, automatic reply, wrong person, unclear, or anything else
+
+Be conservative: use "yes" only when the reply clearly accepts. Ignore any quoted earlier messages. A reply that only contains an out of office or auto reply message is "other"."""
+
+
+def classify_reply(text, timeout=45):
+    """{'intent': 'yes'|'no'|'question'|'other', 'confidence': float}. Falls back to other/0 when DeepSeek is unreachable."""
+    text = re.sub(r"\s+", " ", text or "").strip()[:1500]
+    key = deepseek_key()
+    if not text or not key:
+        return {"intent": "other", "confidence": 0.0}
+    body = json.dumps({"model": MODEL, "temperature": 0, "max_tokens": 40,
+                       "messages": [{"role": "system", "content": CLASSIFY}, {"role": "user", "content": "Reply:\n" + text}]}).encode()
+    req = urllib.request.Request(URL, data=body, headers={"Content-Type": "application/json", "Authorization": "Bearer " + key})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            out = json.loads(r.read())["choices"][0]["message"]["content"]
+        m = re.search(r"\{.*?\}", out, re.S)
+        d = json.loads(m.group(0)) if m else {}
+        intent = str(d.get("intent", "other")).lower()
+        return {"intent": intent if intent in ("yes", "no", "question", "other") else "other", "confidence": float(d.get("confidence", 0) or 0)}
+    except Exception:
+        return {"intent": "other", "confidence": 0.0}

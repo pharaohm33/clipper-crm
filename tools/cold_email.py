@@ -394,6 +394,27 @@ def run(leads, template, mode, limit=20, ignore_window=False, step=0, log_fn=pri
 
 
 # ----------------------------------------------------------------------------------------- replies / opt outs
+def _reply_text(raw):
+    """(plain text without quoted earlier messages, Message-ID, Subject) from raw message bytes."""
+    import email as _email
+    msg = _email.message_from_bytes(raw or b"")
+    text = ""
+    for part in msg.walk() if msg.is_multipart() else [msg]:
+        if part.get_content_type() == "text/plain" and not part.get_filename():
+            try:
+                text = part.get_payload(decode=True).decode(part.get_content_charset() or "utf-8", "ignore")
+            except Exception:
+                text = ""
+            if text:
+                break
+    keep = []
+    for ln in text.splitlines():
+        if ln.lstrip().startswith(">") or re.match(r"\s*On .{5,120}wrote:\s*$", ln) or re.match(r"\s*-{2,}\s*Original Message", ln, re.I):
+            break
+        keep.append(ln)
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(keep)).strip(), (msg.get("Message-ID") or "").strip(), str(msg.get("Subject") or "").strip()
+
+
 def check_replies(sent, log_fn=print):
     """sent: [{id, email, since_ts}]. Looks in each sending inbox for a reply from that address. Returns
     {found: [{id, email, kind: 'replied'|'optout', snippet}], errors: [...]} and adds opt-outs to the suppression list."""
@@ -422,8 +443,8 @@ def check_replies(sent, log_fn=print):
                 ids = data[0].split() if typ == "OK" and data and data[0] else []
                 if not ids:
                     continue
-                typ, raw = imap.fetch(ids[-1], "(BODY.PEEK[TEXT]<0.1500>)")
-                text = raw[0][1].decode("utf-8", "ignore") if raw and raw[0] else ""
+                typ, raw = imap.fetch(ids[-1], "(BODY.PEEK[]<0.30000>)")
+                text, msgid, rsubj = _reply_text(raw[0][1] if raw and raw[0] else b"")
                 kind = "optout" if OPT_OUT.search(text) else "replied"
                 if kind == "optout":
                     suppress(s["email"], "asked to stop")
@@ -432,7 +453,8 @@ def check_replies(sent, log_fn=print):
                     fm = first_mail_for(read_log(), s["email"].lower()) or {}
                     append_log({"ts": time.time(), "id": s["id"], "to": s["email"].lower(), "status": kind, "step": 0,
                                 "variant": fm.get("variant"), "provider": fm.get("provider")})
-                found.append({"id": s["id"], "email": s["email"], "kind": kind, "snippet": re.sub(r"\s+", " ", text)[:160]})
+                found.append({"id": s["id"], "email": s["email"], "kind": kind, "snippet": re.sub(r"\s+", " ", text)[:160], "text": text[:1200],
+                              "msgid": msgid, "subject": rsubj, "slug": s.get("slug"), "name": s.get("name")})
                 log_fn(f"{kind}: {s['email']}")
             imap.logout()
         except Exception as e:

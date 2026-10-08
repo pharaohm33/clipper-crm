@@ -16,7 +16,7 @@ from pathlib import Path
 
 HERE = Path(os.getenv("COLD_EMAIL_HOME") or Path(__file__).resolve().parent)
 CONFIG = HERE / "email_accounts.json"
-DEFAULTS = {"sender_name": "", "postal_address": "", "reply_to": "", "send_window": {"start_hour": 9, "end_hour": 17},
+DEFAULTS = {"sender_name": "", "postal_address": "", "reply_to": "", "phone": "", "auto_reply": "draft", "send_window": {"start_hour": 9, "end_hour": 17},
             "min_delay_seconds": 60, "max_delay_seconds": 90, "warmup": {"start": 5, "add_per_day": 3, "max": 30}, "accounts": []}
 PROVIDERS = {"1": ("Google Workspace or Gmail", "smtp.gmail.com", 587, "imap.gmail.com"),
              "2": ("Zoho Mail", "smtp.zoho.com", 587, "imap.zoho.com"),
@@ -99,7 +99,7 @@ def main():
         cfg["postal_address"] = ask("Your real mailing address (cold email law requires it in every email)")
     while True:
         show(cfg)
-        print("  1) Add an inbox   2) Remove an inbox   3) Change name or address   4) Set where replies go   5) Save and finish")
+        print("  1) Add an inbox   2) Remove an inbox   3) Change name, address, phone, auto reply   4) Set where replies go   5) Save and finish")
         choice = ask("Pick 1-5", "5")
         if choice == "1":
             add_inbox(cfg)
@@ -110,6 +110,9 @@ def main():
         elif choice == "3":
             cfg["sender_name"] = ask("Your name", cfg["sender_name"])
             cfg["postal_address"] = ask("Mailing address", cfg["postal_address"])
+            cfg["phone"] = ask("Your phone number (shown at the bottom of replies to people who say yes; blank for none)", cfg.get("phone", ""))
+            mode = ask("When someone clearly says yes, should the reply be 'draft' (saved for you to send) or 'send' (sent right away)", cfg.get("auto_reply", "draft")).lower()
+            cfg["auto_reply"] = "send" if mode.startswith("s") else "draft"
         elif choice == "4":
             set_reply_to(cfg)
         elif choice == "5":
