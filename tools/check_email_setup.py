@@ -4,11 +4,15 @@ Checks your sending setup BEFORE you send anything. Reads only; sends nothing un
 
     python3 tools/check_email_setup.py
     python3 tools/check_email_setup.py --send-test you@your-personal-address.com   # one real test email from each inbox, to YOU
+    python3 tools/check_email_setup.py --read-results you@gmail.com               # then: did each test land in inbox or spam, and did SPF/DKIM/DMARC pass?
 
 For every inbox it checks: the domain's SPF, DKIM and DMARC records (what makes mail land in the inbox instead of spam), that the domain can receive mail
 (so replies reach you), and that the SMTP (sending) and IMAP (reading replies) logins work. Every problem comes with the exact fix.
 """
+import email as emaillib
+import getpass
 import imaplib
+import re
 import json
 import os
 import smtplib
@@ -84,6 +88,64 @@ def login_checks(acct):
     return out
 
 
+IMAP_HOSTS = {"gmail.com": "imap.gmail.com", "googlemail.com": "imap.gmail.com", "outlook.com": "outlook.office365.com",
+              "hotmail.com": "outlook.office365.com", "live.com": "outlook.office365.com", "yahoo.com": "imap.mail.yahoo.com",
+              "icloud.com": "imap.mail.me.com"}
+SPAM_FOLDERS = ("[Gmail]/Spam", "Junk", "Junk Email", "Spam", "Bulk Mail")
+TEST_SUBJECT = "Test from your outreach setup"
+
+
+def read_results(to, accounts):
+    """Log in to the inbox the tests were sent TO, find each test and report folder + SPF/DKIM/DMARC as the receiver judged them."""
+    host = IMAP_HOSTS.get(to.split("@")[1].lower()) or input(f"IMAP server for {to}: ").strip()
+    pw = getpass.getpass(f"App password for {to} (hidden, used only for this check): ")
+    found = {}
+    try:
+        im = imaplib.IMAP4_SSL(host, timeout=25)
+        im.login(to, pw)
+    except Exception as e:
+        print(BAD + f"could not log in to {to}: {str(e)[:120]}")
+        return 1
+    for folder in ("INBOX",) + SPAM_FOLDERS:
+        try:
+            if im.select(f'"{folder}"', readonly=True)[0] != "OK":
+                continue
+            typ, data = im.search(None, "SUBJECT", f'"{TEST_SUBJECT}"')
+            for num in (data[0].split() if typ == "OK" else [])[-40:]:
+                raw = im.fetch(num, "(BODY.PEEK[HEADER])")[1][0][1]
+                msg = emaillib.message_from_bytes(raw)
+                sender = emaillib.utils.parseaddr(msg.get("From", ""))[1].lower()
+                auth = " ".join(msg.get_all("Authentication-Results") or []).lower()
+                found[sender] = (folder, auth)  # later (newer) messages overwrite earlier ones
+        except Exception:
+            continue
+    im.logout()
+    bad = 0
+    print(f"\nWHAT {to} RECEIVED")
+    for a in accounts:
+        sender = a["email"].lower()
+        if sender not in found:
+            print(WARN + f"{sender}: no test email found (not delivered yet, or wrong folder). Wait a minute and run again.")
+            continue
+        folder, auth = found[sender]
+        verdicts = {k: (re.search(rf"\b{k}=(\w+)", auth).group(1) if re.search(rf"\b{k}=(\w+)", auth) else "not reported") for k in ("spf", "dkim", "dmarc")}
+        placed = "INBOX" if folder == "INBOX" else f"SPAM ({folder})"
+        line = f"{sender}: landed in {placed}; SPF {verdicts['spf']}, DKIM {verdicts['dkim']}, DMARC {verdicts['dmarc']}"
+        ok = folder == "INBOX" and all(v == "pass" for v in verdicts.values())
+        print((GOOD if ok else BAD) + line)
+        if not ok:
+            bad += 1
+            if verdicts["spf"] not in ("pass", "not reported"):
+                print("         fix: SPF is wrong. Fix the TXT record on @ for that domain.")
+            if verdicts["dkim"] not in ("pass", "not reported"):
+                print("         fix: DKIM failed. Turn on DKIM in your mail provider's dashboard and add its TXT record.")
+            if verdicts["dmarc"] not in ("pass", "not reported"):
+                print("         fix: DMARC failed. Add the _dmarc TXT record and make sure SPF or DKIM aligns with the From domain.")
+            if folder != "INBOX" and all(v == "pass" for v in verdicts.values()):
+                print("         all checks passed but it still went to spam: that is the provider's shared IP/reputation, not your setup. If every inbox does this, this host is a poor fit for cold email.")
+    return bad
+
+
 def main():
     cfgfile = HERE / "email_accounts.json"
     if not cfgfile.exists():
@@ -118,6 +180,9 @@ def main():
             except Exception as e:
                 print(BAD + f"{a['email']}: {str(e)[:120]}")
                 bad += 1
+    rr = sys.argv[sys.argv.index("--read-results") + 1] if "--read-results" in sys.argv else None
+    if rr:
+        bad += read_results(rr, accounts)
     print("\n" + ("All clear. You can preview, then try one inbox's drafts." if not bad else f"{bad} thing(s) to fix above, then run this again."))
     sys.exit(1 if bad else 0)
 

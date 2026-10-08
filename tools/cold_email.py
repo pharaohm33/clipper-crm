@@ -322,8 +322,15 @@ def check_replies(sent, log_fn=print):
     by_acct = {}
     for e in sent_entries():
         by_acct.setdefault(e.get("from"), set()).add(e.get("to", "").lower())
-    for acct in cfg.get("accounts", []):
-        wanted = [s for s in sent if s["email"].lower() in by_acct.get(acct["email"], set())]
+    # Replies go to cfg["reply_to"]; if that inbox's login is saved as cfg["reply_account"], scan it for every prospect we emailed.
+    all_sent_to = set().union(*by_acct.values()) if by_acct else set()
+    inboxes = [(a, [s for s in sent if s["email"].lower() in by_acct.get(a["email"], set())]) for a in cfg.get("accounts", [])]
+    ra = cfg.get("reply_account")
+    if ra and ra.get("password"):
+        inboxes.append(({**ra, "smtp_host": ra.get("imap_host", "")}, [s for s in sent if s["email"].lower() in all_sent_to]))
+    seen_ids = set()
+    for acct, wanted in inboxes:
+        wanted = [s for s in wanted if s["id"] not in seen_ids]
         if not wanted:
             continue
         try:
@@ -341,6 +348,7 @@ def check_replies(sent, log_fn=print):
                 kind = "optout" if OPT_OUT.search(text) else "replied"
                 if kind == "optout":
                     suppress(s["email"], "asked to stop")
+                seen_ids.add(s["id"])
                 found.append({"id": s["id"], "email": s["email"], "kind": kind, "snippet": re.sub(r"\s+", " ", text)[:160]})
                 log_fn(f"{kind}: {s['email']}")
             imap.logout()

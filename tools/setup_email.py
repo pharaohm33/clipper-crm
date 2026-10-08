@@ -73,6 +73,23 @@ def add_inbox(cfg):
     print(f"  Added {email}.")
 
 
+def set_reply_to(cfg):
+    print("\nReplies can all go to ONE address (for example your main inbox) instead of the sending inboxes.")
+    cur = cfg.get("reply_to", "")
+    addr = ask("Reply-To address (blank = replies come back to the sending inbox)", cur).lower()
+    cfg["reply_to"] = addr
+    if not addr:
+        cfg.pop("reply_account", None)
+        return
+    print("  So the CRM can still see replies and opt-outs, it needs to read that inbox too (read only).")
+    if ask("  Save that inbox's login for reply detection? y/n", "y").lower().startswith("y"):
+        imap = ask("  IMAP server for " + addr, (cfg.get("reply_account") or {}).get("imap_host", ""))
+        pw = getpass.getpass("  App password for that inbox (hidden): ").replace(" ", "").strip()
+        cfg["reply_account"] = {"email": addr, "imap_host": imap, "username": addr, "password": pw}
+    else:
+        print("  Without it, replies and opt-outs sent there are NOT detected, so watch that inbox yourself and add opt-outs to tools/suppression.txt.")
+
+
 def main():
     cfg = load()
     print(__doc__.split("\n\n")[0])
@@ -82,8 +99,8 @@ def main():
         cfg["postal_address"] = ask("Your real mailing address (cold email law requires it in every email)")
     while True:
         show(cfg)
-        print("  1) Add an inbox   2) Remove an inbox   3) Change name or address   4) Save and finish")
-        choice = ask("Pick 1-4", "4")
+        print("  1) Add an inbox   2) Remove an inbox   3) Change name or address   4) Set where replies go   5) Save and finish")
+        choice = ask("Pick 1-5", "5")
         if choice == "1":
             add_inbox(cfg)
         elif choice == "2" and cfg["accounts"]:
@@ -94,6 +111,8 @@ def main():
             cfg["sender_name"] = ask("Your name", cfg["sender_name"])
             cfg["postal_address"] = ask("Mailing address", cfg["postal_address"])
         elif choice == "4":
+            set_reply_to(cfg)
+        elif choice == "5":
             break
     save(cfg)
     print(f"\nSaved to {CONFIG} (only you can read it).")
