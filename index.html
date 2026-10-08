@@ -42,7 +42,7 @@ const TIERS=[{n:'Starter',clips:20,fee:300},{n:'Growth',clips:50,fee:500},{n:'Sc
 const CNS='Contacted - no sample sent';
 const STATUSES=['New','Sample Sent',CNS,'Replied','Interested','Client','No Response','Not Interested','Removed'];
 const TPL=['{n} podcast full episode','{n} podcast interview','how to start a {n} podcast','{n} podcast new episode'];
-const DEF={settings:{key:'',goal:5000,daily:100,minSubs:0,maxSubs:150000,maxDays:45,minViews:0,needPay:0,onlyHot:1,hotScore:6,apMode:'drafts',apBatch:10,apEvery:15,apMax:25,apOn:0,payMin:1,followDays:3,templates:3,
+const DEF={settings:{key:'',goal:5000,daily:100,minSubs:0,maxSubs:150000,maxDays:45,minViews:0,needPay:0,onlyHot:1,hotScore:6,apMode:'drafts',apBatch:10,apEvery:15,apMax:25,apDiscover:1,apDiscRounds:6,apOn:0,payMin:1,followDays:3,templates:3,
  syncUrl:'',syncPw:'',geminiKey:'',geminiModel:'gemini-2.5-flash',skipNoContact:1,igOnly:0,useGeminiParse:0,maxShorts:70,emailLimit:20,
  emailSkipMS:true,emailSubjectB:"{name} clips you can post",emailBodyB:"",emailSubject:"made clips from {name}",
  emailBody:"{Hi|Hey}, I {saw|caught|came across} {show_ref} and {really liked|loved|really enjoyed} {topic}. It stuck with me, so I went ahead and made {clips} out of it, ready for Reels, TikTok and YouTube Shorts.\n\n{done_line} {Just reply yes and I'll send {them_it} right over.|Want me to send {them_it} over?}\n\n{Thanks|Best|Cheers},\n{sender}",
@@ -308,6 +308,7 @@ function apRender(){const el=document.getElementById('email-ap');if(!el)return;c
   <div class="row" style="margin-top:8px"><button class="b p" id="ap-run" ${AP.running?'disabled':''}>▶ Run once now</button><button class="b" id="ap-stop" ${AP.running?'':'disabled'}>Stop after this step</button><button class="b" id="ap-drip" ${AP.running||ES.busy?'disabled':''} title="Sends the emails you saved as drafts, one every 60 to 90 seconds, rotating across your inboxes within each inbox's daily cap">📤 Drip-send the approved drafts (${S.leads.filter(l=>isEmailReady(l)&&l.draftedAt&&l.approved).length})</button><button class="b" id="ap-toggle">${on?'⏸ Turn repeating off':'⟳ Keep going automatically'}</button>
    <label style="display:inline-flex;gap:4px;align-items:center">When done <select id="ap-mode"><option value="drafts" ${mode=='drafts'?'selected':''}>save to drafts</option><option value="send" ${mode=='send'?'selected':''}>send for real</option></select></label>
    <label style="display:inline-flex;gap:4px;align-items:center"><input type="checkbox" id="ap-awake" ${g.apAwake===0?'':'checked'}> Keep my Mac awake only while working</label>
+   <label style="display:inline-flex;gap:4px;align-items:center"><input type="checkbox" id="ap-disc" ${g.apDiscover===0?'':'checked'}> Find more leads automatically (Google AI)</label>
    <label style="display:inline-flex;gap:4px;align-items:center">Keep at most <input id="ap-max" type="number" min="5" max="100" value="${+g.apMax||25}" style="width:60px"> ready<\/label>
    <label style="display:inline-flex;gap:4px;align-items:center">Clips per round <input id="ap-batch" type="number" min="5" max="30" value="${+g.apBatch||10}" style="width:60px"></label>
    <label style="display:inline-flex;gap:4px;align-items:center">Check for new work every <input id="ap-every" type="number" min="5" max="1440" value="${+g.apEvery||15}" style="width:70px"> min</label></div>
@@ -315,7 +316,7 @@ function apRender(){const el=document.getElementById('email-ap');if(!el)return;c
  const on_=(id,fn)=>{const b=document.getElementById(id);if(b)b.onclick=fn};on_('ap-run',()=>autopilotRun());on_('ap-drip',async()=>{const n=S.leads.filter(l=>isEmailReady(l)&&l.draftedAt&&l.approved).length;if(!n)return apLog('Nothing is approved yet. Open the Unibox, read the drafts, and approve the ones you want sent.');if(!confirm(`Send the ${n} drafted email(s) for real?\n\nThey go out one every 60 to 90 seconds, within each inbox's daily cap (today: about 5 per inbox). Anything over the cap waits for the next run.`))return;apLog(`Drip-sending ${n} drafted email(s)...`);const prev=S.settings.apMode;S.settings.apMode='send';try{await sendEmails('send',0,true,l=>!!(l.draftedAt&&l.approved))}finally{S.settings.apMode=prev}apLog('Drip send finished.');apRender()});on_('ap-stop',()=>{AP.stop=true;apLog('Stopping after the current step...')});
  on_('ap-toggle',()=>{if(AP.timer){clearInterval(AP.timer);AP.timer=null;g.apOn=0;apLog('Repeating is off.')}else{g.apOn=1;apStart()}save();apRender()});
  const m=document.getElementById('ap-mode');if(m)m.onchange=()=>{if(m.value==='send'&&!confirm('Autopilot will then SEND real emails by itself, with no further confirmation. Keep it on drafts until you have read a few drafts and are happy.')){m.value='drafts';return}g.apMode=m.value;save();apRender()};
- const b=document.getElementById('ap-batch');if(b)b.onchange=()=>{g.apBatch=Math.max(5,Math.min(30,+b.value||10));save()};const aw=document.getElementById('ap-awake');if(aw)aw.onchange=()=>{g.apAwake=aw.checked?1:0;if(!aw.checked)awakeSet(false);save()};const mx=document.getElementById('ap-max');if(mx)mx.onchange=()=>{g.apMax=Math.max(5,Math.min(100,+mx.value||25));save()};const e2=document.getElementById('ap-every');if(e2)e2.onchange=()=>{g.apEvery=Math.max(10,Math.min(1440,+e2.value||60));save();if(AP.timer)apStart()}}
+ const b=document.getElementById('ap-batch');if(b)b.onchange=()=>{g.apBatch=Math.max(5,Math.min(30,+b.value||10));save()};const dc=document.getElementById('ap-disc');if(dc)dc.onchange=()=>{g.apDiscover=dc.checked?1:0;save()};const aw=document.getElementById('ap-awake');if(aw)aw.onchange=()=>{g.apAwake=aw.checked?1:0;if(!aw.checked)awakeSet(false);save()};const mx=document.getElementById('ap-max');if(mx)mx.onchange=()=>{g.apMax=Math.max(5,Math.min(100,+mx.value||25));save()};const e2=document.getElementById('ap-every');if(e2)e2.onchange=()=>{g.apEvery=Math.max(10,Math.min(1440,+e2.value||60));save();if(AP.timer)apStart()}}
 function apQueue(){return S.leads.filter(l=>l.status=='New'&&(l.clipFile||l.clipLink)&&!l.emailedAt).length}
 
 /* ---------- Fit check with Google AI: a small, owner led business that can decide alone and can pay ---------- */
@@ -348,6 +349,21 @@ async function fitBatch(n,log){const g=S.settings;
    log(`  ${l.name.slice(0,34)}: ${bad?'NOT a fit':'ok'} (${f.decider}, ${f.size}, can pay: ${f.afford}${f.reasons[0]?'; '+f.reasons[0]:''})`);
    if(bad){l.status='Removed';l.notes=((l.notes?l.notes+' | ':'')+'Removed by the fit check: '+(f.reasons.join('; ')||'looks like a big company or cannot decide alone'));removed++}}
  save();return{checked,removed}}
+
+/* ---------- Autopilot lead finding: asks Google AI (in the open Chrome window) for shows in the next niches, then applies every quality filter ---------- */
+const AP_NICHE_ORDER=['custom home builder','real estate developer','luxury home builder','home builder','real estate investing','commercial real estate','luxury real estate','real estate agent','commercial real estate broker','mortgage broker','financial advisor','wealth management','attorney','insurance agent','med spa owner','chiropractor','solar installation','business coaching','business','luxury vehicles','multifamily investing','real estate syndication','apartment investing','self storage investing','personal finance'];
+function nextNiches(n){const ran=S.nicheRun||{},fresh=k=>!(ran[k]&&Date.now()-ran[k]<20*3600e3);
+ const all=[...AP_NICHE_ORDER.filter(k=>S.niches.includes(k)),...S.niches.filter(k=>!AP_NICHE_ORDER.includes(k))];
+ return all.filter(fresh).slice(0,n)}
+async function aiDiscover(niches,log){window.__aiItems=[];const before=new Set(S.leads.map(l=>l.id));let warned=false;
+ await helperJob('/run',{niches,focus:'',count:15,dry:false,emit:true},t=>{
+  if(t.startsWith('AIITEMS ')){try{window.__aiItems.push(JSON.parse(t.slice(8)))}catch(e){}}
+  else if(/asking you to verify/i.test(t)&&!warned){warned=true;log('  Google wants a verification. Solve it in the Chrome window (I will wait up to 5 minutes).');try{fetch(RUNNER+'/notify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:'Google needs you',message:'Solve the verification in the Chrome window so the lead search can continue.'})})}catch(e){}}});
+ S.nicheRun=S.nicheRun||{};niches.forEach(n=>{S.nicheRun[n]=Date.now()});
+ for(const b of window.__aiItems){log(`  ${b.niche}: Google AI listed ${b.items.length} shows, checking them against your filters`);try{await ingestItems(b.items,b.niche,()=>{})}catch(e){log('  could not check them all: '+e.message.slice(0,90));if(/quota|exceeded/i.test(e.message))break}}
+ const fresh=S.leads.filter(l=>!before.has(l.id)&&l.status=='New'),weak=fresh.filter(l=>!(l.pin||isHot(l)));
+ weak.forEach(l=>{l.status='Removed';l.notes=((l.notes?l.notes+' | ':'')+'Removed: did not meet standards')});save();
+ log(`  ${fresh.length-weak.length} new qualified lead(s) kept, ${weak.length} removed.`);return fresh.length-weak.length}
 function apWork(){const hot=S.leads.filter(l=>l.status=='New'&&isHot(l));const full=apQueue()>=(+S.settings.apMax||25);
  const needEmail=full?0:hot.filter(l=>!l.email&&l.episode&&!(l.emailChecked&&Date.now()-l.emailChecked<14*DAY)).length;
  const needClip=full?0:hot.filter(l=>l.email&&!l.clipFile&&!l.clipLink&&!l.clipFail&&ytLeads(l)).length;
@@ -366,18 +382,20 @@ async function autopilotRun(){
   const clipperOn=hp.state==='on';if(!clipperOn)apLog('The clipper app is '+hp.state+', so new clips are skipped this time.');
   const w0=apWork();apLog(`Work to do: ${w0.needEmail} to find an email for, ${w0.needClip} to make clips for, ${w0.needDraft} to write.`);
   const cap=+g.apMax||25,slots=Math.max(0,cap-apQueue());if(!slots)apLog(`The queue is full: ${apQueue()} emails are ready (one day's worth). Approve and drip-send some, then I will refill it.`);
-  if(w0.needEmail&&slots)await step('1/4  Finding emails (3 at a time)',()=>findEmails(Math.min(Math.max(batch,15),slots*2+5)));
+  let discovered=0,picks=[];
+  if(g.apDiscover!==0&&slots&&w0.needEmail+w0.needClip<3&&(AP.disc||0)<(+g.apDiscRounds||6)){picks=nextNiches(2);if(picks.length){AP.disc=(AP.disc||0)+1;await step(`Finding more leads with Google AI: ${picks.join(', ')}`,async()=>{discovered=await aiDiscover(picks,apLog)})}else apLog('Every niche was searched in the last 20 hours. Add niches or try again tomorrow.')}
+  if((w0.needEmail||discovered)&&slots)await step('1/4  Finding emails (3 at a time)',()=>findEmails(Math.min(Math.max(batch,15),slots*2+5)));
   if(g.apFit!==0&&S.leads.some(l=>l.status=='New'&&isHot(l)&&l.email&&!l.fit))await step('Checking each lead is a good fit (Google AI)',async()=>{const r=await fitBatch(12,apLog);if(r.removed)apLog(`  ${r.removed} removed as a bad fit.`)});
   if(clipperOn&&slots&&apWork().needClip)await step('2/4  Making clips (up to 3 each) and topic lines',()=>prepareClips(Math.min(batch,slots),true,true));
   const ready=S.leads.filter(l=>isEmailReady(l)&&(mode!='drafts'||!l.draftedAt)).length;
   if(ready)await step(`3/4  ${ready} lead(s) ready. ${mode=='send'?'Sending':'Saving as drafts'}`,()=>sendEmails(mode,0,true));
   if(mode==='send'){await step('Follow-ups that are due',async()=>{await sendEmails('send',1,true);await sendEmails('send',2,true)})}
   await step('4/4  Checking replies',()=>checkReplies());
-  const w1=apWork();more=w1.total>0&&w1.total<before.total&&!AP.stop&&(AP.loops=(AP.loops||0)+1)<80;
+  const w1=apWork(),roomLeft=apQueue()<(+g.apMax||25);more=!AP.stop&&(AP.loops=(AP.loops||0)+1)<80&&((w1.total>0&&w1.total<before.total)||(g.apDiscover!==0&&roomLeft&&picks.length>0&&(AP.disc||0)<(+g.apDiscRounds||6)));
  }catch(e){apLog('Stopped: '+(e&&e.message||e))}
  clearInterval(hb);AP.running=false;ES.busy=false;apRender();emailDyn();
  if(more){apLog('More to do, continuing right away...');setTimeout(()=>autopilotRun(),2500);return}
- AP.loops=0;if(g.apAwake!==0)awakeSet(false);const w=apWork(),made=S.leads.filter(l=>l.draftedAt).length-draftedBefore;
+ AP.loops=0;AP.disc=0;if(g.apAwake!==0)awakeSet(false);const w=apWork(),made=S.leads.filter(l=>l.draftedAt).length-draftedBefore;
  if(mode==='drafts'){const msg=w.waiting?`${w.waiting} draft email(s) are ready for your approval. Open the Unibox to read and approve them, then press "Drip-send the approved drafts".`:'Nothing waiting. Run more lead searches to find new leads.';apLog('All caught up. '+msg);
   document.title=(w.waiting?`(${w.waiting} ready) `:'')+'Clipper CRM';
   if(made>0||w.waiting){try{fetch(RUNNER+'/notify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:'Drafts ready',message:`${w.waiting} email draft(s) are waiting for your approval in the Unibox.`})})}catch(e){}}}
@@ -705,7 +723,7 @@ function find(){$('#main').innerHTML=`<div class="card" style="border-color:var(
   if(r.error)return log('Could not start: '+r.error);
   $('#rs').textContent='Running…';log(`Running on ${niches.length} niche(s). A Chrome window will open. If Google asks you to verify, solve it there.`);
   let since=0,go=true;while(go){await new Promise(x=>setTimeout(x,2000));try{const l=await rc('/log?since='+since);since=l.next;l.lines.forEach(t=>{log(t.startsWith('AIITEMS ')?'  (shows read, checking them next)':t);if(t.startsWith('AIITEMS ')){try{(window.__aiItems=window.__aiItems||[]).push(JSON.parse(t.slice(8)))}catch(e){}}});go=l.running}catch(e){log('Lost contact with the helper.');go=false}}
-  $('#rs').textContent='Finished';if(!dry){const batches=window.__aiItems||[];window.__aiItems=[];const before=new Set(S.leads.map(l=>l.id));let tot=0;try{for(const b of batches){log('Checking '+b.items.length+' shows for '+b.niche+' with your quality filters…');tot+=await ingestItems(b.items,b.niche,log)}}catch(e){log('Stopped: '+e.message)}
+  $('#rs').textContent='Finished';if(!dry){S.nicheRun=S.nicheRun||{};niches.forEach(n=>{S.nicheRun[n]=Date.now()});const batches=window.__aiItems||[];window.__aiItems=[];const before=new Set(S.leads.map(l=>l.id));let tot=0;try{for(const b of batches){log('Checking '+b.items.length+' shows for '+b.niche+' with your quality filters…');tot+=await ingestItems(b.items,b.niche,log)}}catch(e){log('Stopped: '+e.message)}
  const fresh=S.leads.filter(l=>!before.has(l.id)&&l.status=='New'),weak=fresh.filter(l=>!(l.pin||isHot(l)));weak.forEach(l=>{l.status='Removed';l.notes=((l.notes?l.notes+' | ':'')+'Removed: did not meet standards')});save();log(`Done. ${fresh.length-weak.length} qualified lead(s) kept, ${weak.length} removed for not meeting the standards. Check Today.`)}};
  $('#pgb').onclick=()=>openAI($('#pgn').value||S.niches[0]);
  $('#main').onclick=e=>{if(e.target.dataset.ai)openAI(e.target.dataset.ai)};
