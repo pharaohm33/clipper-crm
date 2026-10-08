@@ -17,7 +17,7 @@ from pathlib import Path
 HERE = Path(os.getenv("COLD_EMAIL_HOME") or Path(__file__).resolve().parent)
 CONFIG = HERE / "email_accounts.json"
 DEFAULTS = {"sender_name": "", "postal_address": "", "reply_to": "", "send_window": {"start_hour": 9, "end_hour": 17},
-            "min_delay_seconds": 90, "max_delay_seconds": 240, "warmup": {"start": 5, "add_per_day": 3, "max": 30}, "accounts": []}
+            "min_delay_seconds": 60, "max_delay_seconds": 90, "warmup": {"start": 5, "add_per_day": 3, "max": 30}, "accounts": []}
 PROVIDERS = {"1": ("Google Workspace or Gmail", "smtp.gmail.com", 587, "imap.gmail.com"),
              "2": ("Zoho Mail", "smtp.zoho.com", 587, "imap.zoho.com"),
              "3": ("Microsoft 365 / Outlook", "smtp.office365.com", 587, "outlook.office365.com"),

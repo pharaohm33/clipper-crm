@@ -34,7 +34,7 @@ LOG = HERE / "email_log.jsonl"
 SUPPRESS = HERE / "suppression.txt"
 OPT_OUT = re.compile(r"\b(unsubscribe|remove me|take me off|stop (emailing|sending|contacting)|do not (email|contact)|don't (email|contact)|no thanks|not interested|please stop)\b", re.I)
 
-DEFAULT_SUBJECT = "{Quick clip|Short clip|Clip} from your {niche} episode"
+DEFAULT_SUBJECT = "made a clip from your {name} episode"
 DEFAULT_BODY = """{Hi|Hey|Hello} there,
 
 {I just watched|I caught|I watched} your recent episode on {niche} and {loved it|really enjoyed it}. I cut a short clip from it that I think could do well on Reels, TikTok and Shorts:
@@ -367,7 +367,7 @@ def run(leads, template, mode, limit=20, ignore_window=False, step=0, log_fn=pri
             results.append(item)
             continue
         if not first and mode == "send":
-            sleep(random.uniform(float(cfg.get("min_delay_seconds", 90)), float(cfg.get("max_delay_seconds", 240))))
+            sleep(random.uniform(float(cfg.get("min_delay_seconds", 60)), float(cfg.get("max_delay_seconds", 90))))
         first = False
         acct = next(a for a in cfg["accounts"] if a["email"] == item["from"])
         msg = compose(acct, cfg, item["to"], item["subject"], item["body"], item.get("in_reply_to"))

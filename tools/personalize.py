@@ -26,7 +26,7 @@ Write 1 or 2 plain sentences (at most 45 words) that:
 - sound like a real person wrote it quickly: warm, specific, no hype
 
 Hard rules:
-- Use only what is in the transcript. Never invent facts, numbers, names or quotes. Do not quote more than 5 words in a row.
+- Use only what is in the transcript. Never invent facts, numbers, names or quotes, and never claim what other people or most people do. Do not quote more than 5 words in a row.
 - No flattery clichés ("amazing", "incredible", "game changer", "love your content").
 - Do not mention AI, transcripts, or that you are summarizing.
 - No hyphens, no em dashes, no emojis, no hashtags, no exclamation marks.

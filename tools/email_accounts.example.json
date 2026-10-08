@@ -3,8 +3,8 @@
   "postal_address": "Your real mailing address, City, ST 00000",
   "reply_to": "",
   "send_window": {"start_hour": 9, "end_hour": 17},
-  "min_delay_seconds": 90,
-  "max_delay_seconds": 240,
+  "min_delay_seconds": 60,
+  "max_delay_seconds": 90,
   "warmup": {"start": 5, "add_per_day": 3, "max": 30},
   "accounts": [
     {
