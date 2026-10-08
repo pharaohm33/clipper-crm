@@ -133,7 +133,7 @@ function todayV(){const want=Math.max(1,S.settings.daily-sentOn(today()));
  ${cur.ig&&cur.x?`<button class="b" data-openu="${esc(cur.x)}" data-id="${cur.id}">Open X + copy</button>`:''}${cur.ig&&cur.tt?`<button class="b" data-openu="${esc(cur.tt)}" data-id="${cur.id}">Open TikTok + copy</button>`:''}<button class="b" data-ep="${cur.id}">Open episode</button><button class="b" data-next="${cur.id}">Sent, next</button><button class="b" data-cns="${cur.id}" title="You reached out but did not send a sample (for example an inactive podcast that looks like a real business)">Contacted, no sample</button><button class="b" data-shuf="${cur.id}">Reshuffle DM</button><button class="b" data-skip="${cur.id}">Skip</button><button class="b p" data-gc="${cur.id}">Send clip range to clipper</button>${cur.sampleFile?`<button class="b" data-reveal="${cur.id}" title="${esc(cur.sampleFile)}">Show sample file</button>`:''}<button class="b" data-edc="${cur.id}">Edit contact</button><button class="b" data-ede="${cur.id}">Edit episode</button><button class="b" data-rm="${cur.id}" title="Remove for good, never added back">Remove</button></div>
  <span class=mut>Opens in a new tab. If you're logged into Instagram there, it lands on their profile. Hit Message, paste, attach the clip.</span></div>`:''}
  <div class="card tw"><table><tr><th>Sent</th><th>Podcast</th><th>Contact</th><th>Episode</th><th>DM</th></tr>
- ${list.map(l=>`<tr><td><input type="checkbox" data-sent="${l.id}"> <button class="b" data-ed="${l.id}" title="Edit links">✎</button><button class="b" data-rm="${l.id}" title="Remove for good">✕</button></td><td>${esc(l.name)}<br><span class=mut>${(l.subs||0).toLocaleString()} subs${l.shortsPct!=null?` · ${l.shortsPct}% Shorts`:''}${l.medianViews!=null?` · ~${l.medianViews.toLocaleString()} views`:''}${(l.payTags||[]).length?` · 💰 ${esc(l.payTags.join(', '))}`:''} · 🔥 ${leadScore(l)}</span></td>
+ ${list.map(l=>`<tr><td><input type="checkbox" data-sent="${l.id}"> <button class="b" data-ed="${l.id}" title="Edit links">✎</button><button class="b" data-rm="${l.id}" title="Remove for good">✕</button></td><td>${esc(l.name)}<br><span class=mut>${(l.subs||0).toLocaleString()} subs${l.shortsPct!=null?` · ${l.shortsPct}% Shorts`:''}${l.medianViews!=null?` · ~${l.medianViews.toLocaleString()} views`:''}${(l.payTags||[]).length?` · 💰 ${esc(l.payTags.join(', '))}`:''} · 🔥 ${leadScore(l)}${l.fit?(l.fit.big||l.fit.decider==='corporate'?' · ⚠ big company':' · ✓ '+esc(l.fit.decider)+' led'):''}</span></td>
  <td>${[l.ig&&`<a target=_blank rel=noopener href="${esc(l.ig)}">Instagram</a>`,l.x&&`<a target=_blank rel=noopener href="${esc(l.x)}">X</a>`,l.tt&&`<a target=_blank rel=noopener href="${esc(l.tt)}">TikTok</a>`,l.web&&`<a target=_blank rel=noopener href="${esc(l.web)}">Link</a>`].filter(Boolean).join(' · ')}</td>
  <td>${l.episode?`<a target=_blank rel=noopener href="${esc(l.episode)}">${esc((l.epTitle||'Episode').slice(0,45))}</a>`:'<span class=mut>none</span>'}</td><td class="dm">${esc(dm(l))}<br><button class="b" data-copy="${l.id}">Copy DM</button></td></tr>`).join('')||'<tr><td colspan=5 class=mut>No fresh leads with an Instagram. Use Find Podcasts, or Leads → Find missing Instagrams.</td></tr>'}</table></div>`;
  $('#main').onclick=e=>{const d=e.target.dataset,get=id=>S.leads.find(x=>x.id==id);
@@ -317,6 +317,30 @@ function apRender(){const el=document.getElementById('email-ap');if(!el)return;c
  const m=document.getElementById('ap-mode');if(m)m.onchange=()=>{if(m.value==='send'&&!confirm('Autopilot will then SEND real emails by itself, with no further confirmation. Keep it on drafts until you have read a few drafts and are happy.')){m.value='drafts';return}g.apMode=m.value;save();apRender()};
  const b=document.getElementById('ap-batch');if(b)b.onchange=()=>{g.apBatch=Math.max(5,Math.min(30,+b.value||10));save()};const aw=document.getElementById('ap-awake');if(aw)aw.onchange=()=>{g.apAwake=aw.checked?1:0;if(!aw.checked)awakeSet(false);save()};const mx=document.getElementById('ap-max');if(mx)mx.onchange=()=>{g.apMax=Math.max(5,Math.min(100,+mx.value||25));save()};const e2=document.getElementById('ap-every');if(e2)e2.onchange=()=>{g.apEvery=Math.max(10,Math.min(1440,+e2.value||60));save();if(AP.timer)apStart()}}
 function apQueue(){return S.leads.filter(l=>l.status=='New'&&(l.clipFile||l.clipLink)&&!l.emailedAt).length}
+
+/* ---------- Fit check with Google AI: a small, owner led business that can decide alone and can pay ---------- */
+async function fitCheck(l,log){
+ const prompt=`Use Google Search. Decide whether this YouTube show is run by a small independent owner who could decide ALONE to pay a freelancer $300 to $1,000 a month for short form video clips.
+Show: ${l.name}
+YouTube channel: ${l.url}
+Website: ${l.web||'unknown'}
+Subscribers: ${l.subs||'unknown'}
+Big company signs (bad fit): a franchise or national or global brand, owned by or part of a larger media company or network, a corporate marketing department, roughly 50 or more employees, publicly traded, or the host is an employee and not the owner.
+Good fit signs: the host is the owner, a solo person or a small team, their own agency, practice, brokerage, builder, coaching business or product.
+Affordability signs: sponsors, paid products or programs, several revenue streams, a steady business.
+Never guess. Use "unknown" when you cannot find it. Return ONLY a JSON object:
+{"decider":"owner|team|corporate|unknown","size":"solo|small|mid|large|unknown","big_company":true or false,"can_afford":"yes|maybe|no|unknown","reasons":["one short reason","another"],"confidence":0.0 to 1.0}`;
+ const t=await geminiCall(prompt,true,log);const m=t.match(/\{[\s\S]*\}/);if(!m)throw new Error('no answer');
+ const o=JSON.parse(m[0].replace(/,\s*([\]}])/g,'$1'));
+ l.fit={decider:String(o.decider||'unknown'),size:String(o.size||'unknown'),big:!!o.big_company,afford:String(o.can_afford||'unknown'),reasons:(o.reasons||[]).slice(0,3).map(String),conf:+o.confidence||0,at:Date.now()};save();return l.fit}
+async function fitBatch(n,log){const g=S.settings;if(!g.geminiKey){log('Fit check skipped: add your Gemini API key in Settings (free at aistudio.google.com/apikey).');return{checked:0,removed:0}}
+ const todo=S.leads.filter(l=>l.status=='New'&&isHot(l)&&l.email&&!l.fit).slice(0,n);let removed=0,checked=0;
+ for(const l of todo){if(AP&&AP.stop)break;try{const f=await fitCheck(l);checked++;
+   const bad=f.conf>=0.6&&(f.big||f.decider==='corporate'||f.afford==='no');
+   log(`  ${l.name.slice(0,34)}: ${bad?'NOT a fit':'ok'} (${f.decider}, ${f.size}, can pay: ${f.afford}${f.reasons[0]?'; '+f.reasons[0]:''})`);
+   if(bad){l.status='Removed';l.notes=((l.notes?l.notes+' | ':'')+'Removed by the fit check: '+(f.reasons.join('; ')||'looks like a big company or cannot decide alone'));removed++}
+  }catch(e){log('  could not check '+l.name.slice(0,30)+': '+e.message.slice(0,80));if(/key/i.test(e.message))break}}
+ save();return{checked,removed}}
 function apWork(){const hot=S.leads.filter(l=>l.status=='New'&&isHot(l));const full=apQueue()>=(+S.settings.apMax||25);
  const needEmail=full?0:hot.filter(l=>!l.email&&l.episode&&!(l.emailChecked&&Date.now()-l.emailChecked<14*DAY)).length;
  const needClip=full?0:hot.filter(l=>l.email&&!l.clipFile&&!l.clipLink&&!l.clipFail&&ytLeads(l)).length;
@@ -336,6 +360,7 @@ async function autopilotRun(){
   const w0=apWork();apLog(`Work to do: ${w0.needEmail} to find an email for, ${w0.needClip} to make clips for, ${w0.needDraft} to write.`);
   const cap=+g.apMax||25,slots=Math.max(0,cap-apQueue());if(!slots)apLog(`The queue is full: ${apQueue()} emails are ready (one day's worth). Approve and drip-send some, then I will refill it.`);
   if(w0.needEmail&&slots)await step('1/4  Finding emails (3 at a time)',()=>findEmails(Math.min(Math.max(batch,15),slots*2+5)));
+  if(g.apFit!==0&&S.leads.some(l=>l.status=='New'&&isHot(l)&&l.email&&!l.fit))await step('Checking each lead is a good fit (Google AI)',async()=>{const r=await fitBatch(12,apLog);if(r.removed)apLog(`  ${r.removed} removed as a bad fit.`)});
   if(clipperOn&&slots&&apWork().needClip)await step('2/4  Making clips (up to 3 each) and topic lines',()=>prepareClips(Math.min(batch,slots),true,true));
   const ready=S.leads.filter(l=>isEmailReady(l)&&(mode!='drafts'||!l.draftedAt)).length;
   if(ready)await step(`3/4  ${ready} lead(s) ready. ${mode=='send'?'Sending':'Saving as drafts'}`,()=>sendEmails(mode,0,true));
@@ -443,7 +468,7 @@ function leads(){const q=(leads.q||'').toLowerCase(),f=leads.f||'';
  const rows=S.leads.filter(l=>(f?l.status==f:l.status!='Removed')&&(!q||(l.name+l.niche).toLowerCase().includes(q)));
  $('#main').innerHTML=`<div class="row"><input id="q" placeholder="Search" value="${esc(leads.q||'')}"><select id="f"><option value="">All statuses</option>${STATUSES.map(s=>`<option ${s==f?'selected':''}>${s}</option>`).join('')}</select><span class=mut>${rows.length} leads</span><button class="b" id="cl">Remove no-contact leads</button><button class="b p" id="fi">Find missing Instagrams</button><button class="b p" id="fe">Fill episodes + Shorts %</button><button class="b" id="rs2">Remove Shorts-heavy leads</button><button class="b" id="rv">Remove low-view leads</button><button class="b" id="ms">Match existing samples</button><button class="b" id="ri">Remove leads without Instagram</button></div>
  <div class="card tw"><table><tr><th>Podcast</th><th>Niche</th><th>Subs</th><th>Contact</th><th>Status</th><th>Sent / Follow-up</th><th>Notes</th></tr>
- ${rows.slice(0,300).map(l=>`<tr><td><span class="grip" draggable="true" data-grip="${l.id}" title="Drag onto the Today tab to use this lead next">⠿</span> <a target=_blank rel=noopener href="${esc(l.url)}">${esc(l.name)}</a> <button class="b" data-ed="${l.id}" title="Edit everything">✎</button> <button class="b" data-pin="${l.id}" title="Put this lead at the top of Today, ready to use next (also brings back a sent, skipped or removed lead)">▶ Today</button></td><td>${esc(l.niche)}${l.episode?` <a target=_blank rel=noopener href="${esc(l.episode)}">▶</a>`:''}${l.sampleSlug?` <span title="Sample template: ${esc(l.sampleName||'')}\n${esc(l.sampleDir||'')}">🎬</span>`:''} <button class="b" data-ede="${l.id}" title="Edit episode">✎</button></td><td>${(l.subs||0).toLocaleString()}${l.shortsPct!=null?`<br><span class=mut>${l.shortsPct}% Shorts</span>`:''}${l.medianViews!=null?`<br><span class=mut>~${l.medianViews.toLocaleString()} views</span>`:''}${(l.payTags||[]).length?`<br><span class=mut title="Signs they may be able to pay">💰 ${esc(l.payTags.join(', '))}</span>`:''}<br><span class=mut title="Motivation score: posts often and steadily (no long gaps), recent, audience, ways to pay, social presence, new but invested">🔥 ${leadScore(l)}${canAfford(l)?'':' · no money signs yet'}</span></td>
+ ${rows.slice(0,300).map(l=>`<tr><td><span class="grip" draggable="true" data-grip="${l.id}" title="Drag onto the Today tab to use this lead next">⠿</span> <a target=_blank rel=noopener href="${esc(l.url)}">${esc(l.name)}</a> <button class="b" data-ed="${l.id}" title="Edit everything">✎</button> <button class="b" data-pin="${l.id}" title="Put this lead at the top of Today, ready to use next (also brings back a sent, skipped or removed lead)">▶ Today</button></td><td>${esc(l.niche)}${l.episode?` <a target=_blank rel=noopener href="${esc(l.episode)}">▶</a>`:''}${l.sampleSlug?` <span title="Sample template: ${esc(l.sampleName||'')}\n${esc(l.sampleDir||'')}">🎬</span>`:''} <button class="b" data-ede="${l.id}" title="Edit episode">✎</button></td><td>${(l.subs||0).toLocaleString()}${l.shortsPct!=null?`<br><span class=mut>${l.shortsPct}% Shorts</span>`:''}${l.medianViews!=null?`<br><span class=mut>~${l.medianViews.toLocaleString()} views</span>`:''}${(l.payTags||[]).length?`<br><span class=mut title="Signs they may be able to pay">💰 ${esc(l.payTags.join(', '))}</span>`:''}<br><span class=mut title="Motivation score: posts often and steadily (no long gaps), recent, audience, ways to pay, social presence, new but invested">🔥 ${leadScore(l)}${canAfford(l)?'':' · no money signs yet'}</span>${l.fit?`<br><span class=mut title="${esc((l.fit.reasons||[]).join('; '))}">${l.fit.big||l.fit.decider==='corporate'?'⚠ big company':'✓ '+esc(l.fit.decider)+' led'}</span>`:''}</td>
  <td>${[l.email&&`<a href="mailto:${esc(l.email)}" title="${esc(l.email)}">✉</a>`,l.ig&&`<a target=_blank rel=noopener href="${esc(l.ig)}">IG</a>`,l.x&&`<a target=_blank rel=noopener href="${esc(l.x)}">X</a>`,l.tt&&`<a target=_blank rel=noopener href="${esc(l.tt)}">TT</a>`,l.web&&`<a target=_blank rel=noopener href="${esc(l.web)}">Link</a>`].filter(Boolean).join(' · ')||'<span class=mut>none</span>'} <button class="b" data-edc="${l.id}" title="Edit contact">✎</button></td>
  <td><select data-st="${l.id}">${STATUSES.map(s=>`<option ${s==l.status?'selected':''}>${s}</option>`).join('')}</select></td><td>${l.sent||''}<br><span class=mut>${l.follow||''}</span></td>
  <td><input data-nt="${l.id}" value="${esc(l.notes||'')}"></td></tr>`).join('')}</table></div>${rows.length>300?'<p class=mut>Showing first 300 — use search/filter.</p>':''}`;
@@ -498,10 +523,13 @@ function leadScore(l){let s=0;if(l.gapDays!=null){if(l.gapDays<=8)s+=2;else if(l
  if((l.payTags||[]).includes('high ticket'))s+=1;
  if(l.shortsPct!=null&&l.shortsPct<=15&&(l.medDurMin||0)>=20)s+=1;
  if((l.payTags||[]).includes('risky pitch'))s-=4;
+ if((l.payTags||[]).includes('big company'))s-=4;
  return s}
-const canAfford=l=>!(l.payTags||[]).includes('risky pitch')&&(l.payTags||[]).filter(t=>t!=='website'&&t!=='community'&&t!=='risky pitch').length>=(+S.settings.payMin||1);
-const isHot=l=>l.pin||!S.settings.onlyHot||(leadScore(l)>=(+S.settings.hotScore||6)&&canAfford(l)&&(l.shortsPct==null||(+S.settings.maxShorts||100)>=100||l.shortsPct<=+S.settings.maxShorts)&&(!l.last||(Date.now()-new Date(l.last))/864e5<=(+S.settings.maxDays||9999)));
+const canAfford=l=>!(l.payTags||[]).includes('risky pitch')&&(l.payTags||[]).filter(t=>t!=='website'&&t!=='community'&&t!=='risky pitch'&&t!=='big company').length>=(+S.settings.payMin||1);
+const fitOk=l=>!l.fit||!(l.fit.conf>=0.6&&(l.fit.big||l.fit.decider==='corporate'||l.fit.afford==='no'));
+const isHot=l=>l.pin||!S.settings.onlyHot||(leadScore(l)>=(+S.settings.hotScore||6)&&canAfford(l)&&fitOk(l)&&(l.shortsPct==null||(+S.settings.maxShorts||100)>=100||l.shortsPct<=+S.settings.maxShorts)&&(!l.last||(Date.now()-new Date(l.last))/864e5<=(+S.settings.maxDays||9999)));
 function mergePay(tags,sponsoredN){const t=[...(tags||[])];if((sponsoredN||0)>=2&&!t.includes('sponsor reads'))t.push('sponsor reads');return{tags:t,score:t.length}}
+const BIG_RX=/franchis|worldwide|globally|international|network of|media (group|company)|corporation|\bholdings?\b|publicly traded|nasdaq|nyse|fortune 500|a division of|subsidiary|part of the .{2,40}(network|family)|\boffices? in\b|\b\d{2,}\+? (offices|locations|countries|franchises|employees)\b|iheart|wondery|audioboom|spotify studios|\bnpr\b|cumulus|siriusxm/i;
 function payHint(desc,web){const t=String(desc||''),tags=[];
  if(/sponsor|advertis|brand deal|partner with (us|me)/i.test(t))tags.push('sponsors');
  if(/we.?re hiring|join our team|careers|open roles/i.test(t))tags.push('hiring');
@@ -513,6 +541,7 @@ function payHint(desc,web){const t=String(desc||''),tags=[];
  if(/merch|\bshop\b|\bstore\b|supplement|my (brand|products?|line)|dropship|ecom|shopify|amazon fba|whop|use code|affiliate|our products/i.test(t))tags.push('sells products');
  if(/patreon|discord|membership|join (my|our) (community|discord)|channel members/i.test(t))tags.push('community');
  if(/guaranteed (profit|income|returns)|\bsignals\b|pump|get rich|forex|financial freedom in|100% win/i.test(t))tags.push('risky pitch');
+ if(BIG_RX.test(t))tags.push('big company');
  if(web)tags.push('website');
  return{score:tags.length,tags}}
 function seenKeys(){const ig=new Set(),nm=new Set();for(const l of S.leads){if(l.ig)ig.add(String(l.ig).replace(/\/$/,'').split('/').pop().toLowerCase());if(l.name)nm.add(String(l.name).trim().toLowerCase())}return{ig,nm}}
