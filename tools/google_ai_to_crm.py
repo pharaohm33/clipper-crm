@@ -54,8 +54,47 @@ def build_prompt(niche, count, focus=""):
             "For each one give the show name, the YouTube channel link, a recent full length episode title with its direct YouTube watch link, the host's Instagram handle, and their website. Format it as a table.")
 
 
+def _pause(a=0.8, b=2.2):
+    time.sleep(random.uniform(a, b))
+
+
+def open_ai_mode(page, prompt):
+    """Gets to AI Mode the way a person does: open google.com, press the AI Mode button, type the question, press Enter.
+    Jumping straight to the AI Mode address with the question in it is what tends to trigger the 'are you a robot' page.
+    Returns True when the question was submitted this way, False when it fell back to the direct address."""
+    try:
+        page.goto("https://www.google.com/", wait_until="domcontentloaded")
+        _pause(1.5, 3)
+        for label in ("Reject all", "Accept all", "I agree"):  # cookie box in some regions: pick the least tracking option first
+            b = page.get_by_role("button", name=label)
+            if b.count():
+                b.first.click()
+                _pause()
+                break
+        btn = page.get_by_role("button", name=re.compile(r"^AI Mode$", re.I))
+        if not btn.count():
+            btn = page.get_by_role("link", name=re.compile(r"^AI Mode$", re.I))
+        if not btn.count():
+            btn = page.locator("a[href*='udm=50'], [aria-label*='AI Mode' i]")
+        if not btn.count():
+            raise RuntimeError("no AI Mode button on the page")
+        btn.first.click()
+        _pause(1.5, 3)
+        box = page.locator("textarea:visible, input[type=text]:visible, [contenteditable=true]:visible").first
+        box.click()
+        _pause(0.4, 1.0)
+        page.keyboard.type(prompt, delay=random.randint(6, 18))
+        _pause(0.6, 1.4)
+        page.keyboard.press("Enter")
+        return True
+    except Exception as e:
+        print(f"  (could not use the AI Mode button: {str(e)[:80]}; opening it directly)")
+        page.goto("https://www.google.com/search?udm=50&q=" + quote(prompt), wait_until="domcontentloaded")
+        return False
+
+
 def ask_google_ai(page, prompt, timeout=120):
-    page.goto("https://www.google.com/search?udm=50&q=" + quote(prompt), wait_until="domcontentloaded")
+    open_ai_mode(page, prompt)
     start, last_text, stable_since = time.time(), "", time.time()
     while time.time() - start < timeout:
         time.sleep(2)
