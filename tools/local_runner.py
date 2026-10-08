@@ -721,6 +721,10 @@ class H(BaseHTTPRequestHandler):
             if "on" in body:
                 return self._send(200, awake_set(bool(body.get("on")), body.get("minutes") or 180))
             return self._send(200, awake_status())
+        if self.path == "/email/sent":
+            cutoff = time.time() - 30 * 86400
+            rows = [{k: e.get(k) for k in ("id", "to", "from", "ts", "step", "subject", "variant", "provider")} for e in cold_email.sent_entries() if e.get("ts", 0) > cutoff]
+            return self._send(200, {"sent": rows})
         if self.path == "/notify":
             title = clean(body.get("title") or "Clipper CRM", 60)
             msg = clean(body.get("message") or "", 160)
