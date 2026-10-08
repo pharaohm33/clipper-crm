@@ -171,7 +171,8 @@ def sent_today(acct, log):
 
 
 def capacity(cfg, log):
-    return [{"email": a["email"], "sent_today": sent_today(a, log), "cap": warm_cap(a, cfg, log)} for a in cfg.get("accounts", [])]
+    return [{"email": a["email"], "sent_today": sent_today(a, log), "cap": 0 if a.get("paused") else warm_cap(a, cfg, log), "paused": bool(a.get("paused"))}
+            for a in cfg.get("accounts", [])]
 
 
 def pick_account(cfg, log, used=None):
@@ -179,6 +180,8 @@ def pick_account(cfg, log, used=None):
     used = used or {}
     best, room = None, 0
     for a in cfg.get("accounts", []):
+        if a.get("paused"):
+            continue  # a paused inbox is kept for later but never picked for a send
         left = warm_cap(a, cfg, log) - sent_today(a, log) - used.get(a["email"], 0)
         if left > room:
             best, room = a, left

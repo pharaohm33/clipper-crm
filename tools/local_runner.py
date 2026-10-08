@@ -118,6 +118,7 @@ def app_call(path, payload=None, timeout=5):
 AWAKE = {"proc": None, "until": 0}
 
 
+RISKY_TLDS = {"online", "site", "space", "store", "world", "xyz", "top", "click", "club", "shop", "icu", "buzz", "monster", "cyou", "sbs", "quest", "rest", "fun", "work", "win", "bid", "vip", "live", "website", "tech", "cfd"}
 PHONE_LAST = {}
 REMOTE_HINT = os.getenv("PHONE_REMOTE_HINT", "To fix it from your phone: open RVNC Viewer, connect to your Mac (emmanuels-macbook-air.taile1d9f0.ts.net or its Tailscale address), find the Chrome window and complete the check there.")
 
@@ -518,6 +519,9 @@ def email_status():
     rt = (cfg.get("reply_to") or "").lower()
     if rt and rt.split("@")[-1] in ("gmail.com","googlemail.com","yahoo.com","outlook.com","hotmail.com","live.com","icloud.com","aol.com","proton.me","protonmail.com"):
         warnings.append(f"Replies go to a free address ({rt}). Spam filters penalize a Gmail/Yahoo Reply-To on a different From domain (mail-tester: -2.5). Before real outreach, set Reply-To to a mailbox on a domain you own (python3 tools/setup_email.py, option 4).")
+    risky = sorted({a["email"].split("@")[1].rsplit(".", 1)[-1] for a in cfg.get("accounts", [])} & RISKY_TLDS)
+    if risky:
+        warnings.append("Some sending domains end in " + ", ".join("." + t for t in risky) + ". Spam filters distrust these endings (mail-tester scored them 6 out of 10, about 3.5 points lost to the ending alone). A .com ending avoids that. Authentication and the email text are fine.")
     if not (cfg.get("phone") or "").strip():
         warnings.append("Add your phone number (python3 tools/setup_email.py, option 3). Automatic replies to people who say yes need it, and nothing is written without it.")
     caps = cold_email.capacity(cfg, log_)

@@ -176,6 +176,9 @@ def main():
     rt = (cfg.get("reply_to") or "").lower()
     if rt and rt.split("@")[-1] in ("gmail.com","googlemail.com","yahoo.com","outlook.com","hotmail.com","live.com","icloud.com","aol.com","proton.me","protonmail.com"):
         print(WARN + f"Reply-To is a free address ({rt}). Before real outreach, switch it to a mailbox on a domain you own (setup_email.py option 4): a Gmail Reply-To costs about 2.5 spam points.")
+    risky = sorted({a["email"].split("@")[1].rsplit(".", 1)[-1].lower() for a in accounts} & {"online", "site", "space", "store", "world", "xyz", "top", "click", "club", "shop", "icu", "buzz", "monster", "cyou", "sbs", "quest", "rest", "fun", "work", "win", "bid", "vip", "live", "website", "tech", "cfd"})
+    if risky:
+        print(WARN + "Domain endings spam filters distrust: " + ", ".join("." + t for t in risky) + ". mail-tester scored these 6/10 (about 3.5 points lost to the ending alone). A .com ending avoids it.")
     domains = [a["email"].split("@")[1].lower() for a in accounts]
     if len(accounts) > 1 and len(set(domains)) == 1:
         print(WARN + "all inboxes share one domain. Spreading them over 2 or 3 domains protects you if one domain gets a bad reputation.")
