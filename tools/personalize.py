@@ -56,7 +56,12 @@ def clean(text):
     t = re.sub(r"\s+", " ", (text or "").strip().strip("\"'`“”")).rstrip(".,;:")
     t = re.sub(r"\s*[—–]\s*", ", ", t).replace("-", " ").replace("!", ".")
     t = re.sub(r"[{}|]", "", t)
-    return re.sub(r"\s+", " ", t).strip()[:160]
+    t = re.sub(r"\s+", " ", t).strip()
+    if len(t) > 150:  # never cut in the middle of a word or end on a joining word
+        t = t[:150].rsplit(" ", 1)[0]
+        while t.split() and t.split()[-1].lower() in ("and", "of", "to", "the", "for", "with", "in", "a", "an", "that", "how", "what", "why", "your", "you"):
+            t = t.rsplit(" ", 1)[0]
+    return t
 
 
 def write_line(podcast, episode_title, clip_title, hook, transcript, timeout=60):
