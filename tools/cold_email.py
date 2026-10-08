@@ -245,6 +245,7 @@ def _phrases(lead, seed, n_links):
     name = short_name(lead.get("name"))
     n = int(lead.get("clipCount") or 0) or n_links or 1
     show = (pick("show", [f"a new episode of {name}", f"a recent episode of {name}", f"an episode of {name}"]) if SHOWLIKE.search(name)
+            else pick("show", [f"{name} on YouTube", f"the {name[4:]} channel on YouTube", f"some of the {name[4:]} videos on YouTube"]) if name.lower().startswith("the ")
             else pick("show", [f"your {name} videos on YouTube", f"your {name} channel on YouTube", f"a few of your {name} videos on YouTube"]))
     if n >= 3:
         clips = pick("clips", ["three short video clips", "a few short video clips"]) if n == 3 else "a few short video clips"
