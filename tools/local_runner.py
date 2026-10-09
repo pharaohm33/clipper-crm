@@ -778,15 +778,39 @@ class H(BaseHTTPRequestHandler):
         self._send(200, {"ok": True})
 
 
+CLIPPER_DIR = Path(os.getenv("CLIPPER_REPO") or Path.home() / "instagram-video-generator")
+CLIPPER_LOG = Path.home() / "Library" / "Logs" / "clipper" / "app.log"
+
+
+def start_clipper_app():
+    """Starts the clipper web app (python3 app.py) in its own session, so it keeps running if this helper stops. Returns True if started."""
+    try:
+        CLIPPER_LOG.parent.mkdir(parents=True, exist_ok=True)
+        log = open(CLIPPER_LOG, "a")
+        subprocess.Popen([sys.executable, "app.py"], cwd=str(CLIPPER_DIR), stdout=log, stderr=log, start_new_session=True)
+        return True
+    except Exception:
+        return False
+
+
 def keep_clipper_awake():
-    """The clipper app shuts itself down after an hour with no open page. While this helper is running (and the app is up),
-    ping it every 30 seconds so unattended runs are not cut off. Set KEEP_CLIPPER_ALIVE=0 to turn this off."""
+    """Keeps the clipper app alive and running while this helper runs:
+    - pings it every 30 seconds so its idle watchdog never shuts it down;
+    - if it stops answering for about 90 seconds (it was killed, for example by macOS under memory pressure), starts it again and sends a phone alert.
+    Set KEEP_CLIPPER_ALIVE=0 to turn all of this off, or AUTO_RESTART_CLIPPER=0 to only ping."""
+    misses, last_restart = 0, 0
     while True:
-        time.sleep(30)
         try:
             urllib.request.urlopen(urllib.request.Request(APP_URL + "/api/heartbeat", data=b"{}", headers={"Content-Type": "application/json"}), timeout=5).read()
+            misses = 0
         except Exception:
-            pass
+            misses += 1
+            if misses >= 3 and os.getenv("AUTO_RESTART_CLIPPER", "1") != "0" and time.time() - last_restart > 300:
+                last_restart = time.time()
+                ok = start_clipper_app()
+                phone_notify("Clipper app restarted" if ok else "Clipper app is down", "The clipper app stopped" + (", so I started it again." if ok else " and I could not restart it. Start it in Terminal: cd ~/instagram-video-generator && python3 app.py"), key="clipper-restart", every=1800)
+                misses = 0
+        time.sleep(30)
 
 
 if __name__ == "__main__":
