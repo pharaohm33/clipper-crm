@@ -249,7 +249,7 @@ async function helperJob(path,body,onLine){
  if(r.error){ES.busy=false;ES.msg=r.error;emailDyn();return false}
  let since=0,go=true;while(go){await new Promise(x=>setTimeout(x,1000));
   try{const j=await (await fetch(RUNNER+'/log?since='+since)).json();since=j.next;j.lines.forEach(t=>{ES.lines.push(t);onLine&&onLine(t)});go=j.running;save();emailDyn();if(tab=='today')todayV()}catch(e){ES.msg='Lost contact with the helper.';go=false}}
- ES.busy=false;save();emailDyn();if(tab=='today')todayV();return true}
+ ES.busy=false;save();emailDyn();if(tab=='today')todayV();if(path==='/email/run'){ST_T=0;refreshStatusSoon()}return true}
 const parseTag=(t,tag)=>t.startsWith(tag+' ')?JSON.parse(t.slice(tag.length+1)):null;
 function findEmails(n){const now=Date.now();
  const todo=S.leads.filter(l=>l.status=='New'&&isHot(l)&&!l.email&&l.name&&!(l.emailChecked&&now-l.emailChecked<14*DAY)).slice(0,n).map(l=>({id:l.id,name:l.name,url:l.url,web:l.web,episode:l.episode}));
@@ -270,8 +270,10 @@ async function previewEmails(){ES.msg='';const leads=S.leads.filter(isEmailReady
  if(!leads.length){ES.preview=null;ES.msg='Nothing is ready to email yet (a lead needs an email AND a prepared clip).';return emailDyn()}
  try{const r=await (await fetch(RUNNER+'/email/preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({leads,template:tpl(),limit:leads.length})})).json();ES.preview=r.items;ES.status=r.status}
  catch(e){ES.msg='Helper not running. In Terminal: cd ~/clipper-crm && python3 tools/local_runner.py'}emailDyn()}
+let ST_T=0;
+const refreshStatusSoon=()=>{if(Date.now()-ST_T<8000)return;ST_T=Date.now();loadEmailStatus();if(typeof loadEmailStats==='function')loadEmailStats()};
 function applyEmailResult(r){const l=S.leads.find(x=>x.id==r.id);if(!l)return;
- if(r.status=='sent'){if((r.step||0)==0){markSent(l);l.firstEmailedAt=Date.now()}l.emailedAt=Date.now();l.emailStep=r.step||0;l.emailSubject=l.emailSubject||r.subject;l.emailFrom=r.from;l.via='email'}
+ if(r.status=='sent'){refreshStatusSoon();if((r.step||0)==0){markSent(l);l.firstEmailedAt=Date.now()}l.emailedAt=Date.now();l.emailStep=r.step||0;l.emailSubject=l.emailSubject||r.subject;l.emailFrom=r.from;l.via='email'}
  else if(r.status=='drafted'){l.draftedAt=Date.now();delete l.msSkip}
  else if(r.status=='skip'&&/Microsoft/i.test(r.why||''))l.msSkip=Date.now()}
 const msSkipped=l=>!!l.msSkip&&S.settings.emailSkipMS!==false;
