@@ -512,7 +512,7 @@ def run_maps(items):
         STATE["running"] = False
 
 
-def run_find_phones(leads, use_ai=True):
+def run_find_phones(leads, use_ai=True, template=None):
     """Phone numbers, in three steps: their website (fast), a real Chrome visit, then Google AI for the leads that still have none.
     One 'PHONE {json}' line per lead that got a number, 'PHONENONE {json}' for the rest."""
     from concurrent.futures import ThreadPoolExecutor
@@ -541,7 +541,7 @@ def run_find_phones(leads, use_ai=True):
         if missing and use_ai and os.getenv("PHONE_AI", "1") != "0" and not PIPE["stop"]:
             import tempfile
             f = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8")
-            json.dump([{k: str(l.get(k) or "")[:300] for k in ("id", "name", "url", "web", "owner", "business")} for l in missing], f)
+            json.dump({"template": template, "leads": [{k: str(l.get(k) or "")[:300] for k in ("id", "name", "url", "web", "owner", "business")} for l in missing]}, f)
             f.close()
             log(f"[runner] asking Google AI about {len(missing)} lead(s) with no number yet")
             proc = subprocess.Popen([sys.executable, "-u", str(HERE / "phone_ai.py"), f.name], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=str(HERE),
@@ -808,7 +808,7 @@ class H(BaseHTTPRequestHandler):
                     return self._send(409, {"error": "a run is already in progress"})
                 STATE.update(running=True, log=[f"[runner] looking for public phone numbers for {len(leads)} lead(s)"])
                 PIPE["stop"] = False
-                threading.Thread(target=run_find_phones, args=(leads, bool(body.get("ai", True))), daemon=True).start()
+                threading.Thread(target=run_find_phones, args=(leads, bool(body.get("ai", True)), str(body.get("prompt") or "")[:3000] or None), daemon=True).start()
             return self._send(200, {"ok": True, "leads": len(leads)})
         if self.path == "/maps/resolve":
             items = [{k: str(b.get(k) or "")[:300] for k in ("id", "business", "web", "address", "category")} for b in (body.get("items") or [])][:30]
@@ -829,6 +829,10 @@ class H(BaseHTTPRequestHandler):
         if self.path == "/email/validate":
             import email_check
             return self._send(200, {"results": {k: email_check.classify(v) for k, v in (body.get("emails") or {}).items()}})
+        if self.path == "/email/thread":
+            addr = str(body.get("email") or "").strip().lower()
+            rows = [{k: e.get(k) for k in ("ts", "from", "subject", "body", "step", "status")} for e in cold_email.read_log() if str(e.get("to") or "").lower() == addr and e.get("status") in ("sent", "auto_replied")]
+            return self._send(200, {"sent": rows})
         if self.path == "/email/sent":
             cutoff = time.time() - 30 * 86400
             rows = [{k: e.get(k) for k in ("id", "to", "from", "ts", "step", "subject", "variant", "provider")} for e in cold_email.sent_entries() if e.get("ts", 0) > cutoff]

@@ -469,7 +469,22 @@ async function loadEmailStatus(){try{ES.status=await (await fetch(RUNNER+'/email
 
 /* ---------- Calls: public phone numbers, who to call, and what happened ---------- */
 const CALL_OUT={noanswer:'Called, no answer',vm:'Left voicemail',text:'Sent a text',spoke:'Spoke with them',int:'Interested',noint:'Not interested',wrong:'Wrong number',later:'Call back later',dnc:'Do not call'};
-const CS={busy:false,msg:'',open:null};
+const CS={busy:false,msg:'',open:null,mail:{}};
+const DEF_PHONE_PROMPT='Find the public business phone number for {who} ({where}). Only give a number you can actually see on an official page, such as their website, their Google business listing or their social profile. Do not guess and do not use people-search sites, and say unknown if you cannot find one.';
+const phonePrompt=()=>(S.settings.phonePrompt&&S.settings.phonePrompt.trim())||DEF_PHONE_PROMPT;
+async function callsMail(l){const m=CS.mail[l.id]={loading:true};callsV();
+ try{const[t,r]=await Promise.all([fetch(RUNNER+'/email/thread',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:l.email})}).then(x=>x.json()),
+  UB.replies.length?Promise.resolve({replies:UB.replies}):fetch(RUNNER+'/unibox/replies',{method:'POST',headers:{'Content-Type':'application/json'},body:'{"days":30}'}).then(x=>x.json())]);
+  if(!UB.replies.length&&r.replies)UB.replies=r.replies;
+  const em=String(l.email||'').toLowerCase();CS.mail[l.id]={sent:t.sent||[],replies:(r.replies||[]).filter(x=>String(x.from||'').toLowerCase().includes(em)),drafts:UB.drafts.filter(x=>String(x.to||'').toLowerCase()==em)}}
+ catch(e){CS.mail[l.id]={err:'Helper not running, so the emails cannot be read right now.'}}
+ if(tab=='calls')callsV()}
+function mailPanel(l){const m=CS.mail[l.id];if(!l.email)return '<div class="mut">No email address on this lead.</div>';if(!m)return '';if(m.loading)return '<div class="mut">Loading the emails…</div>';if(m.err)return `<div class="mut">${esc(m.err)}</div>`;
+ const fmt=t=>new Date(t*1000).toLocaleString([],{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}),box=(h2,b)=>`<div style="border:1px solid var(--bd,#444);border-radius:6px;padding:6px;margin:4px 0"><b>${h2}</b><div class="mut" style="white-space:pre-wrap">${esc(b||'')}</div></div>`;
+ const out=[];(m.sent||[]).forEach(e=>out.push([e.ts,box(`Sent ${fmt(e.ts)} · ${esc(e.subject||'')} <span class=mut>(from ${esc(e.from||'')})</span>`,e.body||'(body was not saved for this older send, open it in the Unibox)')]));
+ (m.replies||[]).forEach(e=>out.push([Date.parse(e.date)/1000||0,box(`Reply ${esc(e.date||'')} · ${esc(e.subject||'')}`,e.text)]));
+ (m.drafts||[]).forEach(e=>out.push([9e9,box(`Draft (not sent yet) · ${esc(e.subject||'')}`,e.body)]));
+ out.sort((a,b)=>a[0]-b[0]);return (out.length?out.map(x=>x[1]).join(''):'<div class="mut">No emails found for this address yet.</div>')}
 const digits10=p=>String(p||'').replace(/\D/g,'').slice(-10);
 const callable=l=>l.phone&&!l.dnc&&!['Client','Not Interested','Removed'].includes(l.status)&&l.callStatus!=='wrong';
 function callRank(l){if(['Replied','Interested'].includes(l.status))return 0;if(l.emailedAt&&l.status=='Sample Sent'&&Date.now()-l.emailedAt>=3*DAY)return 1;if(l.emailedAt)return 2;return isHot(l)?3:4}
@@ -483,9 +498,9 @@ function callsToday(){const t0=new Date().setHours(0,0,0,0);let n=0,vm=0,tx=0,sp
 const needsPhone=l=>!l.phone&&!l.dnc&&l.name&&['New','Sample Sent'].includes(l.status)&&isHot(l)&&!l.clipFail&&!(l.phoneChecked&&Date.now()-l.phoneChecked<14*DAY);
 const callReady=()=>S.leads.filter(l=>callable(l)&&(isHot(l)||l.emailedAt||l.source=='maps')).length;
 function findPhones(n){const now=Date.now();
- const todo=S.leads.filter(l=>!['Removed','Not Interested','Client'].includes(l.status)&&!l.dnc&&!l.phone&&l.name&&!(l.phoneChecked&&now-l.phoneChecked<14*DAY)&&(isHot(l)||l.emailedAt)).sort((a,b)=>callRank(a)-callRank(b)).slice(0,n).map(l=>({id:l.id,name:l.name,url:l.url,web:l.web,episode:l.episode}));
+ const todo=S.leads.filter(l=>!['Removed','Not Interested','Client'].includes(l.status)&&!l.dnc&&!l.phone&&l.name&&!(l.phoneChecked&&now-l.phoneChecked<14*DAY)&&(isHot(l)||l.emailedAt)).sort((a,b)=>callRank(a)-callRank(b)).slice(0,n).map(l=>({id:l.id,name:l.name,url:l.url,web:l.web,episode:l.episode,owner:l.owner||'',business:l.business||''}));
  if(!todo.length){CS.msg='Every lead worth calling already has a number, or was checked in the last 14 days.';if(tab=='calls')callsV();return Promise.resolve()}
- return helperJob('/phones/find',{leads:todo,ai:true},t=>{let r;
+ return helperJob('/phones/find',{leads:todo,ai:true,prompt:phonePrompt()},t=>{let r;
   if(r=parseTag(t,'PHONE')){const l=S.leads.find(x=>x.id==r.id);if(l){l.phone=r.phone;l.phones=r.others||[];l.phoneSource=r.source;l.phoneHow=r.how;l.phoneKind=r.kind;l.phoneChecked=Date.now();if(tab=='calls')callsV()}}
   else if(r=parseTag(t,'PHONENONE')){const l=S.leads.find(x=>x.id==r.id);if(l)l.phoneChecked=Date.now()}})}
 
@@ -511,7 +526,8 @@ function callsV(){const L=S.leads.filter(callable).sort((a,b)=>callRank(a)-callR
   <div><a class="b p" href="tel:+1${digits10(l.phone)}">${esc(l.phone)}</a> <button class="b" data-cp="${esc(l.phone)}">Copy</button></div></div>
   <div class="mut" style="margin-top:4px">${esc(l.phoneSource||'typed in')}${l.phoneKind&&l.phoneKind!=='direct or main line'?' · '+esc(l.phoneKind)+' (usually a company line)':''}${cls?' · found by Google AI, confirm the name when someone answers':''}${last?` · last: ${CALL_OUT[last.o]} ${new Date(last.t).toLocaleDateString([],{month:'short',day:'numeric'})}`:''}${(l.callLog||[]).length?` (${l.callLog.length} call${l.callLog.length==1?'':'s'})`:''}</div>
   <div class="row" style="margin-top:8px">${['noanswer','vm','text','spoke','int','later','noint','wrong','dnc'].map(o=>`<button class="b${o==='int'?' p':''}" data-co="${esc(l.id)}|${o}">${CALL_OUT[o]}</button>`).join('')}</div>
-  <div style="margin-top:6px"><button class="b" data-sc2="${esc(l.id)}">${open?'Hide':'Show'} scripts and call log</button></div>
+  <div style="margin-top:6px"><button class="b" data-mail="${esc(l.id)}">📧 Emails and replies</button> <button class="b" data-ubox="${esc(l.id)}">Open in Unibox</button> <button class="b" data-sc2="${esc(l.id)}">${open?'Hide':'Show'} scripts and call log</button></div>
+  ${CS.mail[l.id]?`<div style="margin-top:6px">${mailPanel(l)}</div>`:''}
   ${open?`<div style="margin-top:6px"><b>Say</b><div class="mut" style="white-space:pre-wrap">${esc(callScript('callOpener',l))}</div><b>Voicemail</b><div class="mut" style="white-space:pre-wrap">${esc(callScript('callVoicemail',l))}</div><b>Text</b> <button class="b" data-cp="${esc(callScript('callText',l))}">Copy text</button><div class="mut" style="white-space:pre-wrap">${esc(callScript('callText',l))}</div>
    ${(l.callLog||[]).length?`<b>Log</b><div class="mut">${l.callLog.slice().reverse().map(c=>new Date(c.t).toLocaleString([],{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})+' · '+CALL_OUT[c.o]).join('<br>')}</div>`:''}
    ${(l.phones||[]).length?`<div class="mut">Other numbers seen: ${l.phones.map(esc).join(', ')}</div>`:''}</div>`:''}</div>`};
@@ -524,6 +540,7 @@ function callsV(){const L=S.leads.filter(callable).sort((a,b)=>callRank(a)-callR
   <div class="row"><input id="ph-add" placeholder="Add a number: lead name, then number" style="flex:1"><button class="b" id="ph-add-b">Add</button></div></div>
   ${L.length?L.map(card).join(''):'<div class="card mut">No leads with a phone number yet. Press "Find phone numbers".</div>'}
   <div class="card"><b>Scripts</b><p class=mut>{name} {topic} {sender} {phone}</p>
+  <label>Google AI phone search prompt <span class=mut>(used when the website and Chrome visit find nothing). Fill-ins: {who} = the channel owner and the business they own, {owner} {business} {name} {where}. The JSON answer line is added for you if you leave it out.</span></label><textarea data-ck="phonePrompt" rows="5" placeholder="${esc(DEF_PHONE_PROMPT)}">${esc(g.phonePrompt||DEF_PHONE_PROMPT)}</textarea><div class="row"><button class="b" id="pp-reset">Reset to the default prompt</button></div>
   <label>Call opener</label><textarea data-ck="callOpener">${esc(g.callOpener)}</textarea><label>Voicemail</label><textarea data-ck="callVoicemail">${esc(g.callVoicemail)}</textarea><label>Text</label><textarea data-ck="callText">${esc(g.callText)}</textarea></div>`;
  if(!ES.status)loadEmailStatus();
  $('#fp').onclick=async()=>{CS.busy=true;CS.msg='Searching, this takes a few minutes…';callsV();await findPhones(20);CS.busy=false;CS.msg=ES.msg||'Done.';save();callsV()};
@@ -532,7 +549,10 @@ function callsV(){const L=S.leads.filter(callable).sort((a,b)=>callRank(a)-callR
  $('#ph-add-b').onclick=()=>{const v=$('#ph-add').value.trim(),m=v.match(/(.*?)[\s,:]*(\+?1?[\s.\-]?\(?\d{3}\)?[\s.\-]?\d{3}[\s.\-]?\d{4})\s*$/);if(!m||!m[1].trim())return alert('Type the lead name, then the number.');const q=m[1].toLowerCase().trim(),l=S.leads.find(x=>(x.name||'').toLowerCase().includes(q));if(!l)return alert('No lead matches "'+m[1]+'".');const d=digits10(m[2]);l.phone=`(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}`;l.phoneSource='typed in';l.phoneHow='';save();callsV()};
  $('#main').onclick=e=>{const d=e.target.dataset;if(d.cp){navigator.clipboard.writeText(d.cp).catch(()=>{});e.target.textContent='Copied'}
   else if(d.co){const[i,o]=d.co.split('|'),l=S.leads.find(x=>x.id==i);if(l){if(['dnc','noint'].includes(o)&&!confirm(`Mark ${l.name} as ${CALL_OUT[o]}? They will be removed from outreach.`))return;logCall(l,o);callsV()}}
+  else if(d.mail){const l=S.leads.find(x=>x.id==d.mail);if(CS.mail[l.id]&&!CS.mail[l.id].loading){delete CS.mail[l.id];callsV()}else callsMail(l)}
+  else if(d.ubox){const l=S.leads.find(x=>x.id==d.ubox),em=String(l.email||'').toLowerCase();tab='unibox';const hasReply=UB.replies.some(x=>String(x.from||'').toLowerCase().includes(em)),dr=UB.drafts.find(x=>String(x.to||'').toLowerCase()==em);UB.view=hasReply?'replies':'drafts';if(hasReply)UB.sel=UB.replies.find(x=>String(x.from||'').toLowerCase().includes(em)).mid;else if(dr)UB.sel=dr.mid;render();if(!UB.drafts.length&&!UB.replies.length)ubLoad()}
   else if(d.sc2){CS.open=CS.open==d.sc2?null:d.sc2;callsV()}};
+ const pr=$('#pp-reset');if(pr)pr.onclick=()=>{g.phonePrompt='';save();callsV()};
  $('#main').oninput=e=>{const k=e.target.dataset.ck;if(k){g[k]=e.target.value;save()}}}
 function emailDyn(){const el=document.getElementById('email-dyn');if(!el)return;const f=emailFunnel(),st=ES.status,dis=ES.busy?'disabled':'',canSend=st&&st.ready&&!ES.busy?'':'disabled';
  const bar=(k,v)=>`<div class="stat"><small>${k}</small><b>${v}</b></div>`;

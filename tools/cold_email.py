@@ -461,7 +461,7 @@ def run(leads, template, mode, limit=20, ignore_window=False, step=0, log_fn=pri
             append_log({"ts": time.time(), "id": item["id"], "to": item["to"], "from": item["from"], "status": "failed", "why": item["why"], "step": item["step"]})
             continue
         entry = {"ts": time.time(), "id": item["id"], "to": item["to"], "from": item["from"], "subject": item["subject"],
-                 "message_id": msg["Message-ID"], "status": status, "step": item["step"],
+                 "message_id": msg["Message-ID"], "status": status, "step": item["step"], "body": str(item.get("body") or "")[:4000],
                  "variant": item.get("variant"), "provider": item.get("provider")}
         append_log(entry)
         results.append({**item, "status": status, "message_id": msg["Message-ID"]})
