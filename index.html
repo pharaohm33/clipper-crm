@@ -359,8 +359,8 @@ const AP_NICHE_ORDER=['custom home builder','real estate developer','luxury home
 function nextNiches(n){const ran=S.nicheRun||{},fresh=k=>!(ran[k]&&Date.now()-ran[k]<20*3600e3);
  const all=[...AP_NICHE_ORDER.filter(k=>S.niches.includes(k)),...S.niches.filter(k=>!AP_NICHE_ORDER.includes(k))];
  return all.filter(fresh).slice(0,n)}
-async function aiDiscover(niches,log){window.__aiItems=[];const before=new Set(S.leads.map(l=>l.id));let warned=false;
- await helperJob('/run',{niches,focus:'',count:15,dry:false,emit:true},t=>{
+async function aiDiscover(niches,log,focus=''){window.__aiItems=[];const before=new Set(S.leads.map(l=>l.id));let warned=false;
+ await helperJob('/run',{niches,focus,count:15,dry:false,emit:true},t=>{
   if(t.startsWith('AIITEMS ')){try{window.__aiItems.push(JSON.parse(t.slice(8)))}catch(e){}}
   else if(/asking you to verify/i.test(t)&&!warned){warned=true;log('  Google wants a verification. Solve it in the Chrome window (I will wait up to 5 minutes).');try{fetch(RUNNER+'/notify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:'Google needs you',message:'Solve the verification in the Chrome window so the lead search can continue.'})})}catch(e){}}});
  S.nicheRun=S.nicheRun||{};niches.forEach(n=>{S.nicheRun[n]=Date.now()});
@@ -394,7 +394,7 @@ async function autopilotRun(){
   const w0=apWork();apLog(`Work to do: ${w0.needEmail} to find an email for, ${w0.needClip} to make clips for, ${w0.needDraft} to write, ${S.leads.filter(needsPhone).length} to find a phone number for.`);
   const cap=+g.apMax||25,slots=Math.max(0,cap-apQueue());if(!slots)apLog(`The queue is full: ${apQueue()} emails are ready (one day's worth). Approve and drip-send some, then I will refill it.`);
   let discovered=0,picks=[];
-  if(g.apDiscover!==0&&slots&&w0.needEmail+w0.needClip<3&&(AP.disc||0)<(+g.apDiscRounds||6)){picks=nextNiches(2);if(picks.length){AP.disc=(AP.disc||0)+1;await step(`Finding more leads with Google AI: ${picks.join(', ')}`,async()=>{discovered=await aiDiscover(picks,apLog)})}else apLog('Every niche was searched in the last 20 hours. Add niches or try again tomorrow.')}
+  if(g.apDiscover!==0&&slots&&w0.needEmail+w0.needClip<3&&(AP.disc||0)<(+g.apDiscRounds||6)){const cu=nextCustom(2);picks=[...cu.map(c=>c.q+(c.focus?' '+c.focus:'')),...nextNiches(Math.max(0,3-cu.length)).slice(0,2)];if(picks.length){AP.disc=(AP.disc||0)+1;await step(`Finding more leads with Google AI: ${picks.join(', ')}`,async()=>{discovered=0;for(const c of cu)discovered+=await discoverOne(c.q,c.focus,apLog);const nn=nextNiches(Math.max(0,3-cu.length)).slice(0,2);for(const q of nn)discovered+=await discoverOne(q,'',apLog)})}else apLog('Every niche was searched in the last 20 hours. Add niches or try again tomorrow.')}
   if((w0.needEmail||discovered)&&slots)await step('1/4  Finding emails (3 at a time)',()=>findEmails(Math.min(Math.max(batch,15),slots*2+5)));
   if(S.leads.some(l=>l.status=='New'&&l.email&&!l.emailVerified&&!l.emailedAt))await step('Checking each address is real before any content is made',()=>validateAddresses(apLog));
   if(g.apFit!==0&&S.leads.some(l=>l.status=='New'&&isHot(l)&&l.email&&!l.emailWeak&&!l.fit))await step('Checking each lead is a good fit (Google AI)',async()=>{const r=await fitBatch(12,apLog);if(r.removed)apLog(`  ${r.removed} removed as a bad fit.`)});
@@ -759,6 +759,28 @@ async function findInstagrams(list){let found=0;
   let arr;try{arr=jsonList(await geminiCall(prompt,true))}catch(e){if(/key|Gemini failed/i.test(e.message))throw e;continue}
   for(const a of arr){const l=grp[a.i];const h=(a.instagram_handle||'').replace(/^@/,'').replace(/[^A-Za-z0-9._]/g,'');if(l&&h){l.ig='https://instagram.com/'+h;l.notes=(l.notes?l.notes+' | ':'')+'IG from Gemini, verify';found++}}}
  save();return found}
+
+/* Custom Google AI searches: whatever the user types runs through the same filters, on its own or inside autopilot */
+const skey=(q,f)=>q+(f?' | '+f:'');
+const searchFresh=k=>!((S.nicheRun||{})[k]&&Date.now()-S.nicheRun[k]<20*3600e3);
+function nextCustom(n){return (S.customSearches||[]).filter(c=>c.on!==0&&searchFresh(skey(c.q,c.focus))).slice(0,n)}
+async function discoverOne(q,focus,log){const k=skey(q,focus),n=await aiDiscover([q],log,focus);S.nicheRun=S.nicheRun||{};S.nicheRun[k]=Date.now();
+ const st=(S.searchStats=S.searchStats||{})[k]=S.searchStats[k]||{runs:0,found:0};st.runs++;st.found+=n;st.lastFound=n;st.last=Date.now();save();return n}
+function searchRows(){const rows=[],ago=t=>{if(!t)return 'never';const m=Math.round((Date.now()-t)/6e4);return m<60?m+' min ago':m<2880?Math.round(m/60)+' h ago':Math.round(m/1440)+' days ago'};
+ const row=(label,k,tag)=>{const st=(S.searchStats||{})[k]||{},ran=(S.nicheRun||{})[k];return `<tr><td>${tag}</td><td>${esc(label)}</td><td>${ago(ran)}</td><td>${st.runs?`${st.lastFound} last time, ${st.found} in ${st.runs} run${st.runs==1?'':'s'}`:'-'}</td><td>${searchFresh(k)?'<b style="color:var(--acc)">ready</b>':'cooling down'}</td></tr>`};
+ (S.customSearches||[]).forEach(c=>rows.push(row(c.q+(c.focus?' · '+c.focus:'')+(c.on===0?' (off)':''),skey(c.q,c.focus),'custom')));
+ const all=[...AP_NICHE_ORDER.filter(k=>S.niches.includes(k)),...S.niches.filter(k=>!AP_NICHE_ORDER.includes(k))];all.forEach(n=>rows.push(row(n,n,'niche')));return rows.join('')}
+function customCard(){return `<div class="card" style="border-color:var(--acc)"><b>Custom Google AI searches</b> <span class=mut>Type any search, e.g. "podcasts hosted by luxury car dealers in Texas". Autopilot runs these first, then the niches below, through the same quality filters.</span>
+ <div class="row"><input id="cs-q" style="flex:2;min-width:220px" placeholder="What to search for, e.g. luxury car dealer podcasts"><input id="cs-f" style="flex:1;min-width:180px" placeholder="Optional angle, e.g. in Texas"><button class="b p" id="cs-add">Add</button></div>
+ ${(S.customSearches||[]).length?`<div class="row">${S.customSearches.map(c=>`<span style="display:inline-flex;gap:4px;align-items:center;border:1px solid var(--bd,#444);padding:2px 6px;border-radius:6px">${esc(c.q)}${c.focus?' · '+esc(c.focus):''}<button class="b" data-csrun="${esc(c.id)}">Run now</button><button class="b" data-cson="${esc(c.id)}">${c.on===0?'Turn on':'Turn off'}</button><button class="b" data-csdel="${esc(c.id)}">✕</button></span>`).join('')}</div>`:''}
+ <div class="mut" id="cs-msg" style="margin-top:4px"></div>
+ <b style="display:block;margin-top:8px">Everything the autopilot searches</b><div class="tw"><table><tr><th></th><th>Search</th><th>Last run</th><th>Leads kept</th><th>Now</th></tr>${searchRows()}</table></div></div>`}
+function customWire(){const msg=t=>{const e=document.getElementById('cs-msg');if(e)e.textContent=t};
+ const a=$('#cs-add');if(a)a.onclick=()=>{const q=$('#cs-q').value.trim();if(!q)return;(S.customSearches=S.customSearches||[]).push({id:'cs'+Date.now().toString(36),q,focus:$('#cs-f').value.trim(),on:1});save();find()};
+ document.querySelectorAll('[data-csdel]').forEach(b=>b.onclick=()=>{S.customSearches=S.customSearches.filter(c=>c.id!=b.dataset.csdel);save();find()});
+ document.querySelectorAll('[data-cson]').forEach(b=>b.onclick=()=>{const c=S.customSearches.find(x=>x.id==b.dataset.cson);c.on=c.on===0?1:0;save();find()});
+ document.querySelectorAll('[data-csrun]').forEach(b=>b.onclick=async()=>{const c=S.customSearches.find(x=>x.id==b.dataset.csrun);if(ES.busy)return msg('The helper is busy, try again in a moment.');msg('Asking Google AI, this takes a minute. If Google asks you to verify, solve it in the Chrome window.');
+  try{const n=await discoverOne(c.q,c.focus,m=>msg(m.trim()));msg(`Done: ${n} new qualified lead(s) kept.`)}catch(e){msg('Failed: '+String(e.message||e).slice(0,100))}find()});}
 function find(){$('#main').innerHTML=`<div class="card" style="border-color:var(--acc)"><b>Find podcasts</b> <span class=mut>opens Google AI with the prompt already filled in</span>
  <div class="row"><input id="pgn" list="nl" placeholder="Niche, e.g. real estate investing"><datalist id="nl">${S.niches.map(n=>`<option>${esc(n)}</option>`).join('')}</datalist>
  <input id="pgc" type="number" value="15" style="width:80px" title="How many podcasts"><button class="b p" id="pgb">Find podcasts in Google AI</button></div>
@@ -766,6 +788,7 @@ function find(){$('#main').innerHTML=`<div class="card" style="border-color:var(
  <div class="row"><input id="pgf" style="flex:1;min-width:240px" placeholder="Optional focus so results differ, e.g. in Texas, for first time buyers, run by women"></div>
  <div class="row">${S.niches.map(n=>`<button class="b" data-ai="${esc(n)}">${esc(n)}</button>`).join('')}</div>
  <span class=mut>Or use the Run live button: it asks Google AI for you and sends the leads straight to the CRM. Step 2 (manual): copy Google's answer and paste it into the box below. The prompt is also copied to your clipboard as a backup.</span></div>
+ ${customCard()}
  <div class="card"><b>Niches</b> <span class=mut>(one per line)</span><textarea id="ni">${esc(S.niches.join('\n'))}</textarea>
  <div class="row"><button class="b" id="run">Auto search on YouTube instead</button> <button class="b p" id="runstream" title="Streamers with hours of footage who sell products or services">Find streamers who sell</button> <button class="b p" id="runnew" title="Looks for channels under a year old that post often and show a business behind them">Find new channels (under 1 year)</button><span class=mut>Each query costs 100 of your 10,000 free daily API units.</span></div></div>
  <div class="card"><b>Quick add</b> <span class=mut>(paste YouTube video / channel / @handle links)</span><textarea id="qa"></textarea>
@@ -785,6 +808,7 @@ function find(){$('#main').innerHTML=`<div class="card" style="border-color:var(
  <td><a target=_blank rel=noopener href="https://www.google.com/search?udm=50&q=${encodeURIComponent(episodePrompt(n,15,'',false))}">Google AI mode</a></td></tr>`}).join('')}</table></div></div>
  <pre id="log">Ready.</pre>`;
  const log=t=>{$('#log').textContent+='\n'+t;$('#log').scrollTop=1e9};
+ customWire();
  $('#ni').onchange=e=>{S.niches=e.target.value.split('\n').map(x=>x.trim()).filter(Boolean);save()};
  $('#runstream').onclick=async()=>{$('#log').textContent='';let tot=0;try{const one=($('#pgn')&&$('#pgn').value||'').trim(),niches=one?[one]:STREAM_NICHES;for(const n of niches){log('Streamers: '+n);const cand=await searchCandidates(n,'stream',log);const a=await addChannels(Object.values(cand),log,false);tot+=a;log(`  +${a} new leads (${shortsSk} too many Shorts, ${viewsSk} low views, ${skipped} no contact, ${dups} seen)`)}log(`Done. ${tot} new leads.`)}catch(e){log('Stopped: '+e.message)}};
  $('#runnew').onclick=async()=>{$('#log').textContent='';let tot=0;try{const one=($('#pgn')&&$('#pgn').value||'').trim(),niches=one?[one]:S.niches;for(const n of niches){log('New channels: '+n);const cand=await searchCandidates(n,'new',log);const a=await addChannels(Object.values(cand),log,false,{newOnly:true});tot+=a;log(`  +${a} new leads (${ageSk} older than a year, ${shortsSk} Shorts, ${skipped} no contact, ${dups} seen)`)}log(`Done. ${tot} new leads.`)}catch(e){log('Stopped: '+e.message)}};
