@@ -489,11 +489,17 @@ const digits10=p=>String(p||'').replace(/\D/g,'').slice(-10);
 const callable=l=>l.phone&&!l.dnc&&!['Client','Not Interested','Removed'].includes(l.status)&&l.callStatus!=='wrong';
 function callRank(l){if(['Replied','Interested'].includes(l.status))return 0;if(l.emailedAt&&l.status=='Sample Sent'&&Date.now()-l.emailedAt>=3*DAY)return 1;if(l.emailedAt)return 2;return isHot(l)?3:4}
 function callScript(k,l){const st=ES.status||{};return String(S.settings[k]||'').replace(/\{name\}/g,(l.name||'there').replace(/ podcast$/i,'')).replace(/\{topic\}/g,l.personalLine||'the episode').replace(/\{sender\}/g,st.sender_name||'Emmanuel').replace(/\{phone\}/g,st.phone||'')}
-function logCall(l,o){(l.callLog=l.callLog||[]).push({t:Date.now(),o});l.callStatus=o;
+function logCall(l,o){(l.callLog=l.callLog||[]).push({t:Date.now(),o,prev:{status:l.status,dnc:l.dnc?1:0}});l.callStatus=o;
  if(o==='int')l.status='Interested';
  else if(o==='spoke'&&['New','Sample Sent'].includes(l.status))l.status='Replied';
  else if(o==='noint'||o==='dnc'){l.status='Not Interested';if(o==='dnc')l.dnc=1;if(l.email)fetch(RUNNER+'/email/suppress',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:l.email,why:'asked not to be contacted (call)'})}).catch(()=>{})}
  save()}
+function removeCall(l,t){const log=l.callLog||[],i=log.findIndex(c=>c.t==t);if(i<0)return;const e=log[i],last=i===log.length-1;log.splice(i,1);
+ if(last){const p=e.prev||{status:l.emailedAt?'Sample Sent':'New',dnc:0};
+  if(['int','noint','dnc','spoke'].includes(e.o))l.status=p.status;
+  if(e.o==='dnc')l.dnc=p.dnc?1:0;
+  if(['noint','dnc'].includes(e.o)&&l.email)fetch(RUNNER+'/email/unsuppress',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:l.email})}).catch(()=>{})}
+ l.callStatus=log.length?log[log.length-1].o:'';save()}
 function callsToday(){const t0=new Date().setHours(0,0,0,0);let n=0,vm=0,tx=0,sp=0;S.leads.forEach(l=>(l.callLog||[]).forEach(c=>{if(c.t>=t0){n++;if(c.o==='vm')vm++;if(c.o==='text')tx++;if(['spoke','int'].includes(c.o))sp++}}));return{n,vm,tx,sp}}
 const needsPhone=l=>!l.phone&&!l.dnc&&l.name&&['New','Sample Sent'].includes(l.status)&&isHot(l)&&!l.clipFail&&!(l.phoneChecked&&Date.now()-l.phoneChecked<14*DAY);
 const callReady=()=>S.leads.filter(l=>callable(l)&&(isHot(l)||l.emailedAt||l.source=='maps')).length;
@@ -519,6 +525,15 @@ function resolveMaps(n){const todo=(S.mapsQ||[]).slice(0,n);if(!todo.length){CS.
   if(S.leads.some(l=>l.url==r.channel_url)){save();return}
   const d=digits10(q.phone);S.leads.push({id:'M'+r.channel_url.split('/').pop().replace(/[^\w]/g,'').slice(0,30),name:r.channel_name||q.business,business:q.business,owner:r.owner||q.owner||'',url:r.channel_url,web:q.web,
    phone:d.length==10?`(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}`:'',phoneSource:'Google Maps listing',phoneHow:'maps',status:'New',source:'maps',address:q.address,added:today()});save()}})}
+
+function leadLinks(l){const a=(u,t)=>u?`<a href="${esc(u)}" target="_blank" rel="noopener">${esc(t||u)}</a>`:'<span class=mut>not saved</span>',ep=l.episode?l.episode+(l.ytStart&&!/[?&]t=/.test(l.episode)?(l.episode.includes('?')?'&':'?')+'t='+Math.floor(l.ytStart)+'s':''):'';
+ const clips=(l.clipLinks||[]).filter(Boolean),file=(l.clipFiles||[l.clipFile]).filter(Boolean)[0]||l.sampleFile;
+ return `<div style="border:1px solid var(--bd,#444);border-radius:6px;padding:6px;margin-bottom:6px"><b>Links</b>
+  <div>YouTube channel: ${a(l.url)}</div>
+  <div>Episode clipped: ${a(ep,l.epTitle||ep)}${l.clipTitle?` <span class=mut>· clip: ${esc(l.clipTitle)}</span>`:''}</div>
+  ${clips.length?`<div>Clip link${clips.length>1?'s':''}: ${clips.map((u,i)=>a(u,'clip '+(i+1))).join(' · ')}</div>`:''}
+  <div>Handoff sheet: ${l.handoffLink?`${a(l.handoffLink,'open the sheet')} <button class="b" data-cp="${esc(l.handoffLink)}">Copy link</button>`:(l.sampleSlug?`<button class="b" data-handoff="${esc(l.id)}">Get the link</button> <span class=mut>anyone with the link can view the sheet and clips</span>`:'<span class=mut>no clip folder yet</span>')}</div>
+  <div>Client folder: ${file?`<button class="b" data-revealf="${esc(file)}">Open client folder</button> <span class=mut>${esc(l.sampleDir||'')}</span>`:'<span class=mut>no clip made yet</span>'}</div></div>`}
 function callsV(){const L=S.leads.filter(callable).sort((a,b)=>callRank(a)-callRank(b)).slice(0,60),td=callsToday(),noNum=S.leads.filter(l=>!l.phone&&!l.dnc&&!['Removed','Not Interested','Client'].includes(l.status)&&(isHot(l)||l.emailedAt)).length,g=S.settings;
  const why=['Replied, call them now','Emailed 3+ days ago, no reply','Emailed','Hot lead, not emailed yet','Has a number'];
  const card=l=>{const last=(l.callLog||[]).slice(-1)[0],open=CS.open==l.id,cls=l.phoneHow&&/Google AI/.test(l.phoneHow);
@@ -528,8 +543,8 @@ function callsV(){const L=S.leads.filter(callable).sort((a,b)=>callRank(a)-callR
   <div class="row" style="margin-top:8px">${['noanswer','vm','text','spoke','int','later','noint','wrong','dnc'].map(o=>`<button class="b${o==='int'?' p':''}" data-co="${esc(l.id)}|${o}">${CALL_OUT[o]}</button>`).join('')}</div>
   <div style="margin-top:6px"><button class="b" data-mail="${esc(l.id)}">📧 Emails and replies</button> <button class="b" data-ubox="${esc(l.id)}">Open in Unibox</button> <button class="b" data-sc2="${esc(l.id)}">${open?'Hide':'Show'} scripts and call log</button></div>
   ${CS.mail[l.id]?`<div style="margin-top:6px">${mailPanel(l)}</div>`:''}
-  ${open?`<div style="margin-top:6px"><b>Say</b><div class="mut" style="white-space:pre-wrap">${esc(callScript('callOpener',l))}</div><b>Voicemail</b><div class="mut" style="white-space:pre-wrap">${esc(callScript('callVoicemail',l))}</div><b>Text</b> <button class="b" data-cp="${esc(callScript('callText',l))}">Copy text</button><div class="mut" style="white-space:pre-wrap">${esc(callScript('callText',l))}</div>
-   ${(l.callLog||[]).length?`<b>Log</b><div class="mut">${l.callLog.slice().reverse().map(c=>new Date(c.t).toLocaleString([],{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})+' · '+CALL_OUT[c.o]).join('<br>')}</div>`:''}
+  ${open?`<div style="margin-top:6px">${leadLinks(l)}<b>Say</b><div class="mut" style="white-space:pre-wrap">${esc(callScript('callOpener',l))}</div><b>Voicemail</b><div class="mut" style="white-space:pre-wrap">${esc(callScript('callVoicemail',l))}</div><b>Text</b> <button class="b" data-cp="${esc(callScript('callText',l))}">Copy text</button><div class="mut" style="white-space:pre-wrap">${esc(callScript('callText',l))}</div>
+   ${(l.callLog||[]).length?`<b>Log</b><div class="mut">${l.callLog.slice().reverse().map(c=>new Date(c.t).toLocaleString([],{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})+' · '+CALL_OUT[c.o]+` <button class="b" data-rmcall="${esc(l.id)}|${c.t}" title="Remove this entry and undo what it changed">✕ Remove</button>`).join('<br>')}</div>`:''}
    ${(l.phones||[]).length?`<div class="mut">Other numbers seen: ${l.phones.map(esc).join(', ')}</div>`:''}</div>`:''}</div>`};
  $('#main').innerHTML=`<div class="card"><b>Calls today: ${td.n}</b> <span class=mut>· ${callReady()} good leads with a number ready</span> <span class="mut">${td.vm} voicemails · ${td.tx} texts · ${td.sp} conversations</span>
   <div class="row" style="margin-top:8px"><button class="b p" id="fp" ${CS.busy||ES.busy?'disabled':''}>Find phone numbers (${noNum} leads without one)</button><span class="mut">${esc(CS.msg)}</span></div>
@@ -551,6 +566,10 @@ function callsV(){const L=S.leads.filter(callable).sort((a,b)=>callRank(a)-callR
   else if(d.co){const[i,o]=d.co.split('|'),l=S.leads.find(x=>x.id==i);if(l){if(['dnc','noint'].includes(o)&&!confirm(`Mark ${l.name} as ${CALL_OUT[o]}? They will be removed from outreach.`))return;logCall(l,o);callsV()}}
   else if(d.mail){const l=S.leads.find(x=>x.id==d.mail);if(CS.mail[l.id]&&!CS.mail[l.id].loading){delete CS.mail[l.id];callsV()}else callsMail(l)}
   else if(d.ubox){const l=S.leads.find(x=>x.id==d.ubox),em=String(l.email||'').toLowerCase();tab='unibox';const hasReply=UB.replies.some(x=>String(x.from||'').toLowerCase().includes(em)),dr=UB.drafts.find(x=>String(x.to||'').toLowerCase()==em);UB.view=hasReply?'replies':'drafts';if(hasReply)UB.sel=UB.replies.find(x=>String(x.from||'').toLowerCase().includes(em)).mid;else if(dr)UB.sel=dr.mid;render();if(!UB.drafts.length&&!UB.replies.length)ubLoad()}
+  else if(d.handoff){const l=S.leads.find(x=>x.id==d.handoff),bt=e.target;bt.disabled=true;bt.textContent='Making the link…';
+   fetch(RUNNER+'/handoff/share',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({slug:l.sampleSlug})}).then(x=>x.json()).then(r=>{if(r.error){alert(r.error);bt.disabled=false;bt.textContent='Get the link';return}l.handoffLink=r.link;save();callsV()}).catch(()=>{alert('Helper not running.');bt.disabled=false;bt.textContent='Get the link'})}
+  else if(d.revealf){fetch(RUNNER+'/reveal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:d.revealf})}).then(x=>x.json()).then(r=>{if(r.error)alert(r.error)}).catch(()=>alert('Helper not running.'))}
+  else if(d.rmcall){const[i,t]=d.rmcall.split('|'),l=S.leads.find(x=>x.id==i);if(l&&confirm('Remove this call entry'+((l.callLog||[]).slice(-1)[0]&&String((l.callLog.slice(-1)[0]).t)===t?' and undo the status change it made?':'?'))){removeCall(l,+t);callsV()}}
   else if(d.sc2){CS.open=CS.open==d.sc2?null:d.sc2;callsV()}};
  const pr=$('#pp-reset');if(pr)pr.onclick=()=>{g.phonePrompt='';save();callsV()};
  $('#main').oninput=e=>{const k=e.target.dataset.ck;if(k){g[k]=e.target.value;save()}}}

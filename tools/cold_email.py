@@ -84,6 +84,20 @@ def suppress(address, why=""):
         append_log({"ts": time.time(), "to": address, "status": "suppressed", "why": why})
 
 
+def unsuppress(address):
+    """Takes an exact address back off the list (used when a call outcome was pressed by mistake)."""
+    address = address.strip().lower()
+    if not SUPPRESS.exists() or not address:
+        return False
+    lines = SUPPRESS.read_text(encoding="utf-8").splitlines()
+    keep = [l for l in lines if l.strip().lower() != address]
+    if len(keep) == len(lines):
+        return False
+    SUPPRESS.write_text("\n".join(keep) + ("\n" if keep else ""), encoding="utf-8")
+    append_log({"ts": time.time(), "to": address, "status": "unsuppressed", "why": "call outcome undone"})
+    return True
+
+
 def is_suppressed(address):
     s, a = suppressed(), address.lower()
     return a in s or "@" + a.split("@")[-1] in s

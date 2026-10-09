@@ -740,6 +740,16 @@ class H(BaseHTTPRequestHandler):
                 PIPE["stop"] = False
                 threading.Thread(target=run_personalize, args=(leads,), daemon=True).start()
             return self._send(200, {"ok": True, "leads": len(leads)})
+        if self.path == "/handoff/share":
+            slug = str(body.get("slug") or "").strip()
+            if not slug:
+                return self._send(400, {"error": "this lead has no clip folder yet"})
+            code, res = app_call("/api/handoff/share", {"slug": slug}, timeout=300)
+            if code == 0:
+                return self._send(502, {"error": "the clipper app is not running"})
+            if code != 200 or not res.get("success"):
+                return self._send(400, {"error": res.get("error") or f"clipper app said {code}"})
+            return self._send(200, {"link": res.get("link"), "clips": res.get("clips")})
         if self.path == "/clips/share":
             root = (REPO / "opencut-exports").resolve()
             names = []
@@ -820,6 +830,11 @@ class H(BaseHTTPRequestHandler):
                 STATE.update(running=True, log=[f"[runner] checking {len(items)} business(es) for an owner and a YouTube channel"])
                 threading.Thread(target=run_maps, args=(items,), daemon=True).start()
             return self._send(200, {"ok": True, "items": len(items)})
+        if self.path == "/email/unsuppress":
+            addr = str(body.get("email") or "").strip().lower()
+            if "@" not in addr:
+                return self._send(400, {"error": "need an email address"})
+            return self._send(200, {"ok": True, "removed": cold_email.unsuppress(addr)})
         if self.path == "/email/suppress":
             addr = str(body.get("email") or "").strip().lower()
             if "@" not in addr:
