@@ -492,9 +492,9 @@ def run_find_emails(leads, use_ai=True):
         if missing and use_ai and os.getenv("EMAIL_AI", "1") != "0" and not PIPE["stop"]:
             import tempfile
             f = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8")
-            json.dump({"leads": [{k: str(l.get(k) or "")[:300] for k in ("id", "name", "url", "web", "owner", "business")} for l in missing[:12]]}, f)
+            json.dump({"leads": [{k: str(l.get(k) or "")[:300] for k in ("id", "name", "url", "web", "owner", "business")} for l in missing[:6]]}, f)
             f.close()
-            log(f"[runner] asking Google AI about {min(12, len(missing))} lead(s) with no public email yet")
+            log(f"[runner] asking Google AI about {min(6, len(missing))} lead(s) with no public email yet")
             proc = subprocess.Popen([sys.executable, "-u", str(HERE / "email_ai.py"), f.name], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=str(HERE),
                                     env={**os.environ, "PYTHONUNBUFFERED": "1"})
             STATE["proc"] = proc

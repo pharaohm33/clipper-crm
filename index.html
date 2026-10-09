@@ -414,13 +414,13 @@ async function autopilotRun(){
   if(g.apFit!==0&&S.leads.some(l=>l.status=='New'&&isHot(l)&&l.email&&!l.emailWeak&&!l.fit))await step('Checking each lead is a good fit (Google AI)',async()=>{const r=await fitBatch(12,apLog);if(r.removed)apLog(`  ${r.removed} removed as a bad fit.`)});
   if((S.mapsQ||[]).length)await step(`Checking ${Math.min(15,S.mapsQ.length)} Google Maps businesses for an owner and a YouTube channel`,()=>resolveMaps(15));
   await syncHandoffLinks(true);
-  if(g.apPhones!==0&&S.leads.some(needsPhone))await step('Finding phone numbers for the best leads (website, Chrome, then Google AI)',()=>findPhones(15));
   if(clipperOn&&slots&&apWork().needClip)await step('2/4  Making clips (up to 3 each) and topic lines',()=>prepareClips(Math.min(batch,slots),true,true));
   await syncHandoffLinks(true);
   const mode2=modeNow(),ready=S.leads.filter(l=>isEmailReady(l)&&!msSkipped(l)&&(mode2!='drafts'||!l.draftedAt)).length;
   if(ready)await step(`3/4  ${ready} lead(s) ready. ${mode2=='send'?'Sending':'Saving as drafts'}`,()=>sendEmails(modeNow(),0,true));
   if(modeNow()==='send'){await step('Follow-ups that are due',async()=>{await sendEmails('send',1,true);await sendEmails('send',2,true)})}
   await step('4/4  Checking replies',()=>checkReplies());
+  if(g.apPhones!==0&&S.leads.some(needsPhone)){try{await step('Optional: finding phone numbers for follow up calls (leads with no email are skipped, not waited on)',()=>findPhones(15))}catch(e){if(String(e.message)==='stopped')throw e;apLog('  phone search skipped: '+String(e.message||e).slice(0,100))}}
   const w1=apWork(),roomLeft=apQueue()<(+g.apMax||60);more=!AP.stop&&(AP.loops=(AP.loops||0)+1)<80&&((w1.total>0&&w1.total<before.total)||(g.apDiscover!==0&&roomLeft&&picks.length>0&&(AP.disc||0)<(+g.apDiscRounds||6)));
  }catch(e){apLog('Stopped: '+(e&&e.message||e));if(!/^stopped$/i.test(String(e&&e.message||e))){try{fetch(RUNNER+'/notify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:'Autopilot needs you',message:'It stopped: '+String(e&&e.message||e).slice(0,160),key:'ap-error',every:1800})})}catch(_){}}}
  clearInterval(hb);AP.running=false;ES.busy=false;apRender();emailDyn();
