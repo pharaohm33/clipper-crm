@@ -482,7 +482,7 @@ def run_find_emails(leads):
                     continue
                 if got.get("email"):
                     log(f"[{i}/{len(leads)}] {ld.get('name')}: {got['email']} ({got['source']})")
-                    log("EMAILFOUND " + json.dumps({"id": ld["id"], "email": got["email"], "source": got["source"]}))
+                    log("EMAILFOUND " + json.dumps({"id": ld["id"], "email": got["email"], "source": got["source"], "quality": got.get("quality", "good")}))
                 else:
                     log(f"[{i}/{len(leads)}] {ld.get('name')}: no public contact email found")
                     log("EMAILNONE " + json.dumps({"id": ld["id"]}))
@@ -721,6 +721,9 @@ class H(BaseHTTPRequestHandler):
             if "on" in body:
                 return self._send(200, awake_set(bool(body.get("on")), body.get("minutes") or 180))
             return self._send(200, awake_status())
+        if self.path == "/email/validate":
+            import email_check
+            return self._send(200, {"results": {k: email_check.classify(v) for k, v in (body.get("emails") or {}).items()}})
         if self.path == "/email/sent":
             cutoff = time.time() - 30 * 86400
             rows = [{k: e.get(k) for k in ("id", "to", "from", "ts", "step", "subject", "variant", "provider")} for e in cold_email.sent_entries() if e.get("ts", 0) > cutoff]

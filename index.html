@@ -233,7 +233,7 @@ function pinLead(id){const l=S.leads.find(x=>x.id==id);if(!l)return false;
 const ES={lines:[],busy:false,preview:null,status:null,msg:''};
 const DAY=86400000;
 const isSuppressed=e=>{const L=(ES.status&&ES.status.suppressed_list)||[],a=String(e||'').toLowerCase();return L.includes(a)||L.includes('@'+a.split('@')[1])};
-const isEmailReady=l=>l.status=='New'&&l.email&&(l.clipFile||l.clipLink)&&!l.emailedAt&&!isSuppressed(l.email);
+const isEmailReady=l=>l.status=='New'&&l.email&&!l.emailWeak&&(l.clipFile||l.clipLink)&&!l.emailedAt&&!isSuppressed(l.email);
 const ytLeads=l=>/youtube\.com|youtu\.be/.test(l.episode||'');
 function emailFunnel(){const L=S.leads.filter(l=>l.status!='Removed'),now=Date.now();
  const emailed=L.filter(l=>l.emailedAt);
@@ -253,10 +253,10 @@ function findEmails(n){const now=Date.now();
  const todo=S.leads.filter(l=>l.status=='New'&&isHot(l)&&!l.email&&l.name&&!(l.emailChecked&&now-l.emailChecked<14*DAY)).slice(0,n).map(l=>({id:l.id,name:l.name,url:l.url,web:l.web,episode:l.episode}));
  if(!todo.length){ES.msg='Every fresh lead already has an email, or was checked in the last 14 days.';return emailDyn()}
  return helperJob('/emails/find',{leads:todo},t=>{let r;
-  if(r=parseTag(t,'EMAILFOUND')){const l=S.leads.find(x=>x.id==r.id);if(l){l.email=r.email;l.emailSource=r.source;l.emailChecked=Date.now()}}
+  if(r=parseTag(t,'EMAILFOUND')){const l=S.leads.find(x=>x.id==r.id);if(l){l.email=r.email;l.emailSource=r.source;l.emailChecked=Date.now();l.emailWeak=r.quality==='weak'?1:0;l.emailVerified=Date.now()}}
   else if(r=parseTag(t,'EMAILNONE')){const l=S.leads.find(x=>x.id==r.id);if(l)l.emailChecked=Date.now()}})}
 function prepareClips(n,onlyWithEmail,skipFailed){
- const todo=S.leads.filter(l=>l.status=='New'&&isHot(l)&&!l.clipLink&&!l.clipFile&&!(skipFailed&&l.clipFail)&&ytLeads(l)&&(!onlyWithEmail||l.email)).slice(0,n).map(l=>({id:l.id,name:l.name,url:l.episode,epTitle:l.epTitle}));
+ const todo=S.leads.filter(l=>l.status=='New'&&isHot(l)&&!l.clipLink&&!l.clipFile&&!(skipFailed&&l.clipFail)&&ytLeads(l)&&(!onlyWithEmail||(l.email&&!l.emailWeak))).slice(0,n).map(l=>({id:l.id,name:l.name,url:l.episode,epTitle:l.epTitle}));
  if(!todo.length){ES.msg=onlyWithEmail?'No leads with an email still need a clip. Find emails first, or untick the box.':'No leads need a clip.';return emailDyn()}
  return helperJob('/pipeline/start',{leads:todo,minutes:5,clips:1},t=>{let r;
   if(r=parseTag(t,'PERSONAL')){const l=S.leads.find(x=>x.id==r.id);if(l)l.personalLine=r.line||''}
@@ -368,9 +368,16 @@ async function aiDiscover(niches,log){window.__aiItems=[];const before=new Set(S
  const fresh=S.leads.filter(l=>!before.has(l.id)&&l.status=='New'),weak=fresh.filter(l=>!(l.pin||isHot(l)));
  weak.forEach(l=>{l.status='Removed';l.notes=((l.notes?l.notes+' | ':'')+'Removed: did not meet standards')});save();
  log(`  ${fresh.length-weak.length} new qualified lead(s) kept, ${weak.length} removed.`);return fresh.length-weak.length}
+async function validateAddresses(log){const todo=S.leads.filter(l=>l.status=='New'&&l.email&&!l.emailVerified&&!l.emailedAt);if(!todo.length)return 0;
+ const emails=Object.fromEntries(todo.map(l=>[l.id,l.email]));
+ const r=await (await fetch(RUNNER+'/email/validate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({emails})})).json();let bad=0,weak=0;
+ for(const l of todo){const c=(r.results||{})[l.id];if(!c)continue;l.emailVerified=Date.now();
+  if(c.level==='bad'){log&&log(`  ${l.name.slice(0,30)}: ${l.email} is not usable (${c.why}). Dropped.`);l.notes=((l.notes?l.notes+' | ':'')+`Email ${l.email} dropped: ${c.why}`);l.email='';l.emailChecked=Date.now();bad++}
+  else if(c.level==='weak'){l.emailWeak=1;weak++;log&&log(`  ${l.name.slice(0,30)}: ${l.email} is a weak address (${c.why}). No clips until a better one is found.`)}else l.emailWeak=0}
+ save();return bad+weak}
 function apWork(){const hot=S.leads.filter(l=>l.status=='New'&&isHot(l));const full=apQueue()>=(+S.settings.apMax||25);
  const needEmail=full?0:hot.filter(l=>!l.email&&l.episode&&!(l.emailChecked&&Date.now()-l.emailChecked<14*DAY)).length;
- const needClip=full?0:hot.filter(l=>l.email&&!l.clipFile&&!l.clipLink&&!l.clipFail&&ytLeads(l)).length;
+ const needClip=full?0:hot.filter(l=>l.email&&!l.emailWeak&&!l.clipFile&&!l.clipLink&&!l.clipFail&&ytLeads(l)).length;
  const needDraft=S.leads.filter(l=>isEmailReady(l)&&!l.draftedAt).length;
  return{needEmail,needClip,needDraft,total:needEmail+needClip+needDraft,waiting:S.leads.filter(l=>isEmailReady(l)&&l.draftedAt).length}}
 function apStart(){clearInterval(AP.timer);AP.timer=setInterval(()=>{if(!AP.running&&apWork().total>0)autopilotRun()},(+S.settings.apEvery||15)*60000);apLog(`On. It works through every motivated lead back to back, then checks for new work every ${+S.settings.apEvery||15} min while this tab is open.`);autopilotRun()}
@@ -389,7 +396,8 @@ async function autopilotRun(){
   let discovered=0,picks=[];
   if(g.apDiscover!==0&&slots&&w0.needEmail+w0.needClip<3&&(AP.disc||0)<(+g.apDiscRounds||6)){picks=nextNiches(2);if(picks.length){AP.disc=(AP.disc||0)+1;await step(`Finding more leads with Google AI: ${picks.join(', ')}`,async()=>{discovered=await aiDiscover(picks,apLog)})}else apLog('Every niche was searched in the last 20 hours. Add niches or try again tomorrow.')}
   if((w0.needEmail||discovered)&&slots)await step('1/4  Finding emails (3 at a time)',()=>findEmails(Math.min(Math.max(batch,15),slots*2+5)));
-  if(g.apFit!==0&&S.leads.some(l=>l.status=='New'&&isHot(l)&&l.email&&!l.fit))await step('Checking each lead is a good fit (Google AI)',async()=>{const r=await fitBatch(12,apLog);if(r.removed)apLog(`  ${r.removed} removed as a bad fit.`)});
+  if(S.leads.some(l=>l.status=='New'&&l.email&&!l.emailVerified&&!l.emailedAt))await step('Checking each address is real before any content is made',()=>validateAddresses(apLog));
+  if(g.apFit!==0&&S.leads.some(l=>l.status=='New'&&isHot(l)&&l.email&&!l.emailWeak&&!l.fit))await step('Checking each lead is a good fit (Google AI)',async()=>{const r=await fitBatch(12,apLog);if(r.removed)apLog(`  ${r.removed} removed as a bad fit.`)});
   if(clipperOn&&slots&&apWork().needClip)await step('2/4  Making clips (up to 3 each) and topic lines',()=>prepareClips(Math.min(batch,slots),true,true));
   const mode2=modeNow(),ready=S.leads.filter(l=>isEmailReady(l)&&(mode2!='drafts'||!l.draftedAt)).length;
   if(ready)await step(`3/4  ${ready} lead(s) ready. ${mode2=='send'?'Sending':'Saving as drafts'}`,()=>sendEmails(modeNow(),0,true));

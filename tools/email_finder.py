@@ -129,33 +129,47 @@ def from_website(site):
     return found
 
 
+def _pick(emails, source):
+    """The best usable address from what a search found (never a bad one; a weak one only when nothing better exists)."""
+    import email_check
+    addr, c = email_check.best(emails[0] if emails else "", emails[1:])
+    if not addr:
+        return None
+    others = [e for e in emails if e.lower() != addr][:3]
+    return {"email": addr, "source": source, "others": others, "quality": c["level"], "why": c["why"]}
+
+
 def find_email(name, channel_url="", website="", episode_url="", log=print):
-    """Best public contact email for a podcast: {'email','source','others':[...]} or {'email':'', 'tried':[...]}.
-    The quick lookups run first. Only a lead that already has an episode found through the YouTube API (so it passed the
-    filters) gets the slower browser search: its About page, its website, and the episode page."""
-    tried = []
+    """Best public contact email for a podcast: {'email','source','others':[...],'quality'} or {'email':'', 'tried':[...]}.
+    Every address is checked first (format, disposable, mail server, hosting relay addresses like anchor.fm, weak addresses like support@).
+    A weak address is only returned when no better one turns up in any of the places searched."""
+    tried, weak_hit = [], None
     for source, getter in (("podcast RSS feed", lambda: from_rss(name)[0]),
                            ("YouTube channel description", lambda: from_youtube(channel_url)),
                            ("their website", lambda: from_website(website))):
         try:
-            emails = [e for e in getter() if has_mail_server(e)]
+            emails = list(getter())
         except Exception:
             emails = []
         tried.append(source)
-        if emails:
-            return {"email": emails[0], "source": source, "others": emails[1:4]}
+        hit = _pick(emails, source) if emails else None
+        if hit and hit["quality"] == "good":
+            return hit
+        weak_hit = weak_hit or hit
     if episode_url and os.getenv("EMAIL_BROWSER", "1") != "0":
         tried.append("browser: About page, website, episode page")
         try:
             import email_browser
             log("   opening their pages in Chrome ...")
             got = email_browser.find_in_browser(channel_url, website, episode_url, log=log)
-            emails = [e for e in ([got.get("email")] + got.get("others", [])) if e and has_mail_server(e)]
-            if emails:
-                return {"email": emails[0], "source": got["source"], "others": emails[1:4]}
+            emails = [e for e in ([got.get("email")] + got.get("others", [])) if e]
+            hit = _pick(emails, got.get("source", "browser")) if emails else None
+            if hit and hit["quality"] == "good":
+                return hit
+            weak_hit = weak_hit or hit
         except Exception as e:
             log(f"   (browser search failed: {str(e)[:80]})")
-    return {"email": "", "tried": tried}
+    return weak_hit or {"email": "", "tried": tried}
 
 
 if __name__ == "__main__":
