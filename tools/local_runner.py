@@ -464,9 +464,11 @@ def run_personalize(leads):
         STATE["running"] = False
 
 
-def run_find_emails(leads):
-    """Looks for public contact emails, three leads at a time (each browser search is mostly waiting on pages)."""
+def run_find_emails(leads, use_ai=True):
+    """Looks for public contact emails, three leads at a time (each browser search is mostly waiting on pages).
+    Leads whose own pages show nothing then go to Google AI, one at a time, as a last resort."""
     from concurrent.futures import ThreadPoolExecutor
+    found_ids = set()
     try:
         def one(item):
             i, ld = item
@@ -481,11 +483,37 @@ def run_find_emails(leads):
                 if got is None:
                     continue
                 if got.get("email"):
+                    found_ids.add(ld["id"])
                     log(f"[{i}/{len(leads)}] {ld.get('name')}: {got['email']} ({got['source']})")
                     log("EMAILFOUND " + json.dumps({"id": ld["id"], "email": got["email"], "source": got["source"], "quality": got.get("quality", "good")}))
                 else:
-                    log(f"[{i}/{len(leads)}] {ld.get('name')}: no public contact email found")
-                    log("EMAILNONE " + json.dumps({"id": ld["id"]}))
+                    log(f"[{i}/{len(leads)}] {ld.get('name')}: no email on their own pages")
+        missing = [l for l in leads if l["id"] not in found_ids]
+        if missing and use_ai and os.getenv("EMAIL_AI", "1") != "0" and not PIPE["stop"]:
+            import tempfile
+            f = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8")
+            json.dump({"leads": [{k: str(l.get(k) or "")[:300] for k in ("id", "name", "url", "web", "owner", "business")} for l in missing[:12]]}, f)
+            f.close()
+            log(f"[runner] asking Google AI about {min(12, len(missing))} lead(s) with no public email yet")
+            proc = subprocess.Popen([sys.executable, "-u", str(HERE / "email_ai.py"), f.name], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=str(HERE),
+                                    env={**os.environ, "PYTHONUNBUFFERED": "1"})
+            STATE["proc"] = proc
+            for line in proc.stdout:
+                line = line.rstrip()
+                if "asking you to verify" in line:
+                    log(line)
+                    phone_notify("Google needs you", "Google is asking for a verification and the email search is waiting (up to 5 minutes). " + REMOTE_HINT, key="captcha")
+                elif line.startswith("EMAILAI "):
+                    o = json.loads(line[8:])
+                    if o.get("email"):
+                        found_ids.add(o["id"])
+                        log("EMAILFOUND " + json.dumps({"id": o["id"], "email": o["email"], "source": "Google AI: " + o.get("where", ""), "quality": o.get("quality", "good")}))
+                else:
+                    log(line)
+            proc.wait()
+        for l in leads:
+            if l["id"] not in found_ids:
+                log("EMAILNONE " + json.dumps({"id": l["id"]}))
         log("[runner] email search finished.")
     finally:
         STATE["running"] = False

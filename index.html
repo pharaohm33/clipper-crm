@@ -272,7 +272,9 @@ async function previewEmails(){ES.msg='';const leads=S.leads.filter(isEmailReady
  catch(e){ES.msg='Helper not running. In Terminal: cd ~/clipper-crm && python3 tools/local_runner.py'}emailDyn()}
 function applyEmailResult(r){const l=S.leads.find(x=>x.id==r.id);if(!l)return;
  if(r.status=='sent'){if((r.step||0)==0){markSent(l);l.firstEmailedAt=Date.now()}l.emailedAt=Date.now();l.emailStep=r.step||0;l.emailSubject=l.emailSubject||r.subject;l.emailFrom=r.from;l.via='email'}
- else if(r.status=='drafted')l.draftedAt=Date.now()}
+ else if(r.status=='drafted'){l.draftedAt=Date.now();delete l.msSkip}
+ else if(r.status=='skip'&&/Microsoft/i.test(r.why||''))l.msSkip=Date.now()}
+const msSkipped=l=>!!l.msSkip&&S.settings.emailSkipMS!==false;
 async function sendEmails(mode,step,auto,only){const n=+S.settings.emailLimit||20;let leads;
  if(step>0){const now=Date.now();leads=S.leads.filter(l=>l.emailedAt&&l.status=='Sample Sent'&&(l.emailStep||0)==step-1&&now-(l.firstEmailedAt||l.emailedAt)>=((step==1?3:7)*DAY)-3600000).slice(0,n).map(emailPayload)}
  else leads=S.leads.filter(l=>isEmailReady(l)&&(mode!='drafts'||!l.draftedAt)&&(!only||only(l))).slice(0,n).map(emailPayload);
@@ -386,7 +388,7 @@ async function validateAddresses(log){const todo=S.leads.filter(l=>l.status=='Ne
 function apWork(){const hot=S.leads.filter(l=>l.status=='New'&&isHot(l));const full=apQueue()>=(+S.settings.apMax||60);
  const needEmail=full?0:hot.filter(l=>!l.email&&l.episode&&!(l.emailChecked&&Date.now()-l.emailChecked<14*DAY)).length;
  const needClip=full?0:hot.filter(l=>l.email&&!l.emailWeak&&!l.clipFile&&!l.clipLink&&!l.clipFail&&ytLeads(l)).length;
- const needDraft=S.leads.filter(l=>isEmailReady(l)&&!l.draftedAt).length;
+ const needDraft=S.leads.filter(l=>isEmailReady(l)&&!l.draftedAt&&!msSkipped(l)).length;
  return{needEmail,needClip,needDraft,total:needEmail+needClip+needDraft,waiting:S.leads.filter(l=>isEmailReady(l)&&l.draftedAt).length}}
 const canDiscover=()=>S.settings.apDiscover!==0&&apQueue()<(+S.settings.apMax||60)&&(nextCustom(1).length||nextNiches(1).length||nextAngles(1).length);
 async function autoSendApproved(){const g=S.settings;if(!g.apAutoSend||AP.running||ES.busy)return;await loadEmailStatus();const st=ES.status;if(!st||!st.ready||!st.in_send_window||!(st.capacity_left>0))return;
@@ -415,7 +417,7 @@ async function autopilotRun(){
   if(g.apPhones!==0&&S.leads.some(needsPhone))await step('Finding phone numbers for the best leads (website, Chrome, then Google AI)',()=>findPhones(15));
   if(clipperOn&&slots&&apWork().needClip)await step('2/4  Making clips (up to 3 each) and topic lines',()=>prepareClips(Math.min(batch,slots),true,true));
   await syncHandoffLinks(true);
-  const mode2=modeNow(),ready=S.leads.filter(l=>isEmailReady(l)&&(mode2!='drafts'||!l.draftedAt)).length;
+  const mode2=modeNow(),ready=S.leads.filter(l=>isEmailReady(l)&&!msSkipped(l)&&(mode2!='drafts'||!l.draftedAt)).length;
   if(ready)await step(`3/4  ${ready} lead(s) ready. ${mode2=='send'?'Sending':'Saving as drafts'}`,()=>sendEmails(modeNow(),0,true));
   if(modeNow()==='send'){await step('Follow-ups that are due',async()=>{await sendEmails('send',1,true);await sendEmails('send',2,true)})}
   await step('4/4  Checking replies',()=>checkReplies());
