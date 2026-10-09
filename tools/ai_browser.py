@@ -85,7 +85,18 @@ def get_page(p):
     Always finish with release(browser): that disconnects without closing the window."""
     _acquire()
     if ensure_chrome():
-        browser = p.chromium.connect_over_cdp(f"http://127.0.0.1:{PORT}")
+        try:
+            browser = p.chromium.connect_over_cdp(f"http://127.0.0.1:{PORT}")
+        except Exception as e:
+            # a Chrome window that has been open for a long time can stop accepting connections ("Browser context management is not supported"):
+            # close it (the Google login lives in the profile folder, so nothing is lost) and start a fresh one
+            print(f"  (the Google window stopped accepting commands: {str(e)[:70]}; restarting it)")
+            subprocess.run(["pkill", "-f", f"remote-debugging-port={PORT}"], capture_output=True)
+            time.sleep(2)
+            if not ensure_chrome():
+                _release_lock()
+                raise
+            browser = p.chromium.connect_over_cdp(f"http://127.0.0.1:{PORT}")
         ctx = browser.contexts[0] if browser.contexts else browser.new_context()
         pages = [pg for pg in ctx.pages if not pg.url.startswith("devtools")]
         page = next((pg for pg in pages if "google." in pg.url), pages[0] if pages else ctx.new_page())
