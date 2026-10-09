@@ -71,13 +71,40 @@ def ensure_chrome():
         return False
     PROFILE.mkdir(parents=True, exist_ok=True)
     subprocess.Popen([exe, f"--remote-debugging-port={PORT}", f"--user-data-dir={PROFILE}", "--no-first-run", "--no-default-browser-check",
-                      "--window-size=1200,900", "https://www.google.com/"],
+                      "--window-size=1200,900", "--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding",
+                      "--disable-background-timer-throttling", "https://www.google.com/"],
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
     for _ in range(40):
         time.sleep(0.5)
         if alive():
             return True
     return False
+
+
+def set_window(page, state):
+    """Minimizes or restores the Google AI window ('minimized' | 'normal'), so searches do not cover what the user is doing. Never raises."""
+    try:
+        cdp = page.context.new_cdp_session(page)
+        win = cdp.send("Browser.getWindowForTarget")
+        cdp.send("Browser.setWindowBounds", {"windowId": win["windowId"], "bounds": {"windowState": state}})
+        cdp.detach()
+        return True
+    except Exception:
+        return False
+
+
+def hide_window(page):
+    return set_window(page, "minimized")
+
+
+def show_window(page):
+    """Brings the window back (used when Google asks the user to verify)."""
+    ok = set_window(page, "normal")
+    try:
+        page.bring_to_front()
+    except Exception:
+        pass
+    return ok
 
 
 def get_page(p):
@@ -100,10 +127,13 @@ def get_page(p):
         ctx = browser.contexts[0] if browser.contexts else browser.new_context()
         pages = [pg for pg in ctx.pages if not pg.url.startswith("devtools")]
         page = next((pg for pg in pages if "google." in pg.url), pages[0] if pages else ctx.new_page())
-        try:
-            page.bring_to_front()
-        except Exception:
-            pass
+        if os.getenv("AI_WINDOW", "hidden") != "shown":
+            hide_window(page)
+        else:
+            try:
+                page.bring_to_front()
+            except Exception:
+                pass
         return browser, ctx, page
     print("  (could not keep a Chrome window open, using a temporary one)")
     ctx = p.chromium.launch_persistent_context(str(PROFILE), channel="chrome", headless=False, viewport={"width": 1200, "height": 900})

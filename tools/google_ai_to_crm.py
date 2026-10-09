@@ -162,10 +162,12 @@ def ask_google_ai(page, prompt, timeout=120):
         body = page.inner_text("body")
         if re.search(r"unusual traffic|not a robot|captcha", body, re.I):
             print("  Google is asking you to verify. Solve it in the Chrome window; waiting up to 5 minutes...")
+            AB.show_window(page)  # the window is normally minimized: bring it back so it can be solved
             for _ in range(150):
                 time.sleep(2)
                 if not re.search(r"unusual traffic|not a robot|captcha", page.inner_text("body"), re.I):
                     break
+            AB.hide_window(page)
             _thread_save({"turns": MAX_TURNS, "t": 0})  # start a new conversation after a verification
             return ask_google_ai(page, prompt, timeout)
         if "no response available" in body:
