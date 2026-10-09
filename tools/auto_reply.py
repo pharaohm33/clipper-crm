@@ -58,13 +58,21 @@ def preview(to, name, slug):
     """What the reply would say right now, and the handoff page link if that page already exists (it stays private until they say yes)."""
     cfg = cold_email.load_config()
     link = ""
-    try:
-        with urllib.request.urlopen(APP_URL + "/api/handoff/list", timeout=8) as r:
-            for s in json.loads(r.read()).get("sheets", []):
-                if s.get("slug") == slug and s.get("link"):
+    want = re.sub(r"[^a-z0-9]+", "", str(name or "").lower())
+    for attempt in range(2):
+        try:
+            with urllib.request.urlopen(APP_URL + "/api/handoff/list", timeout=20) as r:
+                sheets = json.loads(r.read()).get("sheets", [])
+            for s in sheets:
+                if s.get("link") and (s.get("slug") == slug and slug):
                     link = s["link"]
-    except Exception:
-        pass
+            if not link and want:  # the lead has no saved slug: match the sheet by the show's name
+                for s in sheets:
+                    if s.get("link") and re.sub(r"[^a-z0-9]+", "", str(s.get("name") or "").lower()) == want:
+                        link = s["link"]
+            break
+        except Exception:
+            time.sleep(1)
     shown = link or "[link to their page of clips, made public only when they say yes]"
     return {"text": build_reply(cfg, to.lower(), name, shown), "link": link, "phone_set": bool((cfg.get("phone") or "").strip())}
 

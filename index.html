@@ -443,13 +443,13 @@ async function ubLoad(){UB.loading=true;UB.msg='Reading your inboxes (this logs 
  UB.loading=false;uniboxV()}
 async function ubPost(path,body){const r=await (await fetch(RUNNER+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();if(r.error)throw new Error(r.error);return r}
 function ubYesPanel(cur){const l=leadByEmail(cur.to)||{},y=UB.yes[cur.mid];
- if(!y){UB.yes[cur.mid]={loading:true};(async()=>{try{UB.yes[cur.mid]=await ubPost('/unibox/yes',{to:cur.to,name:l.name||'',slug:l.sampleSlug||''})}catch(e){UB.yes[cur.mid]={text:'Could not build the preview: '+e.message}}if(UB.sel===cur.mid)uniboxV()})();return'<div class=mut style="margin-top:10px">Loading what the reply would say...</div>'}
+ if(!y||(!y.loading&&!y.link&&!l.handoffLink&&Date.now()-(y.t||0)>20000)){UB.yes[cur.mid]={loading:true};(async()=>{try{UB.yes[cur.mid]=await ubPost('/unibox/yes',{to:cur.to,name:l.name||'',slug:l.sampleSlug||''});UB.yes[cur.mid].t=Date.now();if(UB.yes[cur.mid].link&&!l.handoffLink){l.handoffLink=UB.yes[cur.mid].link;save()}}catch(e){UB.yes[cur.mid]={text:'Could not build the preview: '+e.message,t:Date.now()}}if(UB.sel===cur.mid)uniboxV()})();return'<div class=mut style="margin-top:10px">Loading what the reply would say...</div>'}
  if(y.loading)return'<div class=mut style="margin-top:10px">Loading what the reply would say...</div>';
  const yt=l.episode?l.episode+(l.ytStart?(l.episode.includes('?')?'&':'?')+'t='+l.ytStart+'s':''):'';
  return`<div style="margin-top:12px;border-top:1px solid var(--bd,#e5e7eb);padding-top:10px"><b>If they say yes, this is the reply they get</b> <span class=mut>(the real wording, written automatically and saved as a draft for you to approve)</span>
-  <textarea readonly style="min-height:200px;width:100%;margin-top:6px">${esc(y.text||'')}</textarea>
+  <textarea readonly style="min-height:200px;width:100%;margin-top:6px">${esc(String(y.text||'').replace('[link to their page of clips, made public only when they say yes]',y.link||l.handoffLink||'[link to their page of clips, made public only when they say yes]'))}</textarea>
   <div class=mut style="margin-top:6px">${y.phone_set===false?'<span style="color:var(--acc)">Your phone number is not set yet (setup_email.py, option 3), so no reply would be written.</span><br>':''}
-  Handoff page: ${y.link?`<a target=_blank rel=noopener href="${esc(y.link)}">${esc(y.link)}</a> <span class=mut>(private until they say yes)</span>`:'not made yet. It is created from the clips and shared when they say yes.'}<br>
+  Handoff page: ${(y.link||l.handoffLink)?`<a target=_blank rel=noopener href="${esc(y.link||l.handoffLink)}">${esc(y.link||l.handoffLink)}</a> <span class=mut>(private until they say yes)</span>`:'not made yet. It is created from the clips and shared when they say yes.'}<br>
   Original moment on YouTube: ${yt?`<a target=_blank rel=noopener href="${esc(yt)}">${esc(yt)}</a>`:'no episode link on this lead'}</div></div>`}
 function uniboxV(){const list=UB.view==='drafts'?UB.drafts:UB.replies,cur=list.find(x=>x.mid===UB.sel)||list[0];if(cur)UB.sel=cur.mid;
  const approved=S.leads.filter(l=>isEmailReady(l)&&l.draftedAt&&l.approved).length,firsts=UB.drafts.filter(x=>x.kind==='first');
