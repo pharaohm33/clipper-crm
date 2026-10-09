@@ -42,7 +42,7 @@ const TIERS=[{n:'Starter',clips:20,fee:300},{n:'Growth',clips:50,fee:500},{n:'Sc
 const CNS='Contacted - no sample sent';
 const STATUSES=['New','Sample Sent',CNS,'Replied','Interested','Client','No Response','Not Interested','Removed'];
 const TPL=['{n} podcast full episode','{n} podcast interview','how to start a {n} podcast','{n} podcast new episode'];
-const DEF={settings:{key:'',goal:5000,daily:100,minSubs:0,maxSubs:150000,maxDays:45,minViews:0,needPay:0,onlyHot:1,hotScore:6,apMode:'drafts',apBatch:10,apEvery:15,apMax:25,apDiscover:1,apDiscRounds:6,apOn:0,payMin:1,followDays:3,templates:3,
+const DEF={settings:{key:'',goal:5000,daily:100,minSubs:0,maxSubs:150000,maxDays:45,minViews:0,needPay:0,onlyHot:1,hotScore:6,callOpener:"Hi {name}, this is {sender}. I sent you an email about a short clip I made from your podcast, the part about {topic}. Do you have a minute?",callVoicemail:"Hi {name}, this is {sender}. I made a free short clip from your podcast and emailed it over. No pressure, just wanted to put a voice to the name. Call or text me back at {phone} if you'd like it.",callText:"Hi {name}, it's {sender}. I emailed you a free clip from your podcast (the part about {topic}). Want me to send it over?",apMode:'drafts',apBatch:10,apEvery:15,apMax:25,apDiscover:1,apDiscRounds:6,apOn:0,payMin:1,followDays:3,templates:3,
  syncUrl:'',syncPw:'',geminiKey:'',geminiModel:'gemini-2.5-flash',skipNoContact:1,igOnly:0,useGeminiParse:0,maxShorts:70,emailLimit:20,
  emailSkipMS:true,emailSubjectB:"{name} clips you can post",emailBodyB:"",emailSubject:"made clips from {name}",
  emailBody:"{Hi|Hey}, I {saw|caught|came across} {show_ref} and {really liked|loved|really enjoyed} {topic}. It stuck with me, so I went ahead and made {clips} out of it, ready for Reels, TikTok and YouTube Shorts.\n\n{done_line} {Just reply yes and I'll send {them_it} right over.|Want me to send {them_it} over?}\n\n{Thanks|Best|Cheers},\n{sender}",
@@ -83,7 +83,7 @@ const iso=d=>{const x=d||new Date();return x.getFullYear()+'-'+String(x.getMonth
 const today=()=>iso();const money=n=>'$'+Number(n||0).toLocaleString(undefined,{maximumFractionDigits:2});
 const addDays=(d,n)=>{const x=new Date(d+'T00:00');x.setDate(x.getDate()+n);return iso(x)};
 const monthKey=()=>today().slice(0,7);
-let tab='dash';const TABS=[['dash','Dashboard'],['today','Today'],['leads','Leads'],['email','Email'],['unibox','Unibox'],['find','Find Podcasts'],['money','Money'],['settings','Settings']];
+let tab='dash';const TABS=[['dash','Dashboard'],['today','Today'],['leads','Leads'],['email','Email'],['unibox','Unibox'],['calls','Calls'],['find','Find Podcasts'],['money','Money'],['settings','Settings']];
 function nav(){const waiting=S.leads.filter(l=>l.draftedAt&&!l.emailedAt&&!l.approved&&l.status=='New').length;$('#nav').innerHTML=TABS.map(([k,l])=>`<button class="${k===tab?'on':''}" data-t="${k}">${l}${k==='unibox'&&waiting?` (${waiting})`:''}</button>`).join('')}
 $('#nav').onclick=e=>{if(e.target.dataset.t){tab=e.target.dataset.t;render()}};
 $('#nav').ondragover=e=>{if(e.target.dataset&&e.target.dataset.t==='today'){e.preventDefault();e.dataTransfer.dropEffect='move';e.target.classList.add('drop')}};
@@ -103,7 +103,7 @@ function stats(){
  return{earned,owed,dl,remaining:Math.max(0,S.settings.goal-earned),sentToday:sentOn(today()),sentAll,rep,cl,
   fresh:S.leads.filter(l=>l.status=='New').length,fu:S.leads.filter(l=>l.status=='Sample Sent'&&l.follow&&l.follow<=today()).length,...mrrStats()}}
 function mrrStats(){const act=(S.retainers||[]).filter(r=>r.status=='Active'),mrr=act.reduce((a,r)=>a+(+r.fee||0),0);return{mrr,act:act.length,clipsM:act.reduce((a,r)=>a+(+r.clips||0),0),avgFee:act.length?mrr/act.length:0}}
-function render(){nav();({dash,today:todayV,leads,email:emailV,unibox:uniboxV,find,money:moneyV,settings})[tab]()}
+function render(){nav();({dash,today:todayV,leads,email:emailV,unibox:uniboxV,calls:callsV,find,money:moneyV,settings})[tab]()}
 function dash(){const s=stats(),g=S.settings;const pct=Math.min(100,s.earned/g.goal*100);
  const days=[...Array(14)].map((_,i)=>{const d=iso(new Date(Date.now()-(13-i)*864e5));return[d,sentOn(d)]});const mx=Math.max(g.daily,...days.map(x=>x[1]));
  const byInf={};S.payments.forEach(p=>{(byInf[p.who]=byInf[p.who]||{all:0,mo:0}).all+=p.amount;if(p.date.startsWith(monthKey()))byInf[p.who].mo+=p.amount});
@@ -402,6 +402,7 @@ async function autopilotRun(){
   const mode2=modeNow(),ready=S.leads.filter(l=>isEmailReady(l)&&(mode2!='drafts'||!l.draftedAt)).length;
   if(ready)await step(`3/4  ${ready} lead(s) ready. ${mode2=='send'?'Sending':'Saving as drafts'}`,()=>sendEmails(modeNow(),0,true));
   if(modeNow()==='send'){await step('Follow-ups that are due',async()=>{await sendEmails('send',1,true);await sendEmails('send',2,true)})}
+  if(g.apPhones!==0&&S.leads.some(l=>!l.phone&&!l.dnc&&l.status=='New'&&isHot(l)&&l.email&&!(l.phoneChecked&&Date.now()-l.phoneChecked<14*DAY)))await step('Finding phone numbers for the leads you may want to call',()=>findPhones(15));
   await step('4/4  Checking replies',()=>checkReplies());
   const w1=apWork(),roomLeft=apQueue()<(+g.apMax||25);more=!AP.stop&&(AP.loops=(AP.loops||0)+1)<80&&((w1.total>0&&w1.total<before.total)||(g.apDiscover!==0&&roomLeft&&picks.length>0&&(AP.disc||0)<(+g.apDiscRounds||6)));
  }catch(e){apLog('Stopped: '+(e&&e.message||e));if(!/^stopped$/i.test(String(e&&e.message||e))){try{fetch(RUNNER+'/notify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:'Autopilot needs you',message:'It stopped: '+String(e&&e.message||e).slice(0,160),key:'ap-error',every:1800})})}catch(_){}}}
@@ -464,6 +465,51 @@ async function loadEmailStats(){const el=document.getElementById('email-stats');
  const v=tbl('Version',st.variant||{}),p=tbl('Recipient mail host',st.provider||{},{google:'Google / Gmail',microsoft:'Outlook / Microsoft',other:'Other (custom host)',unknown:'Unknown'});
  el.innerHTML=(v||p)?`<div class="card tw"><b>Results</b> <span class=mut>First emails only. Click "Check replies" to refresh. With fewer than about 100 sent per version, differences can just be luck.</span>${v}${p}</div>`:''}
 async function loadEmailStatus(){try{ES.status=await (await fetch(RUNNER+'/email/status')).json()}catch(e){ES.status=null}emailDyn()}
+
+/* ---------- Calls: public phone numbers, who to call, and what happened ---------- */
+const CALL_OUT={noanswer:'Called, no answer',vm:'Left voicemail',text:'Sent a text',spoke:'Spoke with them',int:'Interested',noint:'Not interested',wrong:'Wrong number',later:'Call back later',dnc:'Do not call'};
+const CS={busy:false,msg:'',open:null};
+const digits10=p=>String(p||'').replace(/\D/g,'').slice(-10);
+const callable=l=>l.phone&&!l.dnc&&!['Client','Not Interested','Removed'].includes(l.status)&&l.callStatus!=='wrong';
+function callRank(l){if(['Replied','Interested'].includes(l.status))return 0;if(l.emailedAt&&l.status=='Sample Sent'&&Date.now()-l.emailedAt>=3*DAY)return 1;if(l.emailedAt)return 2;return isHot(l)?3:4}
+function callScript(k,l){const st=ES.status||{};return String(S.settings[k]||'').replace(/\{name\}/g,(l.name||'there').replace(/ podcast$/i,'')).replace(/\{topic\}/g,l.personalLine||'the episode').replace(/\{sender\}/g,st.sender_name||'Emmanuel').replace(/\{phone\}/g,st.phone||'')}
+function logCall(l,o){(l.callLog=l.callLog||[]).push({t:Date.now(),o});l.callStatus=o;
+ if(o==='int')l.status='Interested';
+ else if(o==='spoke'&&['New','Sample Sent'].includes(l.status))l.status='Replied';
+ else if(o==='noint'||o==='dnc'){l.status='Not Interested';if(o==='dnc')l.dnc=1;if(l.email)fetch(RUNNER+'/email/suppress',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:l.email,why:'asked not to be contacted (call)'})}).catch(()=>{})}
+ save()}
+function callsToday(){const t0=new Date().setHours(0,0,0,0);let n=0,vm=0,tx=0,sp=0;S.leads.forEach(l=>(l.callLog||[]).forEach(c=>{if(c.t>=t0){n++;if(c.o==='vm')vm++;if(c.o==='text')tx++;if(['spoke','int'].includes(c.o))sp++}}));return{n,vm,tx,sp}}
+function findPhones(n){const now=Date.now();
+ const todo=S.leads.filter(l=>!['Removed','Not Interested','Client'].includes(l.status)&&!l.dnc&&!l.phone&&l.name&&!(l.phoneChecked&&now-l.phoneChecked<14*DAY)&&(isHot(l)||l.emailedAt||l.email)).sort((a,b)=>callRank(a)-callRank(b)).slice(0,n).map(l=>({id:l.id,name:l.name,url:l.url,web:l.web,episode:l.episode}));
+ if(!todo.length){CS.msg='Every lead worth calling already has a number, or was checked in the last 14 days.';if(tab=='calls')callsV();return Promise.resolve()}
+ return helperJob('/phones/find',{leads:todo,ai:true},t=>{let r;
+  if(r=parseTag(t,'PHONE')){const l=S.leads.find(x=>x.id==r.id);if(l){l.phone=r.phone;l.phones=r.others||[];l.phoneSource=r.source;l.phoneHow=r.how;l.phoneKind=r.kind;l.phoneChecked=Date.now();if(tab=='calls')callsV()}}
+  else if(r=parseTag(t,'PHONENONE')){const l=S.leads.find(x=>x.id==r.id);if(l)l.phoneChecked=Date.now()}})}
+function callsV(){const L=S.leads.filter(callable).sort((a,b)=>callRank(a)-callRank(b)).slice(0,60),td=callsToday(),noNum=S.leads.filter(l=>!l.phone&&!l.dnc&&!['Removed','Not Interested','Client'].includes(l.status)&&(isHot(l)||l.emailedAt)).length,g=S.settings;
+ const why=['Replied, call them now','Emailed 3+ days ago, no reply','Emailed','Hot lead, not emailed yet','Has a number'];
+ const card=l=>{const last=(l.callLog||[]).slice(-1)[0],open=CS.open==l.id,cls=l.phoneHow&&/Google AI/.test(l.phoneHow);
+  return `<div class="card"><div class="row" style="justify-content:space-between"><div><b>${esc(l.name)}</b> <span class="mut">${esc(l.status)} · ${why[callRank(l)]}</span></div>
+  <div><a class="b p" href="tel:+1${digits10(l.phone)}">${esc(l.phone)}</a> <button class="b" data-cp="${esc(l.phone)}">Copy</button></div></div>
+  <div class="mut" style="margin-top:4px">${esc(l.phoneSource||'typed in')}${l.phoneKind&&l.phoneKind!=='direct or main line'?' · '+esc(l.phoneKind)+' (usually a company line)':''}${cls?' · found by Google AI, confirm the name when someone answers':''}${last?` · last: ${CALL_OUT[last.o]} ${new Date(last.t).toLocaleDateString([],{month:'short',day:'numeric'})}`:''}${(l.callLog||[]).length?` (${l.callLog.length} call${l.callLog.length==1?'':'s'})`:''}</div>
+  <div class="row" style="margin-top:8px">${['noanswer','vm','text','spoke','int','later','noint','wrong','dnc'].map(o=>`<button class="b${o==='int'?' p':''}" data-co="${esc(l.id)}|${o}">${CALL_OUT[o]}</button>`).join('')}</div>
+  <div style="margin-top:6px"><button class="b" data-sc2="${esc(l.id)}">${open?'Hide':'Show'} scripts and call log</button></div>
+  ${open?`<div style="margin-top:6px"><b>Say</b><div class="mut" style="white-space:pre-wrap">${esc(callScript('callOpener',l))}</div><b>Voicemail</b><div class="mut" style="white-space:pre-wrap">${esc(callScript('callVoicemail',l))}</div><b>Text</b> <button class="b" data-cp="${esc(callScript('callText',l))}">Copy text</button><div class="mut" style="white-space:pre-wrap">${esc(callScript('callText',l))}</div>
+   ${(l.callLog||[]).length?`<b>Log</b><div class="mut">${l.callLog.slice().reverse().map(c=>new Date(c.t).toLocaleString([],{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})+' · '+CALL_OUT[c.o]).join('<br>')}</div>`:''}
+   ${(l.phones||[]).length?`<div class="mut">Other numbers seen: ${l.phones.map(esc).join(', ')}</div>`:''}</div>`:''}</div>`};
+ $('#main').innerHTML=`<div class="card"><b>Calls today: ${td.n}</b> <span class="mut">${td.vm} voicemails · ${td.tx} texts · ${td.sp} conversations</span>
+  <div class="row" style="margin-top:8px"><button class="b p" id="fp" ${CS.busy||ES.busy?'disabled':''}>Find phone numbers (${noNum} leads without one)</button><span class="mut">${esc(CS.msg)}</span></div>
+  <p class="mut">Numbers come from the lead's own website, YouTube About page and episode notes, then Google AI as a last resort. Only publicly listed numbers. Check the National Do Not Call list and your state's rules before calling or texting; mark anyone who says stop as "Do not call". Not legal advice.</p>
+  <div class="row"><input id="ph-add" placeholder="Add a number: lead name, then number" style="flex:1"><button class="b" id="ph-add-b">Add</button></div></div>
+  ${L.length?L.map(card).join(''):'<div class="card mut">No leads with a phone number yet. Press "Find phone numbers".</div>'}
+  <div class="card"><b>Scripts</b><p class=mut>{name} {topic} {sender} {phone}</p>
+  <label>Call opener</label><textarea data-ck="callOpener">${esc(g.callOpener)}</textarea><label>Voicemail</label><textarea data-ck="callVoicemail">${esc(g.callVoicemail)}</textarea><label>Text</label><textarea data-ck="callText">${esc(g.callText)}</textarea></div>`;
+ if(!ES.status)loadEmailStatus();
+ $('#fp').onclick=async()=>{CS.busy=true;CS.msg='Searching, this takes a few minutes…';callsV();await findPhones(20);CS.busy=false;CS.msg=ES.msg||'Done.';save();callsV()};
+ $('#ph-add-b').onclick=()=>{const v=$('#ph-add').value.trim(),m=v.match(/(.*?)[\s,:]*(\+?1?[\s.\-]?\(?\d{3}\)?[\s.\-]?\d{3}[\s.\-]?\d{4})\s*$/);if(!m||!m[1].trim())return alert('Type the lead name, then the number.');const q=m[1].toLowerCase().trim(),l=S.leads.find(x=>(x.name||'').toLowerCase().includes(q));if(!l)return alert('No lead matches "'+m[1]+'".');const d=digits10(m[2]);l.phone=`(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}`;l.phoneSource='typed in';l.phoneHow='';save();callsV()};
+ $('#main').onclick=e=>{const d=e.target.dataset;if(d.cp){navigator.clipboard.writeText(d.cp).catch(()=>{});e.target.textContent='Copied'}
+  else if(d.co){const[i,o]=d.co.split('|'),l=S.leads.find(x=>x.id==i);if(l){if(['dnc','noint'].includes(o)&&!confirm(`Mark ${l.name} as ${CALL_OUT[o]}? They will be removed from outreach.`))return;logCall(l,o);callsV()}}
+  else if(d.sc2){CS.open=CS.open==d.sc2?null:d.sc2;callsV()}};
+ $('#main').oninput=e=>{const k=e.target.dataset.ck;if(k){g[k]=e.target.value;save()}}}
 function emailDyn(){const el=document.getElementById('email-dyn');if(!el)return;const f=emailFunnel(),st=ES.status,dis=ES.busy?'disabled':'',canSend=st&&st.ready&&!ES.busy?'':'disabled';
  const bar=(k,v)=>`<div class="stat"><small>${k}</small><b>${v}</b></div>`;
  el.innerHTML=`<div class="grid">${bar('Fresh leads',f.fresh)}${bar('With an email',f.withEmail)}${bar('With a clip ready',f.withClip)}${bar('Ready to email',f.ready)}${bar('Emailed',f.emailed)}${bar('Replied',f.replied)}${bar('Follow-ups due',f.followDue)}</div>

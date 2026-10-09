@@ -16,7 +16,7 @@ from urllib.parse import urlparse, parse_qs
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-import cold_email, email_finder, personalize, auto_reply
+import cold_email, email_finder, personalize, auto_reply, phone_finder
 SCRIPT = os.getenv("RUNNER_SCRIPT", str(HERE / "google_ai_to_crm.py"))
 PORT = int(os.getenv("RUNNER_PORT", "8765"))
 APP_URL = os.getenv("CLIPPER_URL", "http://127.0.0.1:5001").rstrip("/")
@@ -491,6 +491,63 @@ def run_find_emails(leads):
         STATE["running"] = False
 
 
+def run_find_phones(leads, use_ai=True):
+    """Phone numbers, in three steps: their website (fast), a real Chrome visit, then Google AI for the leads that still have none.
+    One 'PHONE {json}' line per lead that got a number, 'PHONENONE {json}' for the rest."""
+    from concurrent.futures import ThreadPoolExecutor
+    try:
+        PIPE["stop"] = False
+
+        def one(item):
+            i, ld = item
+            if PIPE["stop"]:
+                return i, ld, None
+            try:
+                return i, ld, phone_finder.find_phone(ld.get("name") or "", ld.get("url") or "", ld.get("web") or "", ld.get("episode") or "", log=lambda m: None)
+            except Exception as e:
+                return i, ld, {"phone": "", "error": str(e)[:80]}
+        missing = []
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            for i, ld, got in pool.map(one, list(enumerate(leads, 1))):
+                if got is None:
+                    continue
+                if got.get("phone"):
+                    log(f"[{i}/{len(leads)}] {ld.get('name')}: {got['phone']} ({got['how']}, {got['source']})")
+                    log("PHONE " + json.dumps({"id": ld["id"], "phone": got["phone"], "others": got.get("others", []), "source": got["source"], "how": got["how"], "kind": got["kind"]}))
+                else:
+                    missing.append(ld)
+                    log(f"[{i}/{len(leads)}] {ld.get('name')}: no number on their own pages")
+        if missing and use_ai and os.getenv("PHONE_AI", "1") != "0" and not PIPE["stop"]:
+            import tempfile
+            f = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8")
+            json.dump([{k: str(l.get(k) or "")[:300] for k in ("id", "name", "url", "web", "owner", "business")} for l in missing], f)
+            f.close()
+            log(f"[runner] asking Google AI about {len(missing)} lead(s) with no number yet")
+            proc = subprocess.Popen([sys.executable, "-u", str(HERE / "phone_ai.py"), f.name], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=str(HERE),
+                                    env={**os.environ, "PYTHONUNBUFFERED": "1"})
+            STATE["proc"] = proc
+            answered = set()
+            for line in proc.stdout:
+                line = line.rstrip()
+                if "asking you to verify" in line:
+                    log(line)
+                    phone_notify("Google needs you", "Google is asking for a verification and the phone number search is waiting (up to 5 minutes). " + REMOTE_HINT, key="captcha")
+                elif line.startswith("PHONEAI "):
+                    o = json.loads(line[8:])
+                    if o.get("phone"):
+                        answered.add(o["id"])
+                        log("PHONE " + json.dumps({"id": o["id"], "phone": o["phone"], "others": [], "source": "Google AI: " + o.get("where", ""), "how": "Google AI, confirm when you call", "kind": o.get("kind", "")}))
+                else:
+                    log(line)
+            proc.wait()
+            missing = [l for l in missing if l["id"] not in answered]
+        for l in missing:
+            log("PHONENONE " + json.dumps({"id": l["id"]}))
+        log("[runner] phone search finished.")
+    finally:
+        STATE["running"] = False
+
+
 def run_email(leads, template, mode, limit, ignore_window, step):
     try:
         PIPE["stop"] = False
@@ -525,7 +582,7 @@ def email_status():
     if not (cfg.get("phone") or "").strip():
         warnings.append("Add your phone number (python3 tools/setup_email.py, option 3). Automatic replies to people who say yes need it, and nothing is written without it.")
     caps = cold_email.capacity(cfg, log_)
-    return {"warnings": warnings, "auto_reply": "send" if cfg.get("auto_reply") == "send" else "draft", "ready": not problems, "problems": problems, "inboxes": caps, "capacity_left": sum(max(0, c["cap"] - c["sent_today"]) for c in caps),
+    return {"sender_name": cfg.get("sender_name") or "", "phone": cfg.get("phone") or "", "warnings": warnings, "auto_reply": "send" if cfg.get("auto_reply") == "send" else "draft", "ready": not problems, "problems": problems, "inboxes": caps, "capacity_left": sum(max(0, c["cap"] - c["sent_today"]) for c in caps),
             "suppressed": len(cold_email.suppressed()), "suppressed_list": sorted(cold_email.suppressed())[:2000], "in_send_window": cold_email.in_window(cfg),
             "window": cfg.get("send_window") or {"start_hour": 9, "end_hour": 17}}
 
@@ -721,6 +778,23 @@ class H(BaseHTTPRequestHandler):
             if "on" in body:
                 return self._send(200, awake_set(bool(body.get("on")), body.get("minutes") or 180))
             return self._send(200, awake_status())
+        if self.path == "/phones/find":
+            leads = [{k: str(l.get(k) or "")[:300] for k in ("id", "name", "url", "web", "episode", "owner", "business")} for l in (body.get("leads") or [])][:40]
+            if not leads:
+                return self._send(400, {"error": "no leads to search"})
+            with LOCK:
+                if STATE["running"]:
+                    return self._send(409, {"error": "a run is already in progress"})
+                STATE.update(running=True, log=[f"[runner] looking for public phone numbers for {len(leads)} lead(s)"])
+                PIPE["stop"] = False
+                threading.Thread(target=run_find_phones, args=(leads, bool(body.get("ai", True))), daemon=True).start()
+            return self._send(200, {"ok": True, "leads": len(leads)})
+        if self.path == "/email/suppress":
+            addr = str(body.get("email") or "").strip().lower()
+            if "@" not in addr:
+                return self._send(400, {"error": "need an email address"})
+            cold_email.suppress(addr, str(body.get("why") or "asked not to be contacted")[:80])
+            return self._send(200, {"ok": True})
         if self.path == "/email/validate":
             import email_check
             return self._send(200, {"results": {k: email_check.classify(v) for k, v in (body.get("emails") or {}).items()}})
