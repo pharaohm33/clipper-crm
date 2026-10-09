@@ -445,7 +445,7 @@ function uniboxV(){const list=UB.view==='drafts'?UB.drafts:UB.replies,cur=list.f
  on_('ub-d',()=>{UB.view='drafts';UB.sel='';uniboxV()});on_('ub-r',()=>{UB.view='replies';UB.sel='';uniboxV()});on_('ub-load',ubLoad);
  on_('ub-all',()=>{firsts.forEach(x=>{const l=leadByEmail(x.to);if(l)l.approved=true});save();uniboxV();nav()});
  on_('ub-drip',()=>{tab='email';render();setTimeout(()=>document.getElementById('ap-drip')&&document.getElementById('ap-drip').click(),400)});
- on_('ub-ok',()=>{const l=leadByEmail(cur.to);if(l){l.approved=!l.approved;save();uniboxV();nav()}});
+ on_('ub-ok',()=>{const t=Date.now();if(UB.okAt&&t-UB.okAt<900)return;UB.okAt=t;const l=leadByEmail(cur.to);if(l){l.approved=!l.approved;save();uniboxV();nav()}});
  on_('ub-save',async()=>{const s=document.getElementById('ub-subj').value,b=document.getElementById('ub-body').value;UB.msg='Saving...';uniboxV();
   try{const r=await ubPost('/unibox/draft/update',{mid:cur.mid,subject:s,body:b});const l=leadByEmail(cur.to);if(l&&cur.kind==='first'){l.subjectOverride=s;l.bodyOverride=b.replace(/\n\n[^\n]*\nNot interested\?[^\n]*\s*$/,'').split('\n\n--\n')[0].trim()}save();UB.sel=r.mid;await ubLoad();UB.msg='Saved. The sent email will use your edit.'}catch(e){UB.msg='Could not save: '+e.message}uniboxV()});
  on_('ub-del',async()=>{if(!confirm('Remove this draft'+(cur.kind==='first'?' and drop the lead':'')+'?'))return;try{await ubPost('/unibox/draft/delete',{mid:cur.mid});const l=leadByEmail(cur.to);if(l&&cur.kind==='first'){l.status='Removed';l.notes=((l.notes?l.notes+' | ':'')+'Removed from the Unibox')}save();await ubLoad()}catch(e){UB.msg='Could not remove: '+e.message;uniboxV()}});
