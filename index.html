@@ -358,6 +358,10 @@ async function fitBatch(n,log){const g=S.settings;
 
 /* ---------- Autopilot lead finding: asks Google AI (in the open Chrome window) for shows in the next niches, then applies every quality filter ---------- */
 const AP_NICHE_ORDER=['custom home builder','real estate developer','luxury home builder','home builder','real estate investing','commercial real estate','luxury real estate','real estate agent','commercial real estate broker','mortgage broker','financial advisor','wealth management','attorney','insurance agent','med spa owner','chiropractor','solar installation','business coaching','business','luxury vehicles','multifamily investing','real estate syndication','apartment investing','self storage investing','personal finance'];
+const AP_ANGLES=['in Texas','in Florida','in California','in Arizona','in Georgia','in North Carolina','in Tennessee','in Colorado','in Nevada','in Utah','in Ohio','in Michigan','in Illinois','in Pennsylvania','in New York','in New Jersey','in Virginia','in Washington','in Oregon','in Minnesota','in Missouri','in Indiana','in Alabama','in South Carolina','in Louisiana','in Oklahoma','in Kentucky','in Wisconsin','in Maryland','in Massachusetts','in Connecticut','in Idaho','in Kansas','in Arkansas','in Mississippi','in Iowa','in Nebraska','in New Mexico','in Montana','in Delaware','in Hawaii','in Maine','in New Hampshire','in Rhode Island','in South Dakota','in North Dakota','in Vermont','in West Virginia','in Wyoming','in Alaska'];
+/* Same niche, one state at a time: each niche x state is its own search, so there is no waiting. Each combination only repeats after 30 days */
+function nextAngles(n){const all=[...AP_NICHE_ORDER.filter(k=>S.niches.includes(k)),...S.niches.filter(k=>!AP_NICHE_ORDER.includes(k))],out=[];
+ for(const f of AP_ANGLES){for(const q of all){if(searchFresh(skey(q,f))){out.push({q,focus:f});if(out.length>=n)return out}}}return out}
 function nextNiches(n){const ran=S.nicheRun||{},fresh=k=>!(ran[k]&&Date.now()-ran[k]<20*3600e3);
  const all=[...AP_NICHE_ORDER.filter(k=>S.niches.includes(k)),...S.niches.filter(k=>!AP_NICHE_ORDER.includes(k))];
  return all.filter(fresh).slice(0,n)}
@@ -382,7 +386,7 @@ function apWork(){const hot=S.leads.filter(l=>l.status=='New'&&isHot(l));const f
  const needClip=full?0:hot.filter(l=>l.email&&!l.emailWeak&&!l.clipFile&&!l.clipLink&&!l.clipFail&&ytLeads(l)).length;
  const needDraft=S.leads.filter(l=>isEmailReady(l)&&!l.draftedAt).length;
  return{needEmail,needClip,needDraft,total:needEmail+needClip+needDraft,waiting:S.leads.filter(l=>isEmailReady(l)&&l.draftedAt).length}}
-const canDiscover=()=>S.settings.apDiscover!==0&&apQueue()<(+S.settings.apMax||60)&&(nextCustom(1).length||nextNiches(1).length);
+const canDiscover=()=>S.settings.apDiscover!==0&&apQueue()<(+S.settings.apMax||60)&&(nextCustom(1).length||nextNiches(1).length||nextAngles(1).length);
 async function autoSendApproved(){const g=S.settings;if(!g.apAutoSend||AP.running||ES.busy)return;await loadEmailStatus();const st=ES.status;if(!st||!st.ready||!st.in_send_window||!(st.capacity_left>0))return;
  const only=l=>!!(l.draftedAt&&l.approved),n=S.leads.filter(l=>isEmailReady(l)&&only(l)).length;if(!n)return;apLog(`Sending hours: auto-sending approved drafts (${n} approved, ${st.capacity_left} left in today's inbox limits).`);
  await sendEmails('send',0,'drip',only);await reconcileSent();apRender()}
@@ -400,7 +404,7 @@ async function autopilotRun(){
   const w0=apWork();apLog(`Work to do: ${w0.needEmail} to find an email for, ${w0.needClip} to make clips for, ${w0.needDraft} to write, ${S.leads.filter(needsPhone).length} to find a phone number for.`);
   const cap=+g.apMax||60,slots=Math.max(0,cap-apQueue());if(!slots)apLog(`The review queue is full: ${apQueue()} drafts are waiting for you to approve (limit ${cap}). Approve or discard some in the Unibox, or raise "Keep at most", and I will keep filling it.`);
   let discovered=0,picks=[];
-  if(g.apDiscover!==0&&slots&&w0.needEmail+w0.needClip<3&&(AP.disc||0)<(+g.apDiscRounds||6)){const cu=nextCustom(2);picks=[...cu.map(c=>c.q+(c.focus?' '+c.focus:'')),...nextNiches(Math.max(0,3-cu.length)).slice(0,2)];if(picks.length){AP.disc=(AP.disc||0)+1;await step(`Finding more leads with Google AI: ${picks.join(', ')}`,async()=>{discovered=0;for(const c of cu)discovered+=await discoverOne(c.q,c.focus,apLog);const nn=nextNiches(Math.max(0,3-cu.length)).slice(0,2);for(const q of nn)discovered+=await discoverOne(q,'',apLog)})}else apLog('Every niche was searched in the last 20 hours. Add niches or try again tomorrow.')}
+  if(g.apDiscover!==0&&slots&&w0.needEmail+w0.needClip<3&&(AP.disc||0)<(+g.apDiscRounds||6)){const cu=nextCustom(2),want=Math.max(0,3-cu.length),plain=nextNiches(want).slice(0,2).map(q=>({q,focus:''})),jobs=[...cu.map(c=>({q:c.q,focus:c.focus})),...plain,...(plain.length<Math.min(2,want)?nextAngles(Math.min(2,want)-plain.length):[])];picks=jobs.map(j=>j.q+(j.focus?' '+j.focus:''));if(picks.length){AP.disc=(AP.disc||0)+1;await step(`Finding more leads with Google AI: ${picks.join(', ')}`,async()=>{discovered=0;for(const j of jobs)discovered+=await discoverOne(j.q,j.focus,apLog)})}else apLog('Every niche was searched in every state. Add a custom search or niche.')}
   if((w0.needEmail||discovered)&&slots)await step('1/4  Finding emails (3 at a time)',()=>findEmails(Math.min(Math.max(batch,15),slots*2+5)));
   if(S.leads.some(l=>l.status=='New'&&l.email&&!l.emailVerified&&!l.emailedAt))await step('Checking each address is real before any content is made',()=>validateAddresses(apLog));
   if(g.apFit!==0&&S.leads.some(l=>l.status=='New'&&isHot(l)&&l.email&&!l.emailWeak&&!l.fit))await step('Checking each lead is a good fit (Google AI)',async()=>{const r=await fitBatch(12,apLog);if(r.removed)apLog(`  ${r.removed} removed as a bad fit.`)});
@@ -814,14 +818,15 @@ async function findInstagrams(list){let found=0;
 
 /* Custom Google AI searches: whatever the user types runs through the same filters, on its own or inside autopilot */
 const skey=(q,f)=>q+(f?' | '+f:'');
-const searchFresh=k=>!((S.nicheRun||{})[k]&&Date.now()-S.nicheRun[k]<20*3600e3);
+const searchFresh=k=>{const f=k.split(' | ')[1],win=AP_ANGLES.includes(f)?30*864e5:20*3600e3;return !((S.nicheRun||{})[k]&&Date.now()-S.nicheRun[k]<win)};
 function nextCustom(n){return (S.customSearches||[]).filter(c=>c.on!==0&&searchFresh(skey(c.q,c.focus))).slice(0,n)}
 async function discoverOne(q,focus,log){const k=skey(q,focus),n=await aiDiscover([q],log,focus);S.nicheRun=S.nicheRun||{};S.nicheRun[k]=Date.now();
  const st=(S.searchStats=S.searchStats||{})[k]=S.searchStats[k]||{runs:0,found:0};st.runs++;st.found+=n;st.lastFound=n;st.last=Date.now();save();return n}
 function searchRows(){const rows=[],ago=t=>{if(!t)return 'never';const m=Math.round((Date.now()-t)/6e4);return m<60?m+' min ago':m<2880?Math.round(m/60)+' h ago':Math.round(m/1440)+' days ago'};
  const row=(label,k,tag)=>{const st=(S.searchStats||{})[k]||{},ran=(S.nicheRun||{})[k];return `<tr><td>${tag}</td><td>${esc(label)}</td><td>${ago(ran)}</td><td>${st.runs?`${st.lastFound} last time, ${st.found} in ${st.runs} run${st.runs==1?'':'s'}`:'-'}</td><td>${searchFresh(k)?'<b style="color:var(--acc)">ready</b>':'cooling down'}</td></tr>`};
  (S.customSearches||[]).forEach(c=>rows.push(row(c.q+(c.focus?' · '+c.focus:'')+(c.on===0?' (off)':''),skey(c.q,c.focus),'custom')));
- const all=[...AP_NICHE_ORDER.filter(k=>S.niches.includes(k)),...S.niches.filter(k=>!AP_NICHE_ORDER.includes(k))];all.forEach(n=>rows.push(row(n,n,'niche')));return rows.join('')}
+ const all=[...AP_NICHE_ORDER.filter(k=>S.niches.includes(k)),...S.niches.filter(k=>!AP_NICHE_ORDER.includes(k))];all.forEach(n=>rows.push(row(n,n,'niche')));
+ const custom=new Set((S.customSearches||[]).map(c=>skey(c.q,c.focus)));Object.keys(S.nicheRun||{}).filter(k=>k.includes(' | ')&&!custom.has(k)).sort((a,b)=>S.nicheRun[b]-S.nicheRun[a]).slice(0,30).forEach(k=>rows.push(row(k.replace(' | ',' · '),k,'angle')));return rows.join('')}
 function customCard(){return `<div class="card" style="border-color:var(--acc)"><b>Custom Google AI searches</b> <span class=mut>Type any search, e.g. "podcasts hosted by luxury car dealers in Texas". Autopilot runs these first, then the niches below, through the same quality filters.</span>
  <div class="row"><input id="cs-q" style="flex:2;min-width:220px" placeholder="What to search for, e.g. luxury car dealer podcasts"><input id="cs-f" style="flex:1;min-width:180px" placeholder="Optional angle, e.g. in Texas"><button class="b p" id="cs-add">Add</button></div>
  ${(S.customSearches||[]).length?`<div class="row">${S.customSearches.map(c=>`<span style="display:inline-flex;gap:4px;align-items:center;border:1px solid var(--bd,#444);padding:2px 6px;border-radius:6px">${esc(c.q)}${c.focus?' · '+esc(c.focus):''}<button class="b" data-csrun="${esc(c.id)}">Run now</button><button class="b" data-cson="${esc(c.id)}">${c.on===0?'Turn on':'Turn off'}</button><button class="b" data-csdel="${esc(c.id)}">✕</button></span>`).join('')}</div>`:''}
