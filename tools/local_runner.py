@@ -491,6 +491,27 @@ def run_find_emails(leads):
         STATE["running"] = False
 
 
+def run_maps(items):
+    """Google AI: owner + YouTube channel per business. 'MAPS {json}' lines stream back."""
+    try:
+        import tempfile
+        f = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8")
+        json.dump(items, f)
+        f.close()
+        proc = subprocess.Popen([sys.executable, "-u", str(HERE / "maps_youtube.py"), f.name], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=str(HERE),
+                                env={**os.environ, "PYTHONUNBUFFERED": "1"})
+        STATE["proc"] = proc
+        for line in proc.stdout:
+            line = line.rstrip()
+            if "asking you to verify" in line:
+                phone_notify("Google needs you", "Google is asking for a verification and the lookup is waiting (up to 5 minutes). " + REMOTE_HINT, key="captcha")
+            log(line)
+        proc.wait()
+        log("[runner] business lookup finished.")
+    finally:
+        STATE["running"] = False
+
+
 def run_find_phones(leads, use_ai=True):
     """Phone numbers, in three steps: their website (fast), a real Chrome visit, then Google AI for the leads that still have none.
     One 'PHONE {json}' line per lead that got a number, 'PHONENONE {json}' for the rest."""
@@ -789,6 +810,16 @@ class H(BaseHTTPRequestHandler):
                 PIPE["stop"] = False
                 threading.Thread(target=run_find_phones, args=(leads, bool(body.get("ai", True))), daemon=True).start()
             return self._send(200, {"ok": True, "leads": len(leads)})
+        if self.path == "/maps/resolve":
+            items = [{k: str(b.get(k) or "")[:300] for k in ("id", "business", "web", "address", "category")} for b in (body.get("items") or [])][:30]
+            if not items:
+                return self._send(400, {"error": "nothing to look up"})
+            with LOCK:
+                if STATE["running"]:
+                    return self._send(409, {"error": "a run is already in progress"})
+                STATE.update(running=True, log=[f"[runner] checking {len(items)} business(es) for an owner and a YouTube channel"])
+                threading.Thread(target=run_maps, args=(items,), daemon=True).start()
+            return self._send(200, {"ok": True, "items": len(items)})
         if self.path == "/email/suppress":
             addr = str(body.get("email") or "").strip().lower()
             if "@" not in addr:

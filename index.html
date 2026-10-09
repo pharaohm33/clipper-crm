@@ -485,6 +485,22 @@ function findPhones(n){const now=Date.now();
  return helperJob('/phones/find',{leads:todo,ai:true},t=>{let r;
   if(r=parseTag(t,'PHONE')){const l=S.leads.find(x=>x.id==r.id);if(l){l.phone=r.phone;l.phones=r.others||[];l.phoneSource=r.source;l.phoneHow=r.how;l.phoneKind=r.kind;l.phoneChecked=Date.now();if(tab=='calls')callsV()}}
   else if(r=parseTag(t,'PHONENONE')){const l=S.leads.find(x=>x.id==r.id);if(l)l.phoneChecked=Date.now()}})}
+
+/* Google Maps scrape import: keep only businesses whose owner has a YouTube channel */
+function parseCSV(t){const rows=[];let r=[],c='',q=false;for(let i=0;i<t.length;i++){const ch=t[i];if(q){if(ch=='"'){if(t[i+1]=='"'){c+='"';i++}else q=false}else c+=ch}else if(ch=='"')q=true;else if(ch==','){r.push(c);c=''}else if(ch=='\n'||ch=='\r'){if(ch=='\r'&&t[i+1]=='\n')i++;r.push(c);c='';if(r.some(x=>x.trim()))rows.push(r);r=[]}else c+=ch}
+ r.push(c);if(r.some(x=>x.trim()))rows.push(r);return rows}
+function importMapsCSV(text){const rows=parseCSV(text);if(rows.length<2)return 0;const hd=rows[0].map(x=>x.toLowerCase().trim()),col=(...re)=>hd.findIndex(x=>re.some(r=>r.test(x)));
+ const cN=col(/^(name|title|business|business name|company)$/),cP=col(/phone|mobile|cell/),cW=col(/website|web|url|site/),cA=col(/address/),cC=col(/categor|type/),cO=col(/owner|contact name/);
+ if(cN<0)return -1;S.mapsQ=S.mapsQ||[];const have=new Set([...S.mapsQ.map(x=>x.business.toLowerCase()),...S.leads.map(l=>(l.business||'').toLowerCase())]);let n=0;
+ for(const r of rows.slice(1)){const b=(r[cN]||'').trim();if(!b||have.has(b.toLowerCase()))continue;have.add(b.toLowerCase());
+  S.mapsQ.push({id:'MQ'+Date.now().toString(36)+n,business:b,phone:cP>=0?(r[cP]||'').trim():'',web:cW>=0?(r[cW]||'').trim():'',address:cA>=0?(r[cA]||'').trim():'',category:cC>=0?(r[cC]||'').trim():'',owner:cO>=0?(r[cO]||'').trim():''});n++}
+ save();return n}
+function resolveMaps(n){const todo=(S.mapsQ||[]).slice(0,n);if(!todo.length){CS.msg='The import list is empty.';return Promise.resolve()}
+ return helperJob('/maps/resolve',{items:todo},t=>{let r;if(r=parseTag(t,'MAPS')){const i=(S.mapsQ||[]).findIndex(x=>x.id==r.id);if(i<0)return;const q=S.mapsQ[i];S.mapsQ.splice(i,1);
+  if(r.none){S.mapsSkipped=(S.mapsSkipped||0)+1;save();return}
+  if(S.leads.some(l=>l.url==r.channel_url)){save();return}
+  const d=digits10(q.phone);S.leads.push({id:'M'+r.channel_url.split('/').pop().replace(/[^\w]/g,'').slice(0,30),name:r.channel_name||q.business,business:q.business,owner:r.owner||q.owner||'',url:r.channel_url,web:q.web,
+   phone:d.length==10?`(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}`:'',phoneSource:'Google Maps listing',phoneHow:'maps',status:'New',source:'maps',address:q.address,added:today()});save()}})}
 function callsV(){const L=S.leads.filter(callable).sort((a,b)=>callRank(a)-callRank(b)).slice(0,60),td=callsToday(),noNum=S.leads.filter(l=>!l.phone&&!l.dnc&&!['Removed','Not Interested','Client'].includes(l.status)&&(isHot(l)||l.emailedAt)).length,g=S.settings;
  const why=['Replied, call them now','Emailed 3+ days ago, no reply','Emailed','Hot lead, not emailed yet','Has a number'];
  const card=l=>{const last=(l.callLog||[]).slice(-1)[0],open=CS.open==l.id,cls=l.phoneHow&&/Google AI/.test(l.phoneHow);
@@ -499,12 +515,17 @@ function callsV(){const L=S.leads.filter(callable).sort((a,b)=>callRank(a)-callR
  $('#main').innerHTML=`<div class="card"><b>Calls today: ${td.n}</b> <span class="mut">${td.vm} voicemails · ${td.tx} texts · ${td.sp} conversations</span>
   <div class="row" style="margin-top:8px"><button class="b p" id="fp" ${CS.busy||ES.busy?'disabled':''}>Find phone numbers (${noNum} leads without one)</button><span class="mut">${esc(CS.msg)}</span></div>
   <p class="mut">Numbers come from the lead's own website, YouTube About page and episode notes, then Google AI as a last resort. Only publicly listed numbers. Check the National Do Not Call list and your state's rules before calling or texting; mark anyone who says stop as "Do not call". Not legal advice.</p>
+  <div class="row" style="margin-top:6px"><label class="mut">Google Maps CSV (name, phone, website, address columns; an extra phone column from a skip-trace export works too)</label><input type="file" id="mp-file" accept=".csv"></div>
+  ${(S.mapsQ||[]).length?`<div class="row"><b>${S.mapsQ.length} businesses waiting.</b> <button class="b p" id="mp-go" ${CS.busy||ES.busy?'disabled':''}>Find owners + YouTube channels (Google AI, 15 at a time)</button></div>`:''}
+  ${S.mapsSkipped?`<div class="mut">${S.mapsSkipped} skipped so far because no YouTube channel was found.</div>`:''}
   <div class="row"><input id="ph-add" placeholder="Add a number: lead name, then number" style="flex:1"><button class="b" id="ph-add-b">Add</button></div></div>
   ${L.length?L.map(card).join(''):'<div class="card mut">No leads with a phone number yet. Press "Find phone numbers".</div>'}
   <div class="card"><b>Scripts</b><p class=mut>{name} {topic} {sender} {phone}</p>
   <label>Call opener</label><textarea data-ck="callOpener">${esc(g.callOpener)}</textarea><label>Voicemail</label><textarea data-ck="callVoicemail">${esc(g.callVoicemail)}</textarea><label>Text</label><textarea data-ck="callText">${esc(g.callText)}</textarea></div>`;
  if(!ES.status)loadEmailStatus();
  $('#fp').onclick=async()=>{CS.busy=true;CS.msg='Searching, this takes a few minutes…';callsV();await findPhones(20);CS.busy=false;CS.msg=ES.msg||'Done.';save();callsV()};
+ $('#mp-file').onchange=async e=>{const f=e.target.files[0];if(!f)return;const n=importMapsCSV(await f.text());CS.msg=n<0?'Could not find a business name column.':`Added ${n} businesses.`;callsV()};
+ const mg=$('#mp-go');if(mg)mg.onclick=async()=>{CS.busy=true;CS.msg='Asking Google AI, about a minute per business…';callsV();await resolveMaps(15);CS.busy=false;CS.msg=ES.msg||'Done. Leads with a channel were added.';save();callsV()};
  $('#ph-add-b').onclick=()=>{const v=$('#ph-add').value.trim(),m=v.match(/(.*?)[\s,:]*(\+?1?[\s.\-]?\(?\d{3}\)?[\s.\-]?\d{3}[\s.\-]?\d{4})\s*$/);if(!m||!m[1].trim())return alert('Type the lead name, then the number.');const q=m[1].toLowerCase().trim(),l=S.leads.find(x=>(x.name||'').toLowerCase().includes(q));if(!l)return alert('No lead matches "'+m[1]+'".');const d=digits10(m[2]);l.phone=`(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}`;l.phoneSource='typed in';l.phoneHow='';save();callsV()};
  $('#main').onclick=e=>{const d=e.target.dataset;if(d.cp){navigator.clipboard.writeText(d.cp).catch(()=>{});e.target.textContent='Copied'}
   else if(d.co){const[i,o]=d.co.split('|'),l=S.leads.find(x=>x.id==i);if(l){if(['dnc','noint'].includes(o)&&!confirm(`Mark ${l.name} as ${CALL_OUT[o]}? They will be removed from outreach.`))return;logCall(l,o);callsV()}}
