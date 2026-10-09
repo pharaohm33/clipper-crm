@@ -391,18 +391,19 @@ async function autopilotRun(){
  try{
   await reconcileSent();await pollClipper();const hp=pollClipper.last;if(!hp)throw new Error('The helper is not running. Start it: cd ~/clipper-crm && python3 tools/local_runner.py');
   const clipperOn=hp.state==='on';if(!clipperOn)apLog('The clipper app is '+hp.state+', so new clips are skipped this time.');
-  const w0=apWork();apLog(`Work to do: ${w0.needEmail} to find an email for, ${w0.needClip} to make clips for, ${w0.needDraft} to write.`);
+  const w0=apWork();apLog(`Work to do: ${w0.needEmail} to find an email for, ${w0.needClip} to make clips for, ${w0.needDraft} to write, ${S.leads.filter(needsPhone).length} to find a phone number for.`);
   const cap=+g.apMax||25,slots=Math.max(0,cap-apQueue());if(!slots)apLog(`The queue is full: ${apQueue()} emails are ready (one day's worth). Approve and drip-send some, then I will refill it.`);
   let discovered=0,picks=[];
   if(g.apDiscover!==0&&slots&&w0.needEmail+w0.needClip<3&&(AP.disc||0)<(+g.apDiscRounds||6)){picks=nextNiches(2);if(picks.length){AP.disc=(AP.disc||0)+1;await step(`Finding more leads with Google AI: ${picks.join(', ')}`,async()=>{discovered=await aiDiscover(picks,apLog)})}else apLog('Every niche was searched in the last 20 hours. Add niches or try again tomorrow.')}
   if((w0.needEmail||discovered)&&slots)await step('1/4  Finding emails (3 at a time)',()=>findEmails(Math.min(Math.max(batch,15),slots*2+5)));
   if(S.leads.some(l=>l.status=='New'&&l.email&&!l.emailVerified&&!l.emailedAt))await step('Checking each address is real before any content is made',()=>validateAddresses(apLog));
   if(g.apFit!==0&&S.leads.some(l=>l.status=='New'&&isHot(l)&&l.email&&!l.emailWeak&&!l.fit))await step('Checking each lead is a good fit (Google AI)',async()=>{const r=await fitBatch(12,apLog);if(r.removed)apLog(`  ${r.removed} removed as a bad fit.`)});
+  if((S.mapsQ||[]).length)await step(`Checking ${Math.min(15,S.mapsQ.length)} Google Maps businesses for an owner and a YouTube channel`,()=>resolveMaps(15));
+  if(g.apPhones!==0&&S.leads.some(needsPhone))await step('Finding phone numbers for the best leads (website, Chrome, then Google AI)',()=>findPhones(15));
   if(clipperOn&&slots&&apWork().needClip)await step('2/4  Making clips (up to 3 each) and topic lines',()=>prepareClips(Math.min(batch,slots),true,true));
   const mode2=modeNow(),ready=S.leads.filter(l=>isEmailReady(l)&&(mode2!='drafts'||!l.draftedAt)).length;
   if(ready)await step(`3/4  ${ready} lead(s) ready. ${mode2=='send'?'Sending':'Saving as drafts'}`,()=>sendEmails(modeNow(),0,true));
   if(modeNow()==='send'){await step('Follow-ups that are due',async()=>{await sendEmails('send',1,true);await sendEmails('send',2,true)})}
-  if(g.apPhones!==0&&S.leads.some(l=>!l.phone&&!l.dnc&&l.status=='New'&&isHot(l)&&l.email&&!(l.phoneChecked&&Date.now()-l.phoneChecked<14*DAY)))await step('Finding phone numbers for the leads you may want to call',()=>findPhones(15));
   await step('4/4  Checking replies',()=>checkReplies());
   const w1=apWork(),roomLeft=apQueue()<(+g.apMax||25);more=!AP.stop&&(AP.loops=(AP.loops||0)+1)<80&&((w1.total>0&&w1.total<before.total)||(g.apDiscover!==0&&roomLeft&&picks.length>0&&(AP.disc||0)<(+g.apDiscRounds||6)));
  }catch(e){apLog('Stopped: '+(e&&e.message||e));if(!/^stopped$/i.test(String(e&&e.message||e))){try{fetch(RUNNER+'/notify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:'Autopilot needs you',message:'It stopped: '+String(e&&e.message||e).slice(0,160),key:'ap-error',every:1800})})}catch(_){}}}
@@ -479,8 +480,10 @@ function logCall(l,o){(l.callLog=l.callLog||[]).push({t:Date.now(),o});l.callSta
  else if(o==='noint'||o==='dnc'){l.status='Not Interested';if(o==='dnc')l.dnc=1;if(l.email)fetch(RUNNER+'/email/suppress',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:l.email,why:'asked not to be contacted (call)'})}).catch(()=>{})}
  save()}
 function callsToday(){const t0=new Date().setHours(0,0,0,0);let n=0,vm=0,tx=0,sp=0;S.leads.forEach(l=>(l.callLog||[]).forEach(c=>{if(c.t>=t0){n++;if(c.o==='vm')vm++;if(c.o==='text')tx++;if(['spoke','int'].includes(c.o))sp++}}));return{n,vm,tx,sp}}
+const needsPhone=l=>!l.phone&&!l.dnc&&l.name&&['New','Sample Sent'].includes(l.status)&&isHot(l)&&!l.clipFail&&!(l.phoneChecked&&Date.now()-l.phoneChecked<14*DAY);
+const callReady=()=>S.leads.filter(l=>callable(l)&&(isHot(l)||l.emailedAt||l.source=='maps')).length;
 function findPhones(n){const now=Date.now();
- const todo=S.leads.filter(l=>!['Removed','Not Interested','Client'].includes(l.status)&&!l.dnc&&!l.phone&&l.name&&!(l.phoneChecked&&now-l.phoneChecked<14*DAY)&&(isHot(l)||l.emailedAt||l.email)).sort((a,b)=>callRank(a)-callRank(b)).slice(0,n).map(l=>({id:l.id,name:l.name,url:l.url,web:l.web,episode:l.episode}));
+ const todo=S.leads.filter(l=>!['Removed','Not Interested','Client'].includes(l.status)&&!l.dnc&&!l.phone&&l.name&&!(l.phoneChecked&&now-l.phoneChecked<14*DAY)&&(isHot(l)||l.emailedAt)).sort((a,b)=>callRank(a)-callRank(b)).slice(0,n).map(l=>({id:l.id,name:l.name,url:l.url,web:l.web,episode:l.episode}));
  if(!todo.length){CS.msg='Every lead worth calling already has a number, or was checked in the last 14 days.';if(tab=='calls')callsV();return Promise.resolve()}
  return helperJob('/phones/find',{leads:todo,ai:true},t=>{let r;
   if(r=parseTag(t,'PHONE')){const l=S.leads.find(x=>x.id==r.id);if(l){l.phone=r.phone;l.phones=r.others||[];l.phoneSource=r.source;l.phoneHow=r.how;l.phoneKind=r.kind;l.phoneChecked=Date.now();if(tab=='calls')callsV()}}
@@ -512,7 +515,7 @@ function callsV(){const L=S.leads.filter(callable).sort((a,b)=>callRank(a)-callR
   ${open?`<div style="margin-top:6px"><b>Say</b><div class="mut" style="white-space:pre-wrap">${esc(callScript('callOpener',l))}</div><b>Voicemail</b><div class="mut" style="white-space:pre-wrap">${esc(callScript('callVoicemail',l))}</div><b>Text</b> <button class="b" data-cp="${esc(callScript('callText',l))}">Copy text</button><div class="mut" style="white-space:pre-wrap">${esc(callScript('callText',l))}</div>
    ${(l.callLog||[]).length?`<b>Log</b><div class="mut">${l.callLog.slice().reverse().map(c=>new Date(c.t).toLocaleString([],{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})+' · '+CALL_OUT[c.o]).join('<br>')}</div>`:''}
    ${(l.phones||[]).length?`<div class="mut">Other numbers seen: ${l.phones.map(esc).join(', ')}</div>`:''}</div>`:''}</div>`};
- $('#main').innerHTML=`<div class="card"><b>Calls today: ${td.n}</b> <span class="mut">${td.vm} voicemails · ${td.tx} texts · ${td.sp} conversations</span>
+ $('#main').innerHTML=`<div class="card"><b>Calls today: ${td.n}</b> <span class=mut>· ${callReady()} good leads with a number ready</span> <span class="mut">${td.vm} voicemails · ${td.tx} texts · ${td.sp} conversations</span>
   <div class="row" style="margin-top:8px"><button class="b p" id="fp" ${CS.busy||ES.busy?'disabled':''}>Find phone numbers (${noNum} leads without one)</button><span class="mut">${esc(CS.msg)}</span></div>
   <p class="mut">Numbers come from the lead's own website, YouTube About page and episode notes, then Google AI as a last resort. Only publicly listed numbers. Check the National Do Not Call list and your state's rules before calling or texting; mark anyone who says stop as "Do not call". Not legal advice.</p>
   <div class="row" style="margin-top:6px"><label class="mut">Google Maps CSV (name, phone, website, address columns; an extra phone column from a skip-trace export works too)</label><input type="file" id="mp-file" accept=".csv"></div>
