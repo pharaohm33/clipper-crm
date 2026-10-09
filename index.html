@@ -399,8 +399,10 @@ async function autopilotRun(){
   if(S.leads.some(l=>l.status=='New'&&l.email&&!l.emailVerified&&!l.emailedAt))await step('Checking each address is real before any content is made',()=>validateAddresses(apLog));
   if(g.apFit!==0&&S.leads.some(l=>l.status=='New'&&isHot(l)&&l.email&&!l.emailWeak&&!l.fit))await step('Checking each lead is a good fit (Google AI)',async()=>{const r=await fitBatch(12,apLog);if(r.removed)apLog(`  ${r.removed} removed as a bad fit.`)});
   if((S.mapsQ||[]).length)await step(`Checking ${Math.min(15,S.mapsQ.length)} Google Maps businesses for an owner and a YouTube channel`,()=>resolveMaps(15));
+  await syncHandoffLinks(true);
   if(g.apPhones!==0&&S.leads.some(needsPhone))await step('Finding phone numbers for the best leads (website, Chrome, then Google AI)',()=>findPhones(15));
   if(clipperOn&&slots&&apWork().needClip)await step('2/4  Making clips (up to 3 each) and topic lines',()=>prepareClips(Math.min(batch,slots),true,true));
+  await syncHandoffLinks(true);
   const mode2=modeNow(),ready=S.leads.filter(l=>isEmailReady(l)&&(mode2!='drafts'||!l.draftedAt)).length;
   if(ready)await step(`3/4  ${ready} lead(s) ready. ${mode2=='send'?'Sending':'Saving as drafts'}`,()=>sendEmails(modeNow(),0,true));
   if(modeNow()==='send'){await step('Follow-ups that are due',async()=>{await sendEmails('send',1,true);await sendEmails('send',2,true)})}
@@ -526,14 +528,18 @@ function resolveMaps(n){const todo=(S.mapsQ||[]).slice(0,n);if(!todo.length){CS.
   const d=digits10(q.phone);S.leads.push({id:'M'+r.channel_url.split('/').pop().replace(/[^\w]/g,'').slice(0,30),name:r.channel_name||q.business,business:q.business,owner:r.owner||q.owner||'',url:r.channel_url,web:q.web,
    phone:d.length==10?`(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}`:'',phoneSource:'Google Maps listing',phoneHow:'maps',status:'New',source:'maps',address:q.address,added:today()});save()}})}
 
-function leadLinks(l){const a=(u,t)=>u?`<a href="${esc(u)}" target="_blank" rel="noopener">${esc(t||u)}</a>`:'<span class=mut>not saved</span>',ep=l.episode?l.episode+(l.ytStart&&!/[?&]t=/.test(l.episode)?(l.episode.includes('?')?'&':'?')+'t='+Math.floor(l.ytStart)+'s':''):'';
+let SYNC_H=0;
+async function syncHandoffLinks(force){const need=S.leads.filter(l=>l.sampleSlug&&!l.handoffLink);if(!need.length||(!force&&Date.now()-SYNC_H<120000))return 0;SYNC_H=Date.now();
+ try{const r=await (await fetch(RUNNER+'/handoff/lookup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({slugs:[...new Set(need.map(l=>l.sampleSlug))]})})).json();let n=0;
+  need.forEach(l=>{const k=r.links&&r.links[l.sampleSlug];if(k){l.handoffLink=k;n++}});if(n){save();if(tab=='calls')callsV()}return n}catch(e){return 0}}
+function sheetFromReplyDraft(l){const em=String(l.email||'').toLowerCase(),d=(UB.drafts||[]).find(x=>x.kind==='reply'&&String(x.to||'').toLowerCase()===em),m=d&&String(d.body||'').match(/https:\/\/docs\.google\.com\/[^\s<>"')]+/);return m?m[0]:''}
+function leadLinks(l){if(!l.handoffLink){const s=sheetFromReplyDraft(l);if(s){l.handoffLink=s;save()}}const a=(u,t)=>u?`<a href="${esc(u)}" target="_blank" rel="noopener">${esc(t||u)}</a>`:'<span class=mut>not saved</span>',ep=l.episode?l.episode+(l.ytStart&&!/[?&]t=/.test(l.episode)?(l.episode.includes('?')?'&':'?')+'t='+Math.floor(l.ytStart)+'s':''):'';
  const clips=(l.clipLinks||[]).filter(Boolean),file=(l.clipFiles||[l.clipFile]).filter(Boolean)[0]||l.sampleFile;
  return `<div style="border:1px solid var(--bd,#444);border-radius:6px;padding:6px;margin-bottom:6px"><b>Links</b>
   <div>YouTube channel: ${a(l.url)}</div>
   <div>Episode clipped: ${a(ep,l.epTitle||ep)}${l.clipTitle?` <span class=mut>· clip: ${esc(l.clipTitle)}</span>`:''}</div>
   ${clips.length?`<div>Clip link${clips.length>1?'s':''}: ${clips.map((u,i)=>a(u,'clip '+(i+1))).join(' · ')}</div>`:''}
-  <div>Handoff sheet: ${l.handoffLink?`${a(l.handoffLink,'open the sheet')} <button class="b" data-cp="${esc(l.handoffLink)}">Copy link</button>`:(l.sampleSlug?`<button class="b" data-handoff="${esc(l.id)}">Get the link</button> <span class=mut>anyone with the link can view the sheet and clips</span>`:'<span class=mut>no clip folder yet</span>')}</div>
-  <div>Client folder: ${file?`<button class="b" data-revealf="${esc(file)}">Open client folder</button> <span class=mut>${esc(l.sampleDir||'')}</span>`:'<span class=mut>no clip made yet</span>'}</div></div>`}
+  <div>Client folder (Google Sheet, the same link as in your yes-reply draft): ${l.handoffLink?`${a(l.handoffLink,'open the sheet')} <button class="b" data-cp="${esc(l.handoffLink)}">Copy link</button> ${l.handoffPublic?'<span class=mut>public</span>':`<button class="b" data-handoff="${esc(l.id)}">Make it public</button> <span class=mut>saved automatically, private until they say yes</span>`}`:(l.sampleSlug?`<button class="b" data-handoff="${esc(l.id)}">Get the link</button> <span class=mut>anyone with the link can view the sheet and clips</span>`:'<span class=mut>no clips made yet</span>')}</div></div>`}
 function callsV(){const L=S.leads.filter(callable).sort((a,b)=>callRank(a)-callRank(b)).slice(0,60),td=callsToday(),noNum=S.leads.filter(l=>!l.phone&&!l.dnc&&!['Removed','Not Interested','Client'].includes(l.status)&&(isHot(l)||l.emailedAt)).length,g=S.settings;
  const why=['Replied, call them now','Emailed 3+ days ago, no reply','Emailed','Hot lead, not emailed yet','Has a number'];
  const card=l=>{const last=(l.callLog||[]).slice(-1)[0],open=CS.open==l.id,cls=l.phoneHow&&/Google AI/.test(l.phoneHow);
@@ -558,6 +564,7 @@ function callsV(){const L=S.leads.filter(callable).sort((a,b)=>callRank(a)-callR
   <label>Google AI phone search prompt <span class=mut>(used when the website and Chrome visit find nothing). Fill-ins: {who} = the channel owner and the business they own, {owner} {business} {name} {where}. The JSON answer line is added for you if you leave it out.</span></label><textarea data-ck="phonePrompt" rows="5" placeholder="${esc(DEF_PHONE_PROMPT)}">${esc(g.phonePrompt||DEF_PHONE_PROMPT)}</textarea><div class="row"><button class="b" id="pp-reset">Reset to the default prompt</button></div>
   <label>Call opener</label><textarea data-ck="callOpener">${esc(g.callOpener)}</textarea><label>Voicemail</label><textarea data-ck="callVoicemail">${esc(g.callVoicemail)}</textarea><label>Text</label><textarea data-ck="callText">${esc(g.callText)}</textarea></div>`;
  if(!ES.status)loadEmailStatus();
+ syncHandoffLinks();
  $('#fp').onclick=async()=>{CS.busy=true;CS.msg='Searching, this takes a few minutes…';callsV();await findPhones(20);CS.busy=false;CS.msg=ES.msg||'Done.';save();callsV()};
  $('#mp-file').onchange=async e=>{const f=e.target.files[0];if(!f)return;const n=importMapsCSV(await f.text());CS.msg=n<0?'Could not find a business name column.':`Added ${n} businesses.`;callsV()};
  const mg=$('#mp-go');if(mg)mg.onclick=async()=>{CS.busy=true;CS.msg='Asking Google AI, about a minute per business…';callsV();await resolveMaps(15);CS.busy=false;CS.msg=ES.msg||'Done. Leads with a channel were added.';save();callsV()};
@@ -567,7 +574,7 @@ function callsV(){const L=S.leads.filter(callable).sort((a,b)=>callRank(a)-callR
   else if(d.mail){const l=S.leads.find(x=>x.id==d.mail);if(CS.mail[l.id]&&!CS.mail[l.id].loading){delete CS.mail[l.id];callsV()}else callsMail(l)}
   else if(d.ubox){const l=S.leads.find(x=>x.id==d.ubox),em=String(l.email||'').toLowerCase();tab='unibox';const hasReply=UB.replies.some(x=>String(x.from||'').toLowerCase().includes(em)),dr=UB.drafts.find(x=>String(x.to||'').toLowerCase()==em);UB.view=hasReply?'replies':'drafts';if(hasReply)UB.sel=UB.replies.find(x=>String(x.from||'').toLowerCase().includes(em)).mid;else if(dr)UB.sel=dr.mid;render();if(!UB.drafts.length&&!UB.replies.length)ubLoad()}
   else if(d.handoff){const l=S.leads.find(x=>x.id==d.handoff),bt=e.target;bt.disabled=true;bt.textContent='Making the link…';
-   fetch(RUNNER+'/handoff/share',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({slug:l.sampleSlug})}).then(x=>x.json()).then(r=>{if(r.error){alert(r.error);bt.disabled=false;bt.textContent='Get the link';return}l.handoffLink=r.link;save();callsV()}).catch(()=>{alert('Helper not running.');bt.disabled=false;bt.textContent='Get the link'})}
+   fetch(RUNNER+'/handoff/share',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({slug:l.sampleSlug})}).then(x=>x.json()).then(r=>{if(r.error){alert(r.error);bt.disabled=false;bt.textContent='Get the link';return}l.handoffLink=r.link;l.handoffPublic=1;save();callsV()}).catch(()=>{alert('Helper not running.');bt.disabled=false;bt.textContent='Get the link'})}
   else if(d.revealf){fetch(RUNNER+'/reveal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:d.revealf})}).then(x=>x.json()).then(r=>{if(r.error)alert(r.error)}).catch(()=>alert('Helper not running.'))}
   else if(d.rmcall){const[i,t]=d.rmcall.split('|'),l=S.leads.find(x=>x.id==i);if(l&&confirm('Remove this call entry'+((l.callLog||[]).slice(-1)[0]&&String((l.callLog.slice(-1)[0]).t)===t?' and undo the status change it made?':'?'))){removeCall(l,+t);callsV()}}
   else if(d.sc2){CS.open=CS.open==d.sc2?null:d.sc2;callsV()}};

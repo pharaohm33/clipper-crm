@@ -740,6 +740,12 @@ class H(BaseHTTPRequestHandler):
                 PIPE["stop"] = False
                 threading.Thread(target=run_personalize, args=(leads,), daemon=True).start()
             return self._send(200, {"ok": True, "leads": len(leads)})
+        if self.path == "/handoff/lookup":
+            code, res = app_call("/api/handoff/list", None, timeout=15)
+            if code != 200:
+                return self._send(502, {"error": "the clipper app is not running"})
+            want = set(str(s) for s in (body.get("slugs") or []))
+            return self._send(200, {"links": {s["slug"]: s["link"] for s in (res.get("sheets") or []) if s.get("slug") in want and s.get("link")}})
         if self.path == "/handoff/share":
             slug = str(body.get("slug") or "").strip()
             if not slug:
