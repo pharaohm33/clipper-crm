@@ -172,7 +172,7 @@ def _day(ts):
 
 
 def warm_cap(acct, cfg, log):
-    w = cfg.get("warmup") or {}
+    w = {**(cfg.get("warmup") or {}), **(acct.get("warmup") or {})}  # an inbox can have its own ramp, e.g. a newer domain that starts lower
     mine = [e["ts"] for e in sent_entries(log) if e.get("from") == acct["email"]]
     days_active = (datetime.now().date() - _day(min(mine))).days if mine else 0
     cap = int(w.get("start", 5)) + int(w.get("add_per_day", 3)) * days_active
