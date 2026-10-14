@@ -73,7 +73,10 @@ def extract(text, tel_links=(), schema=()):
             continue
         around = text[max(0, m.start() - 28): m.end() + 12]
         if CONTEXT.search(around):
+            n = len(found)
             add(m, "next to a phone word", 2)
+            if len(found) > n:  # the page itself calls it a cell / mobile / text number
+                found[-1]["mobile"] = bool(re.search(r"\bcell\b|mobile|\btext\b|\bsms\b", around, re.I))
     found.sort(key=lambda x: (x["rank"], x["kind"] == "toll free"))
     return found
 

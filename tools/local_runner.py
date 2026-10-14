@@ -16,7 +16,7 @@ from urllib.parse import urlparse, parse_qs
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-import cold_email, email_finder, personalize, auto_reply, phone_finder
+import cold_email, email_finder, personalize, auto_reply, phone_finder, coach_finder
 SCRIPT = os.getenv("RUNNER_SCRIPT", str(HERE / "google_ai_to_crm.py"))
 PORT = int(os.getenv("RUNNER_PORT", "8765"))
 APP_URL = os.getenv("CLIPPER_URL", "http://127.0.0.1:5001").rstrip("/")
@@ -464,6 +464,61 @@ def run_personalize(leads):
         STATE["running"] = False
 
 
+def run_find_coaches(job):
+    """Asks Google AI for independent coaches (names and websites only), then keeps the ones whose own website checks out.
+    One 'COACH {json}' line per kept coach, with the email and phone found on that website."""
+    import tempfile
+    try:
+        PIPE["stop"] = False
+        f = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8")
+        json.dump(job, f)
+        f.close()
+        proc = subprocess.Popen([sys.executable, "-u", str(HERE / "coach_finder.py"), "discover", f.name], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                cwd=str(HERE), env={**os.environ, "PYTHONUNBUFFERED": "1"})
+        STATE["proc"] = proc
+        for line in proc.stdout:
+            line = line.rstrip()
+            if "asking you to verify" in line:
+                log(line)
+                phone_notify("Google needs you", "Google is asking for a verification and the coach search is waiting (up to 5 minutes). " + REMOTE_HINT, key="captcha")
+            else:
+                log(line)
+        proc.wait()
+        log("[runner] coach search finished.")
+    finally:
+        STATE["running"] = False
+
+
+def run_enrich_coaches(prospects):
+    """Public email and phone for prospects that have a website, read from the site's own pages (no browser). 'CONTACT {json}' per prospect."""
+    from concurrent.futures import ThreadPoolExecutor
+    try:
+        PIPE["stop"] = False
+
+        def one(p):
+            if PIPE["stop"]:
+                return p, None
+            try:
+                return p, coach_finder.contacts(coach_finder.origin(p.get("website")))
+            except Exception as e:
+                return p, {"error": str(e)[:80]}
+        n = 0
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            for i, (p, got) in enumerate(pool.map(one, prospects), 1):
+                if got is None:
+                    continue
+                if got.get("email") or got.get("phone"):
+                    n += 1
+                    log(f"[{i}/{len(prospects)}] {p.get('name')}: {got.get('email') or 'no email'} / {got.get('phone') or 'no phone'}")
+                    log("CONTACT " + json.dumps({"id": p["id"], **{k: got.get(k) for k in ("email", "email_quality", "phone", "phone_mobile", "phone_how", "others")}}))
+                else:
+                    log(f"[{i}/{len(prospects)}] {p.get('name')}: nothing on their own pages")
+                    log("CONTACTNONE " + json.dumps({"id": p["id"]}))
+        log(f"[runner] contact search finished: {n} of {len(prospects)} had something.")
+    finally:
+        STATE["running"] = False
+
+
 def run_find_emails(leads, use_ai=True):
     """Looks for public contact emails, three leads at a time (each browser search is mostly waiting on pages).
     Leads whose own pages show nothing then go to Google AI, one at a time, as a last resort."""
@@ -843,6 +898,30 @@ class H(BaseHTTPRequestHandler):
             if "on" in body:
                 return self._send(200, awake_set(bool(body.get("on")), body.get("minutes") or 180))
             return self._send(200, awake_status())
+        if self.path == "/audit/find":
+            seg = {"fitness": "fitness coach", "weight_loss": "weight loss coach", "executive": "executive coach"}.get(str(body.get("segment") or ""))
+            if not seg:
+                return self._send(400, {"error": "pick a type of coach"})
+            job = {"label": seg, "location": str(body.get("location") or "")[:80], "count": max(1, min(15, int(body.get("count") or 8))),
+                   "exclude": [str(x)[:80] for x in (body.get("exclude") or [])][:60]}
+            with LOCK:
+                if STATE["running"]:
+                    return self._send(409, {"error": "a run is already in progress"})
+                STATE.update(running=True, log=[f"[runner] looking for {job['count']} {seg}s" + (f" in {job['location']}" if job["location"] else "")])
+                PIPE["stop"] = False
+                threading.Thread(target=run_find_coaches, args=(job,), daemon=True).start()
+            return self._send(200, {"ok": True})
+        if self.path == "/audit/enrich":
+            ps = [{k: str(p.get(k) or "")[:300] for k in ("id", "name", "website")} for p in (body.get("prospects") or []) if p.get("website")][:60]
+            if not ps:
+                return self._send(400, {"error": "no prospects with a website to look up"})
+            with LOCK:
+                if STATE["running"]:
+                    return self._send(409, {"error": "a run is already in progress"})
+                STATE.update(running=True, log=[f"[runner] looking for public emails and phones on {len(ps)} website(s)"])
+                PIPE["stop"] = False
+                threading.Thread(target=run_enrich_coaches, args=(ps,), daemon=True).start()
+            return self._send(200, {"ok": True, "prospects": len(ps)})
         if self.path == "/phones/find":
             leads = [{k: str(l.get(k) or "")[:300] for k in ("id", "name", "url", "web", "episode", "owner", "business")} for l in (body.get("leads") or [])][:40]
             if not leads:

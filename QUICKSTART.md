@@ -80,8 +80,9 @@ Cold email for fitness, weight loss and executive coaches, offering a free 3 min
 2. **Prospects:** paste lines like `Name | fitness / weight loss / executive | email | business | LinkedIn URL | website | one real sentence about them`. The "about them" sentence is what makes the first line personal; if it is blank that line is dropped.
 3. **Send:** keep **Save as drafts** until you trust the wording, read them, then switch to **Send for real**. Follow up 1 and 2 only go to people who have not replied.
 4. **When someone says yes:** record the video, paste its link in their row, and answer from the Unibox. Nothing is sent automatically to prospects.
-5. **LinkedIn:** the **LinkedIn note** button copies a short note and opens their profile. You send it yourself (no automated LinkedIn messaging).
-6. Compare templates only after about 100 first emails each; below that, differences can be luck. Change one thing at a time.
+5. **Find coaches (no LinkedIn login):** pick a type and optional city, press **Find coaches**. Google AI only suggests names and websites. A coach is kept only if their website loads, is about coaching and shows their name, and the email and phone come from that website's own pages (mailto and tel links, "call" or "text" numbers). Prospects that have a website but no email or phone get **Find emails and phones**. A phone is marked "mobile" only when the page calls it a cell, mobile or text number. A phone number alone can't tell mobile from landline, so check the National Do Not Call list before calling or texting.
+6. **LinkedIn:** the **LinkedIn note** button copies a short note and opens their profile. You send it yourself (no automated LinkedIn messaging).
+7. Compare templates only after about 100 first emails each; below that, differences can be luck. Change one thing at a time.
 
 ## If something is stuck
 

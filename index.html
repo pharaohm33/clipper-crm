@@ -676,9 +676,10 @@ function auProspectsCard(){const el=document.getElementById('au-pro');if(!el)ret
  const list=auS().prospects.filter(p=>(!auUI.seg||p.segment==auUI.seg)&&(!auUI.tpl||((p.tpl||{}).id==auUI.tpl||p.tplId==auUI.tpl))&&(!q||[p.name,p.business,p.email,p.status].join(' ').toLowerCase().includes(q)));
  const tplOpts=cur=>`<option value="">auto</option>`+auS().templates.map(t=>`<option value="${esc(t.id)}" ${cur==t.id?'selected':''}>${esc(t.name)}</option>`).join('');
  const rows=list.slice(0,200).map(p=>{const used=p.tpl?`${esc(p.tpl.name||p.tpl.id)}${p.status=='Drafted'?' <span class=mut>(draft)</span>':` <span class=mut>(step ${(p.emailStep||0)+1} sent)</span>`}`:'<span class=mut>not sent yet</span>';
-  return`<tr><td>${p.linkedin?`<a target=_blank rel=noopener href="${esc(p.linkedin)}">${esc(p.name)}</a>`:esc(p.name)}<br><span class=mut>${esc(p.business||'')}</span></td>
+  return`<tr><td>${p.linkedin?`<a target=_blank rel=noopener href="${esc(p.linkedin)}">${esc(p.name)}</a>`:esc(p.name)}<br><span class=mut>${esc(p.business||'')}</span>${p.website?`<br><a class=mut target=_blank rel=noopener href="${esc(/^https?:/.test(p.website)?p.website:'https://'+p.website)}" ${p.siteAbout?`title="${esc(p.siteAbout)}"`:''}>${esc(String(p.website).replace(/^https?:\/\/(www\.)?/,'').replace(/\/$/,''))}</a>`:''}</td>
    <td><select data-ap="segment" data-id="${p.id}"><option value="">-</option>${Object.entries(AU_SEGMENTS).map(([k,v])=>`<option value="${k}" ${p.segment==k?'selected':''}>${v}</option>`).join('')}</select></td>
    <td><input data-ap="email" data-id="${p.id}" value="${esc(p.email||'')}" placeholder="needs email" style="width:170px"></td>
+   <td><input data-ap="phone" data-id="${p.id}" value="${esc(p.phone||'')}" placeholder="no phone" style="width:120px">${p.phone&&p.phoneMobile?'<br><span class=mut title="Their page calls this a cell, mobile or text number">📱 mobile</span>':p.phone?'<br><span class=mut title="Listed on their website. It may be a landline or a mobile">business line</span>':''}</td>
    <td>${used}<br><select data-ap="tplId" data-id="${p.id}" title="Pin a template for this prospect">${tplOpts(p.tplId)}</select></td>
    <td><select data-ap="status" data-id="${p.id}">${AU_STATUSES.map(s=>`<option ${p.status==s?'selected':''}>${s}</option>`).join('')}</select></td>
    <td><input data-ap="observation" data-id="${p.id}" value="${esc(p.observation||'')}" placeholder="one real sentence about them" style="width:210px"></td>
@@ -689,7 +690,30 @@ function auProspectsCard(){const el=document.getElementById('au-pro');if(!el)ret
   <textarea id="au-paste" style="min-height:80px;width:100%" placeholder="Jane Doe | weight loss | jane@janefit.com | Jane Doe Coaching | https://linkedin.com/in/janedoe | janefit.com | Saw your post about busy moms and strength training.">${esc(auUI.paste)}</textarea>
   <button class="b" data-aa="addp">Add</button> <span class=mut>Leave email blank if you only have LinkedIn. Duplicates are skipped.</span>
   <div class="row" style="margin-top:8px"><div><input id="au-q" placeholder="Search" value="${esc(auUI.filter)}"></div><div><select id="au-seg"><option value="">All types</option>${Object.entries(AU_SEGMENTS).map(([k,v])=>`<option value="${k}" ${auUI.seg==k?'selected':''}>${v}</option>`).join('')}</select></div><div><select id="au-ft"><option value="">All templates</option>${auS().templates.map(t=>`<option value="${esc(t.id)}" ${auUI.tpl==t.id?'selected':''}>${esc(t.name)}</option>`).join('')}</select></div></div>
-  <div class="tw"><table><tr><th>Prospect</th><th>Type</th><th>Email</th><th>Template / offer</th><th>Status</th><th>About them</th><th>Video</th><th></th></tr>${rows||'<tr><td colspan=8 class=mut>No prospects yet.</td></tr>'}</table></div>${list.length>200?`<span class=mut>Showing 200 of ${list.length}. Use the filters.</span>`:''}</div>`}
+  <div class="tw"><table><tr><th>Prospect</th><th>Type</th><th>Email</th><th>Phone</th><th>Template / offer</th><th>Status</th><th>About them</th><th>Video</th><th></th></tr>${rows||'<tr><td colspan=9 class=mut>No prospects yet.</td></tr>'}</table></div>${list.length>200?`<span class=mut>Showing 200 of ${list.length}. Use the filters.</span>`:''}</div>`}
+function auAddFound(o,seg){const P=auS().prospects,hostOf=u=>String(u||'').toLowerCase().replace(/^https?:\/\/(www\.)?/,'').replace(/\/.*$/,''),h=hostOf(o.website),em=String(o.email||'').toLowerCase();
+ if(P.some(p=>(h&&hostOf(p.website)==h)||(em&&String(p.email||'').toLowerCase()==em)))return false;
+ P.push({id:auId(),name:o.name,first:String(o.name||'').split(/\s+/)[0],segment:seg,email:em,phone:o.phone||'',phoneMobile:!!o.phone_mobile,phoneHow:o.phone_how||'',business:o.business||'',website:o.website||'',siteAbout:o.about||'',location:o.location||'',who:o.who||'',observation:'',status:'New',tplId:'',source:'google',added:Date.now()});return true}
+async function auFind(){const seg=document.getElementById('au-fseg').value,loc=document.getElementById('au-floc').value.trim(),n=+document.getElementById('au-fn').value||8;
+ auUI.floc=loc;auUI.fn=n;auUI.fseg=seg;auUI.msg='';auUI.lines=[];let got=0,total=0;const hostOf=u=>String(u||'').toLowerCase().replace(/^https?:\/\/(www\.)?/,'').replace(/\/.*$/,'');
+ auActionsCard();
+ const ok=await helperJob('/audit/find',{segment:seg,location:loc,count:n,exclude:auS().prospects.map(p=>hostOf(p.website)).filter(Boolean)},t=>{if(!/^(COACH|CONTACT|CONTACTNONE|EMAIL) /.test(t))auUI.lines.push(t);const r=parseTag(t,'COACH');if(r){total++;if(auAddFound(r,seg))got++;if(tab=='audit'){auProspectsCard();auFindCard()}}});
+ if(!ok)auUI.msg=ES.msg||'The helper did not start the search.';else{auUI.msg=`Found ${got} new coach${got==1?'':'es'}${total>got?` (${total-got} already in your list)`:''}. Google AI only suggests names and websites; each one was kept only after its website checked out, and emails and phones come from that website.`}
+ save();if(tab=='audit'){auActionsCard();auProspectsCard();auFindCard()}}
+async function auEnrich(){const need=auS().prospects.filter(p=>p.website&&(!p.email||!p.phone)&&!p.contactChecked);
+ if(!need.length){auUI.msg='Every prospect with a website has already been checked.';return auActionsCard()}
+ auUI.msg='';auUI.lines=[];auActionsCard();let e=0,ph=0;
+ const ok=await helperJob('/audit/enrich',{prospects:need.slice(0,60).map(p=>({id:p.id,name:p.name,website:p.website}))},t=>{if(!/^(COACH|CONTACT|CONTACTNONE|EMAIL) /.test(t))auUI.lines.push(t);
+  const r=parseTag(t,'CONTACT'),z=parseTag(t,'CONTACTNONE'),p=auS().prospects.find(x=>x.id==(r||z||{}).id);if(!p)return;p.contactChecked=Date.now();
+  if(r){if(r.email&&!p.email){p.email=String(r.email).toLowerCase();e++}if(r.phone&&!p.phone){p.phone=r.phone;p.phoneMobile=!!r.phone_mobile;p.phoneHow=r.phone_how||'';ph++}}
+  if(tab=='audit')auProspectsCard()});
+ if(!ok)auUI.msg=ES.msg||'The helper did not start the search.';else auUI.msg=`Added ${e} email${e==1?'':'s'} and ${ph} phone number${ph==1?'':'s'} found on their own websites. Prospects with nothing are marked checked, so they are not searched again.`;
+ save();if(tab=='audit'){auActionsCard();auProspectsCard();auFindCard()}}
+function auFindCard(){const el=document.getElementById('au-find');if(!el)return;const need=auS().prospects.filter(p=>p.website&&(!p.email||!p.phone)&&!p.contactChecked).length,b=ES.busy?'disabled':'';
+ el.innerHTML=`<div class="card"><b>Find coaches</b> <span class=mut>No LinkedIn login. Google AI suggests independent coaches, and each one is kept only if their website loads, is about coaching and shows their name. Their public email and phone are read from that website.</span>
+  <div class="row"><div><label>Type</label><select id="au-fseg">${Object.entries(AU_SEGMENTS).map(([k,v])=>`<option value="${k}" ${auUI.fseg==k?'selected':''}>${v}</option>`).join('')}</select></div><div><label>Where (optional)</label><input id="au-floc" value="${esc(auUI.floc||'')}" placeholder="e.g. Austin, TX" style="width:170px"></div><div><label>How many</label><input id="au-fn" type="number" min="1" max="15" value="${+auUI.fn||8}" style="width:70px"></div></div>
+  <button class="b" data-aa="find" ${b}>Find coaches</button> <button class="b" data-aa="enrich" ${b}>Find emails and phones (${need} to check)</button>
+  <div class=mut style="margin-top:6px">Phone numbers come from their website only. A phone is marked mobile only when the page calls it a cell, mobile or text number; otherwise it is a business line. Check the National Do Not Call list before calling or texting, and do not text numbers in bulk without consent.</div></div>`}
 function auActionsCard(){const el=document.getElementById('au-act');if(!el)return;const b=ES.busy?'disabled':'',st=ES.status;
  const ready=auS().prospects.filter(p=>p.email&&p.status=='New').length,due=n=>auDue(n).length;
  el.innerHTML=`<div class="card"><b>Send</b> <span class=mut>${auUI.mode=='drafts'?'Drafts mode: nothing is sent. Emails land in the sending inbox\'s Drafts folder for you to read first.':'Send mode: REAL emails, one at a time, rotating inboxes, inside each inbox\'s daily cap and the send window.'}</span>
@@ -709,7 +733,7 @@ async function auRun(mode,step){const n=Math.max(1,Math.min(60,+document.getElem
  if(!leads.length){auUI.msg=step?'No follow-ups are due yet.':'Nothing is ready: a prospect needs an email address and status New.';return auActionsCard()}
  if(mode=='send'&&!confirm(`Send up to ${leads.length} REAL email${leads.length==1?'':'s'} now?\n\nThey go out one at a time from your inboxes, with your name, postal address and an opt out line. Previews and drafts are free; this is not.`))return;
  auUI.msg='';auUI.lines=[];auActionsCard();
- await helperJob('/email/run',{mode,confirm:mode=='send',leads:leads.map(auPayload),template:auLib(),limit:n,step},t=>{auUI.lines.push(t);const r=parseTag(t,'EMAIL');if(r){auApply(r);if(tab=='audit'){auActionsCard();auProspectsCard()}}});
+ await helperJob('/email/run',{mode,confirm:mode=='send',leads:leads.map(auPayload),template:auLib(),limit:n,step},t=>{if(!/^(COACH|CONTACT|CONTACTNONE|EMAIL) /.test(t))auUI.lines.push(t);const r=parseTag(t,'EMAIL');if(r){auApply(r);if(tab=='audit'){auActionsCard();auProspectsCard()}}});
  save();if(tab=='audit'){auActionsCard();auProspectsCard();auLoadStats()}}
 async function auPreview(){auUI.msg='';const leads=auS().prospects.filter(p=>p.email&&p.status=='New').slice(0,+document.getElementById('au-n').value||20).map(auPayload);
  if(!leads.length){auUI.msg='Nothing is ready: a prospect needs an email address and status New.';return auActionsCard()}
@@ -725,7 +749,7 @@ async function auCheckReplies(){const sent=auS().prospects.filter(p=>p.emailedAt
    auUI.msg=(r.errors&&r.errors.length?`Could not read: ${r.errors.join('; ')}. `:'')+`Checked ${sent.length}: ${rep} ${rep==1?'reply':'replies'} (${yes} said yes, those need your video), ${out} asked to stop (added to the do not contact list), ${(r.bounced||[]).length} bounced.`;save()}}
  catch(e){auUI.msg='Helper not running. In Terminal: cd ~/clipper-crm && python3 tools/local_runner.py'}ES.busy=false;auActionsCard();auProspectsCard();auLoadStats()}
 function auV(){
- $('#main').innerHTML=`<div class="card"><b>Audit outreach</b> <span class=mut>Cold email for coaches (fitness, weight loss, executive) offering a free 3 minute video on where they lose high ticket inquiries. Pick templates below, add prospects, and the CRM shows which template and step each prospect got. When someone says yes, record their video, paste the link in their row, and reply from the Unibox. Replies stop their follow-ups.</span></div><div id="au-act"></div><div id="au-tpl"></div><div id="au-pro"></div>`;
+ $('#main').innerHTML=`<div class="card"><b>Audit outreach</b> <span class=mut>Cold email for coaches (fitness, weight loss, executive) offering a free 3 minute video on where they lose high ticket inquiries. Pick templates below, add prospects, and the CRM shows which template and step each prospect got. When someone says yes, record their video, paste the link in their row, and reply from the Unibox. Replies stop their follow-ups.</span></div><div id="au-act"></div><div id="au-find"></div><div id="au-tpl"></div><div id="au-pro"></div>`;
  const m=$('#main');
  m.onclick=e=>{const b=e.target.closest('[data-aa]');if(!b)return;const a=b.dataset.aa,id=b.dataset.id,t=auTpl(id);
   if(a=='edit'){auUI.edit=id;auTemplatesCard()}else if(a=='close'){auUI.edit='';auTemplatesCard();auProspectsCard()}
@@ -736,6 +760,7 @@ function auV(){
   else if(a=='addp'){const r=auAddPasted(document.getElementById('au-paste').value);auUI.paste='';auUI.msg=`Added ${r.added} prospect${r.added==1?'':'s'}${r.dup?`, skipped ${r.dup} duplicate${r.dup==1?'':'s'}`:''}.`;auProspectsCard();auActionsCard()}
   else if(a=='rm'){const p=auS().prospects.find(x=>x.id==id);if(p&&confirm(`Remove ${p.name}?`)){auS().prospects=auS().prospects.filter(x=>x.id!=id);save();auProspectsCard();auActionsCard()}}
   else if(a=='li'){const p=auS().prospects.find(x=>x.id==id);if(!p)return;const note=auLinkedinNote(p);(navigator.clipboard?navigator.clipboard.writeText(note):Promise.reject()).catch(()=>prompt('Copy this LinkedIn note:',note));p.liSent=true;save();auProspectsCard();if(p.linkedin)window.open(p.linkedin,'_blank','noopener')}
+  else if(a=='find')auFind();else if(a=='enrich')auEnrich();
   else if(a=='preview')auPreview();else if(a=='run0')auRun(auUI.mode,0);else if(a=='run1')auRun(auUI.mode,1);else if(a=='run2')auRun(auUI.mode,2);else if(a=='replies')auCheckReplies();
   else if(a=='pv'){const p=auUI.preview[+b.dataset.i];alert(`Template: ${p.template_name}\nTo: ${p.to}\nFrom: ${p.from}\nSubject: ${p.subject}\n\n${p.body}`)}};
  m.onchange=e=>{const el=e.target;
@@ -751,7 +776,7 @@ function auV(){
   if(f.startsWith('seg:')){const[,k,field]=f.split(':');t.segments=t.segments||{};(t.segments[k]=t.segments[k]||{})[field]=v}
   else if(f.startsWith('fu:')){const[,i,field]=f.split(':');t.followups=t.followups||[];(t.followups[+i]=t.followups[+i]||{days:+i?7:3,body:''})[field]=v}
   else t[f]=v;save()};
- auActionsCard();auTemplatesCard();auProspectsCard();loadEmailStatus().then(()=>auActionsCard());auLoadStats()}
+ auActionsCard();auFindCard();auTemplatesCard();auProspectsCard();loadEmailStatus().then(()=>auActionsCard());auLoadStats()}
 // ===================== end audit outreach =====================
 function emailV(){const g=S.settings;
  $('#main').innerHTML=`<div class="card"><b>Cold email</b> <span class=mut>One short, honest email per podcast with a link to a clip made from their own episode. Rotates across your inboxes, keeps to daily caps that grow slowly, never emails the same address twice, and stops for anyone who says no.</span></div>
