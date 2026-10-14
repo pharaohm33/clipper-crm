@@ -603,7 +603,7 @@ def run_email(leads, template, mode, limit, ignore_window, step):
         cold_email_sleep = lambda secs: [time.sleep(1) for _ in range(int(secs)) if not PIPE["stop"]]
         results = cold_email.run(leads, template, mode, limit=limit, ignore_window=ignore_window, step=step, log_fn=log, sleep=cold_email_sleep)
         for r in results:
-            log("EMAIL " + json.dumps({k: r.get(k) for k in ("id", "to", "from", "status", "why", "subject", "step", "message_id")}))
+            log("EMAIL " + json.dumps({k: r.get(k) for k in ("id", "to", "from", "status", "why", "subject", "step", "message_id", "template_id", "template_name")}))
         log(f"[runner] done: {sum(1 for r in results if r['status'] in ('sent', 'drafted'))} {mode} / {sum(1 for r in results if r['status'] == 'skip')} skipped / {sum(1 for r in results if r['status'] == 'failed')} failed")
     except Exception as e:
         log(f"[runner] email run stopped: {e}")

@@ -86,7 +86,7 @@ const iso=d=>{const x=d||new Date();return x.getFullYear()+'-'+String(x.getMonth
 const today=()=>iso();const money=n=>'$'+Number(n||0).toLocaleString(undefined,{maximumFractionDigits:2});
 const addDays=(d,n)=>{const x=new Date(d+'T00:00');x.setDate(x.getDate()+n);return iso(x)};
 const monthKey=()=>today().slice(0,7);
-let tab='dash';const TABS=[['dash','Dashboard'],['today','Today'],['leads','Leads'],['email','Email'],['unibox','Unibox'],['calls','Calls'],['find','Find Podcasts'],['money','Money'],['settings','Settings']];
+let tab='dash';const TABS=[['dash','Dashboard'],['today','Today'],['leads','Leads'],['email','Email'],['audit','Audit'],['unibox','Unibox'],['calls','Calls'],['find','Find Podcasts'],['money','Money'],['settings','Settings']];
 function nav(){const waiting=S.leads.filter(l=>l.draftedAt&&!l.emailedAt&&!l.approved&&l.status=='New').length;$('#nav').innerHTML=TABS.map(([k,l])=>`<button class="${k===tab?'on':''}" data-t="${k}">${l}${k==='unibox'&&waiting?` (${waiting})`:''}</button>`).join('')}
 $('#nav').onclick=e=>{if(e.target.dataset.t){tab=e.target.dataset.t;render()}};
 $('#nav').ondragover=e=>{if(e.target.dataset&&e.target.dataset.t==='today'){e.preventDefault();e.dataTransfer.dropEffect='move';e.target.classList.add('drop')}};
@@ -106,7 +106,7 @@ function stats(){
  return{earned,owed,dl,remaining:Math.max(0,S.settings.goal-earned),sentToday:sentOn(today()),sentAll,rep,cl,
   fresh:S.leads.filter(l=>l.status=='New').length,fu:S.leads.filter(l=>l.status=='Sample Sent'&&l.follow&&l.follow<=today()).length,...mrrStats()}}
 function mrrStats(){const act=(S.retainers||[]).filter(r=>r.status=='Active'),mrr=act.reduce((a,r)=>a+(+r.fee||0),0);return{mrr,act:act.length,clipsM:act.reduce((a,r)=>a+(+r.clips||0),0),avgFee:act.length?mrr/act.length:0}}
-function render(){nav();({dash,today:todayV,leads,email:emailV,unibox:uniboxV,calls:callsV,find,money:moneyV,settings})[tab]()}
+function render(){nav();({dash,today:todayV,leads,email:emailV,audit:auV,unibox:uniboxV,calls:callsV,find,money:moneyV,settings})[tab]()}
 function dash(){const s=stats(),g=S.settings;const pct=Math.min(100,s.earned/g.goal*100);
  const days=[...Array(14)].map((_,i)=>{const d=iso(new Date(Date.now()-(13-i)*864e5));return[d,sentOn(d)]});const mx=Math.max(g.daily,...days.map(x=>x[1]));
  const byInf={};S.payments.forEach(p=>{(byInf[p.who]=byInf[p.who]||{all:0,mo:0}).all+=p.amount;if(p.date.startsWith(monthKey()))byInf[p.who].mo+=p.amount});
@@ -436,7 +436,7 @@ async function autopilotRun(){
 
 /* ---------- Unibox: every saved draft and every reply from all inboxes in one place ---------- */
 const UB={view:'drafts',drafts:[],replies:[],sel:'',loading:false,msg:'',errors:[],yes:{}};
-const leadByEmail=e=>S.leads.find(l=>String(l.email||'').toLowerCase()===String(e||'').toLowerCase());
+const leadByEmail=e=>S.leads.find(l=>String(l.email||'').toLowerCase()===String(e||'').toLowerCase())||auS().prospects.find(l=>String(l.email||'').toLowerCase()===String(e||'').toLowerCase());
 async function ubLoad(){UB.loading=true;UB.msg='Reading your inboxes (this logs in to each one once)...';uniboxV();
  try{const[d,r]=await Promise.all([fetch(RUNNER+'/unibox/drafts',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}).then(x=>x.json()),fetch(RUNNER+'/unibox/replies',{method:'POST',headers:{'Content-Type':'application/json'},body:'{"days":21}'}).then(x=>x.json())]);
   UB.drafts=d.drafts||[];UB.replies=r.replies||[];UB.errors=[...(d.errors||[]),...(r.errors||[])];UB.msg='';
@@ -616,6 +616,143 @@ function emailDyn(){const el=document.getElementById('email-dyn');if(!el)return;
  on('e-fu',()=>{const now=Date.now(),due=k=>S.leads.some(l=>l.emailedAt&&l.status=='Sample Sent'&&(l.emailStep||0)==k-1&&now-(l.firstEmailedAt||l.emailedAt)>=((k==1?3:7)*DAY)-3600000);sendEmails('send',due(1)?1:2)});on('e-rep',checkReplies);
  on('e-stop',async()=>{try{await fetch(RUNNER+'/pipeline/stop',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})}catch(e){}});
  el.querySelectorAll('[data-pv]').forEach(b=>b.onclick=()=>{const p=ES.preview[+b.dataset.pv];alert(`To: ${p.to}\nFrom: ${p.from}\nSubject: ${p.subject}\n\n${p.body}`)})}
+// ===================== AUDIT OUTREACH: template library + prospects (coaches) =====================
+// Separate from the podcast leads: its own prospects and its own named templates. It reuses the same sending engine
+// (inbox rotation, warm-up caps, suppression list, reply and bounce checks), so nothing about deliverability changes.
+const AU_SEGMENTS={fitness:'Fitness coach',weight_loss:'Weight loss coach',executive:'Executive coach'};
+const AU_STATUSES=['New','Drafted','Emailed','Replied','Interested','Booked','Not Interested','Bounced'];
+const AU_FOLLOW1="Floating this back up, {first_name}. The video is about 3 minutes and covers what I'd fix first for {business}. Happy to send it if you want it, and no worries if not.\n\n{sender}";
+const AU_FOLLOW2="Last note from me. If this isn't a priority right now, no problem at all, just reply \"no thanks\" and I won't reach out again. If it is, reply \"send it\" and the video is yours.\n\n{sender}";
+const AU_SEGS=()=>({
+ default:{client_type:'high ticket clients',leaks:'an unclear next step and slow follow up on inquiries'},
+ fitness:{client_type:'high ticket fitness clients',leaks:'a vague call to action and no follow up when someone shows interest'},
+ weight_loss:{client_type:'high ticket weight loss clients',leaks:'a page that talks more about you than the result and no proof next to the booking step'},
+ executive:{client_type:'executive coaching clients',leaks:'a profile that does not say who you help and no clear next step'}});
+const AU_STARTERS=()=>[
+ {id:'audit-video',name:'Audit video: specific',offer:'Free 3 min video: where you lose high ticket inquiries',active:true,weight:1,needs_clip:false,keep_case:true,
+  subject:'3 min video for {business}',
+  body:"{Hi|Hey} {first_name},\n\n{observation}\n\nI'd like to record a free 3 minute video for {business} showing a few places you may be losing {client_type} before they ever book a call, things like {leaks}.\n\nIt's a quick screen recording of what I'd fix first, and it's yours either way. {Want me to send it over?|Worth sending over?}\n\n{Thanks|Best},\n{sender}",
+  followups:[{days:3,body:AU_FOLLOW1},{days:7,body:AU_FOLLOW2}],segments:AU_SEGS()},
+ {id:'audit-question',name:'Audit video: question first',offer:'Free 3 min video, opened with a question',active:true,weight:1,needs_clip:false,keep_case:true,
+  subject:'question about {business}',
+  body:"{Hi|Hey} {first_name},\n\n{observation}\n\nQuick question: when someone new finds {business} online and wants to work with you, how do they book? I ask because I noticed a few spots where {client_type} could slip away, like {leaks}.\n\nI can send a free 3 minute video walking through them if that would be useful.\n\n{Thanks|Best},\n{sender}",
+  followups:[{days:3,body:AU_FOLLOW1},{days:7,body:AU_FOLLOW2}],segments:AU_SEGS()},
+ {id:'audit-outcome',name:'Audit video: outcome led',offer:'Free 3 min video, led with the result',active:true,weight:1,needs_clip:false,keep_case:true,
+  subject:'idea for {business}',
+  body:"{Hi|Hey} {first_name},\n\n{observation}\n\nI help coaches turn more of the people who already find them into booked calls. The aim is a few more high ticket clients a month from the traffic you already have.\n\nI'd like to send you a free 3 minute video on where {business} may be losing {client_type}, like {leaks}. {Want it?|Should I send it over?}\n\n{Thanks|Best},\n{sender}",
+  followups:[{days:3,body:AU_FOLLOW1},{days:7,body:AU_FOLLOW2}],segments:AU_SEGS()}];
+function auS(){if(!S.audit||!S.audit.templates)S.audit={templates:AU_STARTERS(),prospects:[]};S.audit.prospects=S.audit.prospects||[];return S.audit}
+const auUI={edit:'',filter:'',seg:'',tpl:'',msg:'',preview:null,stats:null,paste:'',mode:'drafts',lines:[]};
+const auId=()=>'au'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+const auTpl=id=>(auS().templates||[]).find(t=>t.id==id);
+const auSeg=v=>{v=String(v||'');return /weight|fat loss|nutrition/i.test(v)?'weight_loss':/exec|leader|c.?suite|ceo|career/i.test(v)?'executive':/fit|train|gym|strength|health/i.test(v)?'fitness':''};
+const auPayload=p=>({id:p.id,name:p.name,first_name:p.first||'',business:p.business||'',segment:p.segment||'',email:p.email,tplId:p.tplId||'',personal:p.observation||'',video_link:p.videoLink||'',subject_override:p.subjectOverride||'',body_override:p.bodyOverride||''});
+const auLib=()=>({library:(auS().templates||[]).map(t=>({...t})),skip_providers:S.settings.emailSkipMS===false?[]:['microsoft']});
+function auAddPasted(text){let added=0,dup=0;const have=new Set(auS().prospects.flatMap(p=>[String(p.email||'').toLowerCase(),String(p.linkedin||'').toLowerCase().replace(/\/$/,'')]).filter(Boolean));
+ for(const raw of String(text||'').split('\n')){const line=raw.trim();if(!line)continue;const c=(line.includes('|')?line.split('|'):line.split('\t')).map(x=>x.trim());
+  const [name,seg,email,business,linkedin,website,...obs]=c;if(!name)continue;const em=/@/.test(email||'')?email.toLowerCase():'',li=/linkedin\.com/i.test(linkedin||'')?linkedin.replace(/\/$/,''):'';
+  if((em&&have.has(em))||(li&&have.has(li.toLowerCase()))){dup++;continue}if(em)have.add(em);if(li)have.add(li.toLowerCase());
+  auS().prospects.push({id:auId(),name,first:name.split(/\s+/)[0],segment:auSeg(seg),email:em,business:business||'',linkedin:li,website:website||'',observation:obs.join(' | ').trim(),status:'New',tplId:'',added:Date.now()});added++}
+ save();return{added,dup}}
+function auStatsRows(){const by={};for(const p of auS().prospects){const id=(p.tpl||{}).id;if(!id)continue;const r=by[id]=by[id]||{interested:0,booked:0};if(p.status=='Interested')r.interested++;if(p.status=='Booked'){r.booked++;r.interested++}}return by}
+async function auLoadStats(){try{auUI.stats=(await (await fetch(RUNNER+'/email/stats',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})).json()).template||{}}catch(e){auUI.stats=null}if(tab=='audit')auTemplatesCard()}
+function auTemplatesCard(){const el=document.getElementById('au-tpl');if(!el)return;const st=auUI.stats||{},crm=auStatsRows();
+ const rows=auS().templates.map(t=>{const r=st[t.id]||{sent:0,replied:0,optout:0,bounced:0,reply_rate:0},c=crm[t.id]||{interested:0,booked:0},n=r.sent,enough=n>=100;
+  return`<tr><td><input type="checkbox" data-aa="active" data-id="${esc(t.id)}" ${t.active===false?'':'checked'} title="Off = no new prospects get this template"></td><td><b>${esc(t.name)}</b><br><span class=mut>${esc(t.offer||'')}</span></td><td>${n}</td><td>${r.replied}</td><td>${n?r.reply_rate+'%':'-'}${n&&!enough?' <span class=mut title="Under about 100 sends, differences can be luck">(early)</span>':''}</td><td>${c.interested}</td><td>${c.booked}</td><td>${r.optout+r.bounced}</td><td><button class="b" data-aa="edit" data-id="${esc(t.id)}">Edit</button> <button class="b" data-aa="dup" data-id="${esc(t.id)}">Copy</button></td></tr>`}).join('');
+ el.innerHTML=`<div class="card tw"><b>Templates</b> <span class=mut>Each new prospect gets one active template (spread evenly, or the one you pin on the prospect). The CRM records which one on every prospect. Stats count first emails only.</span>
+  <table><tr><th>On</th><th>Template / offer</th><th>Sent</th><th>Replied</th><th>Reply rate</th><th>Interested</th><th>Booked</th><th>Stop / bounce</th><th></th></tr>${rows}</table>
+  <button class="b" data-aa="new">+ New template</button> <button class="b" data-aa="stats">Refresh results</button></div>${auEditor()}`}
+function auEditor(){const t=auTpl(auUI.edit);if(!t)return'';const seg=t.segments||{};const fu=t.followups||[];
+ const segIn=k=>`<div class="card" style="margin:6px 0"><b>${k=='default'?'Default (no segment)':AU_SEGMENTS[k]}</b><label>{client_type}</label><input data-af="seg:${k}:client_type" value="${esc((seg[k]||{}).client_type||'')}" style="width:100%"><label>{leaks} (places they may be losing inquiries)</label><textarea data-af="seg:${k}:leaks" style="min-height:60px">${esc((seg[k]||{}).leaks||'')}</textarea></div>`;
+ return`<div class="card" style="border-color:var(--acc)"><b>Editing: ${esc(t.name)}</b> <button class="b" data-aa="close">Done</button> <button class="b" data-aa="del" data-id="${esc(t.id)}">Delete</button>
+  <div class="row"><div><label>Name</label><input data-af="name" value="${esc(t.name)}"></div><div style="flex:2"><label>Offer (shown on each prospect)</label><input data-af="offer" value="${esc(t.offer||'')}" style="width:100%"></div><div><label>Share</label><input data-af="weight" type="number" min="1" max="10" value="${+t.weight||1}" style="width:70px"></div></div>
+  <label><input type="checkbox" data-afc="keep_case" ${t.keep_case?'checked':''}> Keep my subject exactly as written (otherwise Every Word Is Capitalised)</label>
+  <span class=mut>Tokens: {first_name} {business} {observation} {client_type} {leaks} {video_link} {sender}. Spintax like {Hi|Hey} picks one per prospect. Your name, postal address and the opt out line are added automatically. If {observation} is blank on a prospect, that line is dropped.</span>
+  <label>Subject</label><input data-af="subject" value="${esc(t.subject)}" style="width:100%"><label>Email</label><textarea data-af="body" style="min-height:230px">${esc(t.body)}</textarea>
+  ${[0,1].map(i=>`<div class="row"><div><label>Follow up ${i+1}: days after the first email</label><input data-af="fu:${i}:days" type="number" min="1" max="30" value="${+(fu[i]||{}).days||(i?7:3)}" style="width:90px"></div></div><textarea data-af="fu:${i}:body" style="min-height:90px">${esc((fu[i]||{}).body||'')}</textarea>`).join('')}
+  <div style="margin-top:8px"><b>Wording by type of coach</b> ${segIn('default')}${Object.keys(AU_SEGMENTS).map(segIn).join('')}</div></div>`}
+function auLinkedinNote(p){const lab=(AU_SEGMENTS[p.segment]||'coach').toLowerCase();return`Hi ${p.first||'there'}, I work with ${lab}es on getting more high ticket inquiries to actually book.${p.observation?' '+p.observation:''} Mind if I send a free 3 min video on a few spots I'd fix${p.business?' at '+p.business:''}? No pitch.`.slice(0,299)}
+function auProspectsCard(){const el=document.getElementById('au-pro');if(!el)return;const q=auUI.filter.toLowerCase();
+ const list=auS().prospects.filter(p=>(!auUI.seg||p.segment==auUI.seg)&&(!auUI.tpl||((p.tpl||{}).id==auUI.tpl||p.tplId==auUI.tpl))&&(!q||[p.name,p.business,p.email,p.status].join(' ').toLowerCase().includes(q)));
+ const tplOpts=cur=>`<option value="">auto</option>`+auS().templates.map(t=>`<option value="${esc(t.id)}" ${cur==t.id?'selected':''}>${esc(t.name)}</option>`).join('');
+ const rows=list.slice(0,200).map(p=>{const used=p.tpl?`${esc(p.tpl.name||p.tpl.id)}${p.status=='Drafted'?' <span class=mut>(draft)</span>':` <span class=mut>(step ${(p.emailStep||0)+1} sent)</span>`}`:'<span class=mut>not sent yet</span>';
+  return`<tr><td>${p.linkedin?`<a target=_blank rel=noopener href="${esc(p.linkedin)}">${esc(p.name)}</a>`:esc(p.name)}<br><span class=mut>${esc(p.business||'')}</span></td>
+   <td><select data-ap="segment" data-id="${p.id}"><option value="">-</option>${Object.entries(AU_SEGMENTS).map(([k,v])=>`<option value="${k}" ${p.segment==k?'selected':''}>${v}</option>`).join('')}</select></td>
+   <td><input data-ap="email" data-id="${p.id}" value="${esc(p.email||'')}" placeholder="needs email" style="width:170px"></td>
+   <td>${used}<br><select data-ap="tplId" data-id="${p.id}" title="Pin a template for this prospect">${tplOpts(p.tplId)}</select></td>
+   <td><select data-ap="status" data-id="${p.id}">${AU_STATUSES.map(s=>`<option ${p.status==s?'selected':''}>${s}</option>`).join('')}</select></td>
+   <td><input data-ap="observation" data-id="${p.id}" value="${esc(p.observation||'')}" placeholder="one real sentence about them" style="width:210px"></td>
+   <td><input data-ap="videoLink" data-id="${p.id}" value="${esc(p.videoLink||'')}" placeholder="their video link" style="width:130px"></td>
+   <td><button class="b" data-aa="li" data-id="${p.id}" title="Copies a short LinkedIn note. You send it yourself.">${p.liSent?'✓ ':''}LinkedIn note</button> <button class="b" data-aa="rm" data-id="${p.id}">✕</button></td></tr>`}).join('');
+ el.innerHTML=`<div class="card"><b>Prospects</b> <span class=mut>${auS().prospects.length} total, ${auS().prospects.filter(p=>p.email&&p.status=='New').length} ready to email</span>
+  <label>Add prospects: one per line, separated by |  →  <span class=mut>Name | fitness / weight loss / executive | email | business | LinkedIn URL | website | one sentence about them</span></label>
+  <textarea id="au-paste" style="min-height:80px;width:100%" placeholder="Jane Doe | weight loss | jane@janefit.com | Jane Doe Coaching | https://linkedin.com/in/janedoe | janefit.com | Saw your post about busy moms and strength training.">${esc(auUI.paste)}</textarea>
+  <button class="b" data-aa="addp">Add</button> <span class=mut>Leave email blank if you only have LinkedIn. Duplicates are skipped.</span>
+  <div class="row" style="margin-top:8px"><div><input id="au-q" placeholder="Search" value="${esc(auUI.filter)}"></div><div><select id="au-seg"><option value="">All types</option>${Object.entries(AU_SEGMENTS).map(([k,v])=>`<option value="${k}" ${auUI.seg==k?'selected':''}>${v}</option>`).join('')}</select></div><div><select id="au-ft"><option value="">All templates</option>${auS().templates.map(t=>`<option value="${esc(t.id)}" ${auUI.tpl==t.id?'selected':''}>${esc(t.name)}</option>`).join('')}</select></div></div>
+  <div class="tw"><table><tr><th>Prospect</th><th>Type</th><th>Email</th><th>Template / offer</th><th>Status</th><th>About them</th><th>Video</th><th></th></tr>${rows||'<tr><td colspan=8 class=mut>No prospects yet.</td></tr>'}</table></div>${list.length>200?`<span class=mut>Showing 200 of ${list.length}. Use the filters.</span>`:''}</div>`}
+function auActionsCard(){const el=document.getElementById('au-act');if(!el)return;const b=ES.busy?'disabled':'',st=ES.status;
+ const ready=auS().prospects.filter(p=>p.email&&p.status=='New').length,due=n=>auDue(n).length;
+ el.innerHTML=`<div class="card"><b>Send</b> <span class=mut>${auUI.mode=='drafts'?'Drafts mode: nothing is sent. Emails land in the sending inbox\'s Drafts folder for you to read first.':'Send mode: REAL emails, one at a time, rotating inboxes, inside each inbox\'s daily cap and the send window.'}</span>
+  ${st&&st.problems&&st.problems.length?`<div class="mut" style="color:var(--bad,#b91c1c)">Setup needed: ${esc(st.problems.join('; '))}</div>`:''}
+  <div class="row"><div><label>Mode</label><select id="au-mode"><option value="drafts" ${auUI.mode=='drafts'?'selected':''}>Save as drafts</option><option value="send" ${auUI.mode=='send'?'selected':''}>Send for real</option></select></div><div><label>Emails per run</label><input id="au-n" type="number" min="1" max="60" value="${+S.settings.emailLimit||20}" style="width:80px"></div></div>
+  <button class="b" data-aa="preview" ${b}>Preview next (${ready} ready)</button> <button class="b" data-aa="run0" ${b}>${auUI.mode=='drafts'?'Save drafts':'Send'} first emails</button>
+  <button class="b" data-aa="run1" ${b}>Follow up 1 (${due(1)} due)</button> <button class="b" data-aa="run2" ${b}>Follow up 2 (${due(2)} due)</button> <button class="b" data-aa="replies" ${b}>Check replies</button>
+  ${ES.busy?'<span class=mut> working...</span>':''} ${auUI.msg?`<div class=mut style="margin-top:6px">${esc(auUI.msg)}</div>`:''}
+  ${auUI.lines.length?`<pre class=mut style="white-space:pre-wrap;max-height:140px;overflow:auto">${esc(auUI.lines.slice(-12).join('\n'))}</pre>`:''}</div>
+  ${auUI.preview?`<div class="card tw"><b>Preview</b> <span class=mut>nothing has been sent</span><table><tr><th>To</th><th>Template</th><th>From inbox</th><th>Subject</th><th></th></tr>${auUI.preview.map((p,i)=>`<tr><td>${esc(p.to||p.name)}</td><td>${p.status=='ready'?esc(p.template_name||''):''}</td><td>${esc(p.from||'')}</td><td>${p.status=='ready'?esc(p.subject):`<span class=mut>skipped: ${esc(p.why)}</span>`}</td><td>${p.status=='ready'?`<button class="b" data-aa="pv" data-i="${i}">Read</button>`:''}</td></tr>`).join('')}</table></div>`:''}`}
+function auDue(step){const now=Date.now();return auS().prospects.filter(p=>p.email&&p.status=='Emailed'&&(p.emailStep||0)==step-1&&(()=>{const t=auTpl((p.tpl||{}).id)||{},d=((t.followups||[])[step-1]||{}).days||(step==1?3:7);return now-(p.firstEmailedAt||p.emailedAt||now)>=d*DAY-3600000})())}
+function auApply(r){const p=auS().prospects.find(x=>x.id==r.id);if(!p)return;
+ if(r.status=='sent'){refreshStatusSoon();if((r.step||0)==0){p.firstEmailedAt=Date.now();p.status='Emailed'}p.emailedAt=Date.now();p.emailStep=r.step||0;p.tpl={id:r.template_id||(p.tpl||{}).id,name:r.template_name||(p.tpl||{}).name};delete p.draftedAt}
+ else if(r.status=='drafted'){p.draftedAt=Date.now();p.status='Drafted';p.tpl={id:r.template_id,name:r.template_name}}}
+async function auRun(mode,step){const n=Math.max(1,Math.min(60,+document.getElementById('au-n').value||20));S.settings.emailLimit=n;let leads;
+ if(step>0)leads=auDue(step).slice(0,n);else leads=auS().prospects.filter(p=>p.email&&(p.status=='New'||(mode=='send'&&p.status=='Drafted'))).slice(0,n);
+ if(!leads.length){auUI.msg=step?'No follow-ups are due yet.':'Nothing is ready: a prospect needs an email address and status New.';return auActionsCard()}
+ if(mode=='send'&&!confirm(`Send up to ${leads.length} REAL email${leads.length==1?'':'s'} now?\n\nThey go out one at a time from your inboxes, with your name, postal address and an opt out line. Previews and drafts are free; this is not.`))return;
+ auUI.msg='';auUI.lines=[];auActionsCard();
+ await helperJob('/email/run',{mode,confirm:mode=='send',leads:leads.map(auPayload),template:auLib(),limit:n,step},t=>{auUI.lines.push(t);const r=parseTag(t,'EMAIL');if(r){auApply(r);if(tab=='audit'){auActionsCard();auProspectsCard()}}});
+ save();if(tab=='audit'){auActionsCard();auProspectsCard();auLoadStats()}}
+async function auPreview(){auUI.msg='';const leads=auS().prospects.filter(p=>p.email&&p.status=='New').slice(0,+document.getElementById('au-n').value||20).map(auPayload);
+ if(!leads.length){auUI.msg='Nothing is ready: a prospect needs an email address and status New.';return auActionsCard()}
+ try{const r=await (await fetch(RUNNER+'/email/preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({leads,template:auLib(),limit:leads.length})})).json();auUI.preview=r.items;ES.status=r.status}
+ catch(e){auUI.msg='Helper not running. In Terminal: cd ~/clipper-crm && python3 tools/local_runner.py'}auActionsCard()}
+async function auCheckReplies(){const sent=auS().prospects.filter(p=>p.emailedAt&&['Emailed','Replied'].includes(p.status)&&p.email).map(p=>({id:p.id,email:p.email,since_ts:Math.floor((p.firstEmailedAt||p.emailedAt)/1000),slug:'',name:p.name}));
+ if(!sent.length){auUI.msg='No sent emails to check.';return auActionsCard()}ES.busy=true;auUI.msg='Checking your inboxes for replies...';auActionsCard();
+ try{const r=await (await fetch(RUNNER+'/email/check-replies',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sent})})).json();
+  if(r.error)auUI.msg=r.error;else{let rep=0,out=0,yes=0;for(const f of r.found||[]){const p=auS().prospects.find(x=>x.id==f.id);if(!p)continue;
+   if(f.kind=='optout'){p.status='Not Interested';p.notes=(p.notes?p.notes+' | ':'')+(f.auto||'Asked not to be contacted');out++}
+   else{const isYes=f.intent=='yes';if(p.status=='Emailed'||p.status=='Replied')p.status=isYes?'Interested':'Replied';if(isYes)yes++;p.replyIntent=f.intent||'';p.notes=(p.notes?p.notes+' | ':'')+'Replied: '+(f.snippet||'');rep++}}
+   for(const e of r.bounced||[]){const p=auS().prospects.find(x=>String(x.email||'').toLowerCase()==String(e.to||e.email||e).toLowerCase());if(p)p.status='Bounced'}
+   auUI.msg=(r.errors&&r.errors.length?`Could not read: ${r.errors.join('; ')}. `:'')+`Checked ${sent.length}: ${rep} ${rep==1?'reply':'replies'} (${yes} said yes, those need your video), ${out} asked to stop (added to the do not contact list), ${(r.bounced||[]).length} bounced.`;save()}}
+ catch(e){auUI.msg='Helper not running. In Terminal: cd ~/clipper-crm && python3 tools/local_runner.py'}ES.busy=false;auActionsCard();auProspectsCard();auLoadStats()}
+function auV(){
+ $('#main').innerHTML=`<div class="card"><b>Audit outreach</b> <span class=mut>Cold email for coaches (fitness, weight loss, executive) offering a free 3 minute video on where they lose high ticket inquiries. Pick templates below, add prospects, and the CRM shows which template and step each prospect got. When someone says yes, record their video, paste the link in their row, and reply from the Unibox. Replies stop their follow-ups.</span></div><div id="au-act"></div><div id="au-tpl"></div><div id="au-pro"></div>`;
+ const m=$('#main');
+ m.onclick=e=>{const b=e.target.closest('[data-aa]');if(!b)return;const a=b.dataset.aa,id=b.dataset.id,t=auTpl(id);
+  if(a=='edit'){auUI.edit=id;auTemplatesCard()}else if(a=='close'){auUI.edit='';auTemplatesCard();auProspectsCard()}
+  else if(a=='dup'&&t){const c=JSON.parse(JSON.stringify(t));c.id='t'+Date.now().toString(36);c.name=t.name+' copy';auS().templates.push(c);auUI.edit=c.id;save();auTemplatesCard();auProspectsCard()}
+  else if(a=='new'){const c=JSON.parse(JSON.stringify(AU_STARTERS()[0]));c.id='t'+Date.now().toString(36);c.name='New template';auS().templates.push(c);auUI.edit=c.id;save();auTemplatesCard();auProspectsCard()}
+  else if(a=='del'&&t){if(auS().prospects.some(p=>(p.tpl||{}).id==id)&&!confirm('Prospects were already emailed with this template. Delete it anyway? (Their history stays, but follow ups need the template.)'))return;auS().templates=auS().templates.filter(x=>x.id!=id);auUI.edit='';save();auTemplatesCard();auProspectsCard()}
+  else if(a=='stats')auLoadStats();
+  else if(a=='addp'){const r=auAddPasted(document.getElementById('au-paste').value);auUI.paste='';auUI.msg=`Added ${r.added} prospect${r.added==1?'':'s'}${r.dup?`, skipped ${r.dup} duplicate${r.dup==1?'':'s'}`:''}.`;auProspectsCard();auActionsCard()}
+  else if(a=='rm'){const p=auS().prospects.find(x=>x.id==id);if(p&&confirm(`Remove ${p.name}?`)){auS().prospects=auS().prospects.filter(x=>x.id!=id);save();auProspectsCard();auActionsCard()}}
+  else if(a=='li'){const p=auS().prospects.find(x=>x.id==id);if(!p)return;const note=auLinkedinNote(p);(navigator.clipboard?navigator.clipboard.writeText(note):Promise.reject()).catch(()=>prompt('Copy this LinkedIn note:',note));p.liSent=true;save();auProspectsCard();if(p.linkedin)window.open(p.linkedin,'_blank','noopener')}
+  else if(a=='preview')auPreview();else if(a=='run0')auRun(auUI.mode,0);else if(a=='run1')auRun(auUI.mode,1);else if(a=='run2')auRun(auUI.mode,2);else if(a=='replies')auCheckReplies();
+  else if(a=='pv'){const p=auUI.preview[+b.dataset.i];alert(`Template: ${p.template_name}\nTo: ${p.to}\nFrom: ${p.from}\nSubject: ${p.subject}\n\n${p.body}`)}};
+ m.onchange=e=>{const el=e.target;
+  if(el.dataset.afc){const t=auTpl(auUI.edit);if(t){t[el.dataset.afc]=el.checked;save()}return}
+  if(el.dataset.aa=='active'){const t=auTpl(el.dataset.id);if(t){t.active=el.checked;save();auActionsCard()}return}
+  if(el.dataset.ap){const p=auS().prospects.find(x=>x.id==el.dataset.id);if(p){p[el.dataset.ap]=el.value.trim();if(el.dataset.ap=='email')p.email=p.email.toLowerCase();save();auActionsCard()}return}
+  if(el.id=='au-mode'){auUI.mode=el.value;auActionsCard()}
+  if(el.id=='au-seg'){auUI.seg=el.value;auProspectsCard()}if(el.id=='au-ft'){auUI.tpl=el.value;auProspectsCard()}};
+ m.oninput=e=>{const el=e.target;
+  if(el.id=='au-paste'){auUI.paste=el.value;return}
+  if(el.id=='au-q'){auUI.filter=el.value;const pos=el.selectionStart;auProspectsCard();const n=document.getElementById('au-q');n.focus();n.setSelectionRange(pos,pos);return}
+  const f=el.dataset.af;if(!f)return;const t=auTpl(auUI.edit);if(!t)return;const v=el.type=='number'?+el.value:el.value;
+  if(f.startsWith('seg:')){const[,k,field]=f.split(':');t.segments=t.segments||{};(t.segments[k]=t.segments[k]||{})[field]=v}
+  else if(f.startsWith('fu:')){const[,i,field]=f.split(':');t.followups=t.followups||[];(t.followups[+i]=t.followups[+i]||{days:+i?7:3,body:''})[field]=v}
+  else t[f]=v;save()};
+ auActionsCard();auTemplatesCard();auProspectsCard();loadEmailStatus().then(()=>auActionsCard());auLoadStats()}
+// ===================== end audit outreach =====================
 function emailV(){const g=S.settings;
  $('#main').innerHTML=`<div class="card"><b>Cold email</b> <span class=mut>One short, honest email per podcast with a link to a clip made from their own episode. Rotates across your inboxes, keeps to daily caps that grow slowly, never emails the same address twice, and stops for anyone who says no.</span></div>
  <div id="email-ap"></div>

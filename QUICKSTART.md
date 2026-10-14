@@ -72,6 +72,17 @@ To keep it visible while debugging, start the helper with `AI_WINDOW=shown`.
 
 Needs-you alerts (a Google verification, drafts ready, autopilot stopped) go to Telegram as "ClipperCRM: ...". Test it with the **Test phone alert** button on the Email tab. If the alert says Google needs you, log in to your remote connection and solve it.
 
+## Audit outreach tab (coaches)
+
+Cold email for fitness, weight loss and executive coaches, offering a free 3 minute video on where they lose high ticket inquiries. It is separate from the podcast leads but uses the same inboxes, warm-up caps, do-not-contact list and Unibox.
+
+1. **Templates:** three starters are included. Each new prospect gets one active template (spread evenly, or pin one on the prospect). Edit the wording, the follow ups (3 and 7 days) and the per type lines ({client_type}, {leaks}) in the editor. Every prospect row shows which template and step it received, and the table shows sent, replied, interested and booked per template.
+2. **Prospects:** paste lines like `Name | fitness / weight loss / executive | email | business | LinkedIn URL | website | one real sentence about them`. The "about them" sentence is what makes the first line personal; if it is blank that line is dropped.
+3. **Send:** keep **Save as drafts** until you trust the wording, read them, then switch to **Send for real**. Follow up 1 and 2 only go to people who have not replied.
+4. **When someone says yes:** record the video, paste its link in their row, and answer from the Unibox. Nothing is sent automatically to prospects.
+5. **LinkedIn:** the **LinkedIn note** button copies a short note and opens their profile. You send it yourself (no automated LinkedIn messaging).
+6. Compare templates only after about 100 first emails each; below that, differences can be luck. Change one thing at a time.
+
 ## If something is stuck
 
 - **Not making drafts:** read the autopilot log on the Email tab. "No email on their own pages" means the lead has no public email. "Search not run, will try again later" means the helper was busy and it retries next round.

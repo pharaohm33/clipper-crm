@@ -137,6 +137,39 @@ def pick_variant(template, lead_id):
     return chr(65 + i), options[i]["subject"], options[i]["body"]
 
 
+def active_templates(template):
+    """The named templates in template['library'] that are switched on (active != False)."""
+    return [t for t in (template.get("library") or []) if t.get("id") and t.get("active", True) is not False and (t.get("subject") or t.get("body"))]
+
+
+def pick_template(template, lead):
+    """The library template this lead gets: the one pinned on the lead (tplId) if it is active, otherwise a weighted pick that depends
+    only on the lead id (so preview, send and follow-ups agree). Returns None when there is no library (old single-template mode)."""
+    lib = active_templates(template)
+    if not lib:
+        return None
+    pinned = next((t for t in lib if t["id"] == lead.get("tplId")), None)
+    if pinned:
+        return pinned
+    weights = [max(1, int(t.get("weight") or 1)) for t in lib]
+    i = zlib.crc32(str(lead.get("id")).encode()) % sum(weights)
+    for t, w in zip(lib, weights):
+        if i < w:
+            return t
+        i -= w
+    return lib[0]
+
+
+def template_by_id(template, tid):
+    return next((t for t in (template.get("library") or []) if t.get("id") == tid), None)
+
+
+def followups_for(template):
+    """[(days, text)] for a template: its own 'followups' list ({days, body}) if it has one, otherwise the built in clip pitch ones."""
+    own = [(int(f.get("days") or 3), f.get("body") or "") for f in (template.get("followups") or []) if (f.get("body") or "").strip()]
+    return own or FOLLOWUPS
+
+
 def stats(log=None):
     """First-email results per variant and per recipient mail host: sent, replied, asked to stop, bounced, failed."""
     log = read_log() if log is None else log
@@ -148,9 +181,12 @@ def stats(log=None):
     for e in log:
         if e.get("status") in ("replied", "optout", "bounced"):
             outcome.setdefault(e.get("to", "").lower(), set()).add(e["status"])
-    out = {"variant": {}, "provider": {}}
+    out = {"variant": {}, "provider": {}, "template": {}}
     for to, e in firsts.items():
-        for kind, key in (("variant", e.get("variant") or "A"), ("provider", e.get("provider") or "unknown")):
+        pairs = [("variant", e.get("variant") or "A"), ("provider", e.get("provider") or "unknown")]
+        if e.get("template_id"):
+            pairs.append(("template", e["template_id"]))
+        for kind, key in pairs:
             row = out[kind].setdefault(key, {"sent": 0, "replied": 0, "optout": 0, "bounced": 0})
             row["sent"] += 1
             for st in outcome.get(to, ()):
@@ -287,8 +323,17 @@ def render(template, lead, cfg, step=0, subject_for_reply=None):
     links = [x for x in (lead.get("clipLinks") or []) if x] or [x for x in [lead.get("clipLink") or lead.get("link")] if x]
     ph = _phrases(lead, seed, len(links))
 
+    segs = template.get("segments") or {}
+    seg = {**(segs.get("default") or {}), **(segs.get(lead.get("segment")) or {})}
+    first = (lead.get("first_name") or str(lead.get("name") or "").split(" ")[0] or "there").strip()
+
     def fill(t):
-        t = (t.replace("{show_ref}", "@@SHOW@@").replace("{clips}", "@@CLIPS@@").replace("{done_line}", "@@DONE@@").replace("{them_it}", "@@THEM@@"))
+        t = (t.replace("{first_name}", first).replace("{business}", str(lead.get("business") or lead.get("name") or "your business"))
+             .replace("{client_type}", str(seg.get("client_type") or "high ticket clients"))
+             .replace("{leaks}", str(seg.get("leaks") or "an unclear next step, no easy way to book, and a slow reply"))
+             .replace("{video_link}", str(lead.get("video_link") or ""))
+             .replace("{observation}", _prose(str(lead.get("personal") or "")))
+             .replace("{show_ref}", "@@SHOW@@").replace("{clips}", "@@CLIPS@@").replace("{done_line}", "@@DONE@@").replace("{them_it}", "@@THEM@@"))
         t = _prose(spin(t, seed))
         for k, v in ph.items():
             t = t.replace(k, v)
@@ -300,13 +345,15 @@ def render(template, lead, cfg, step=0, subject_for_reply=None):
                 .replace("{topic}", _prose(str(lead.get("personal") or "")) or "your recent episode")
                 .replace("{personal_line}", _prose(str(lead.get("personal") or "")))
                 .replace("{sender}", str(cfg.get("sender_name") or "")))
+    case = (lambda x: x) if template.get("keep_case") else _title_case  # keep_case: the subject stays exactly as written
     if step == 0 and (lead.get("body_override") or "").strip():
-        subject = (lead.get("subject_override") or "").strip() or _title_case(fill(template.get("subject") or DEFAULT_SUBJECT))
+        subject = (lead.get("subject_override") or "").strip() or case(fill(template.get("subject") or DEFAULT_SUBJECT))
         body = lead["body_override"].strip()
     elif step == 0:
-        subject, body = _title_case(fill(template.get("subject") or DEFAULT_SUBJECT)), fill(template.get("body") or DEFAULT_BODY)
+        subject, body = case(fill(template.get("subject") or DEFAULT_SUBJECT)), fill(template.get("body") or DEFAULT_BODY)
     else:
-        days, text = FOLLOWUPS[min(step, len(FOLLOWUPS)) - 1]
+        fl = followups_for(template)
+        days, text = fl[min(step, len(fl)) - 1]
         subject = "Re: " + (subject_for_reply or "your episode clip")
         body = fill(template.get(f"followup{step}") or text)
     footer = f"\n\n{cfg.get('postal_address', '')}\nNot interested? Just reply \"no thanks\" and I won't email you again."
@@ -396,7 +443,9 @@ def plan(leads, template, mode="preview", limit=20, ignore_window=False, step=0)
         if step == 0 and provider in (template.get("skip_providers") if "skip_providers" in template else cfg.get("skip_providers", ["microsoft"])):
             yield {**base, "status": "skip", "why": f"mailbox is hosted by {provider.title()} (skipped for now)"}
             continue
-        if step == 0 and not (ld.get("clipReady") or ld.get("clipLink") or ld.get("link")):
+        chosen = pick_template(template, ld) if step == 0 else None
+        needs_clip = (chosen or {}).get("needs_clip", True) is not False
+        if step == 0 and needs_clip and not (ld.get("clipReady") or ld.get("clipLink") or ld.get("link")):
             yield {**base, "status": "skip", "why": "no clip prepared yet (prepare the clip first)"}
             continue
         if n >= limit:
@@ -412,7 +461,12 @@ def plan(leads, template, mode="preview", limit=20, ignore_window=False, step=0)
             if any(e.get("to", "").lower() == to and e.get("status") in ("replied", "optout") for e in log):
                 yield {**base, "status": "skip", "why": "they already replied"}
                 continue
-            days_needed = FOLLOWUPS[min(step, len(FOLLOWUPS)) - 1][0]
+            fu_tpl = template_by_id(template, first_mail.get("template_id")) or {}
+            fl = followups_for(fu_tpl)
+            if fu_tpl.get("followups") and step > len(fl):
+                yield {**base, "status": "skip", "why": f"this template has no follow up {step}"}
+                continue
+            days_needed = fl[min(step, len(fl)) - 1][0]
             if time.time() - first_mail["ts"] < days_needed * 86400 - 3600:
                 yield {**base, "status": "skip", "why": f"too soon (follow up {days_needed} days after the first email)"}
                 continue
@@ -431,15 +485,25 @@ def plan(leads, template, mode="preview", limit=20, ignore_window=False, step=0)
             continue
         variant = first_mail.get("variant", "A") if first_mail else "A"
         tpl_used = template
-        if step == 0:
+        tpl_id = tpl_name = None
+        if step == 0 and chosen:
+            tpl_id, tpl_name, variant = chosen["id"], chosen.get("name") or chosen["id"], chosen["id"]
+            tpl_used = {**{k: v for k, v in template.items() if k != "library"}, **chosen}
+        elif step == 0:
             variant, vs, vb = pick_variant(template, ld.get("id"))
             tpl_used = {**template, "subject": vs, "body": vb}
+        elif first_mail and first_mail.get("template_id"):
+            tpl_id = first_mail["template_id"]
+            fu_t = template_by_id(template, tpl_id) or {}
+            tpl_name = first_mail.get("template_name") or fu_t.get("name") or tpl_id
+            tpl_used = {**{k: v for k, v in template.items() if k != "library"}, **fu_t}
         subject, body = render(tpl_used, ld, cfg, step, ld.get("subject"))
         if acct:
             used[acct["email"]] = used.get(acct["email"], 0) + 1
         n += 1
         yield {**base, "status": "ready", "from": acct["email"] if acct else "(no inbox set up yet)", "subject": subject, "body": body,
-               "in_reply_to": (first_mail or {}).get("message_id"), "variant": variant, "provider": provider}
+               "in_reply_to": (first_mail or {}).get("message_id"), "variant": variant, "provider": provider,
+               "template_id": tpl_id, "template_name": tpl_name}
 
 
 def run(leads, template, mode, limit=20, ignore_window=False, step=0, log_fn=print, sleep=time.sleep):
@@ -476,7 +540,8 @@ def run(leads, template, mode, limit=20, ignore_window=False, step=0, log_fn=pri
             continue
         entry = {"ts": time.time(), "id": item["id"], "to": item["to"], "from": item["from"], "subject": item["subject"],
                  "message_id": msg["Message-ID"], "status": status, "step": item["step"], "body": str(item.get("body") or "")[:4000],
-                 "variant": item.get("variant"), "provider": item.get("provider")}
+                 "variant": item.get("variant"), "provider": item.get("provider"),
+                 "template_id": item.get("template_id"), "template_name": item.get("template_name")}
         append_log(entry)
         results.append({**item, "status": status, "message_id": msg["Message-ID"]})
         log_fn(f"{status} {item['to']} via {item['from']}")
