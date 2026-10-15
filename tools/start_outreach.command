@@ -20,7 +20,7 @@ else
 fi
 sleep 5
 echo "The Mac is NOT kept awake by this launcher. The CRM shows a coffee cup indicator and keeps it awake only while the autopilot works."
-open "https://pharaohm33.github.io/clipper-crm/"
+open "https://pharaohm33.github.io/cold-email-outreach-crm/"
 echo
 echo "Done. In the CRM: Email tab > Autopilot > turn Repeating on. Logs: $LOGS"
 echo "You can close this window; everything keeps running."

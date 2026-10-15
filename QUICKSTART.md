@@ -2,7 +2,7 @@
 
 Everything runs on your Mac. The CRM page is the control panel, a small helper on your computer does the work (Google AI searches, email, clips), and the clipper app makes the clips.
 
-CRM: https://pharaohm33.github.io/clipper-crm/
+CRM: https://pharaohm33.github.io/cold-email-outreach-crm/
 
 ## Start and stop
 
