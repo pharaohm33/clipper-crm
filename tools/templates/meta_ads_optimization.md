@@ -5,9 +5,9 @@ Not wired into the CRM yet. This is the wording, adapted from "Strategy 1", with
 Fill-ins (the CRM would supply these):
 - `{first}` the person's first name
 - `{company}` their company
-- `{product}` your product name
+- `{product}` your product name (assumed "AI Ads Optimization" from your sign up page address: change it if it's different)
 - `{ads_count}` how many active ads you saw in their Meta Ad Library
-- `{link}` your website
+- `{link}` your sign up page: https://portal.aiadsoptimization.com/signup
 - `{sender}` your name
 
 Every cold email also carries your postal address and an opt-out line (added automatically by the sender).
