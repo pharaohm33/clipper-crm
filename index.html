@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Clipper CRM</title>
+<title>Cold Email Outreach CRM</title>
 <style>
 :root{--bg:#f6f7f9;--card:#fff;--ink:#111827;--mut:#6b7280;--line:#e5e7eb;--acc:#e11d48;--ok:#16a34a;--hd:#111827}
 @media (prefers-color-scheme:dark){:root{--bg:#0b0f17;--card:#141a26;--ink:#e5e7eb;--mut:#94a3b8;--line:#243044;--hd:#1e293b}}
@@ -32,7 +32,7 @@ a{color:var(--acc)}.hide{display:none}.mut{color:var(--mut)}pre{white-space:pre-
 </style>
 </head>
 <body>
-<header><b>Clipper CRM</b>
+<header><b>Cold Email Outreach CRM</b>
 <nav id="nav"></nav>
 <span id="cp" style="margin-left:auto" class="mut"></span><span id="aw" style="margin-left:12px;cursor:pointer" class="mut"></span><span class="mut" id="sync"></span><span class="mut" id="clock"></span></header>
 <main id="main"></main>
@@ -430,7 +430,7 @@ async function autopilotRun(){
  if(more){apLog('More to do, continuing right away...');setTimeout(()=>autopilotRun(),2500);return}
  AP.loops=0;AP.disc=0;if(g.apAwake!==0)awakeSet(false);const w=apWork(),made=S.leads.filter(l=>l.draftedAt).length-draftedBefore;
  if(mode==='drafts'){const msg=w.waiting?`${w.waiting} draft email(s) are ready for your approval. Open the Unibox to read and approve them, then press "Drip-send the approved drafts".`:'Nothing waiting. Run more lead searches to find new leads.';apLog('All caught up. '+msg);
-  document.title=(w.waiting?`(${w.waiting} ready) `:'')+'Clipper CRM';
+  document.title=(w.waiting?`(${w.waiting} ready) `:'')+'Cold Email Outreach CRM';
   if(made>0||w.waiting){try{fetch(RUNNER+'/notify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:'Drafts ready',message:`${w.waiting} email draft(s) are waiting for your approval in the Unibox.`})})}catch(e){}}}
  else apLog('All caught up.')}
 
