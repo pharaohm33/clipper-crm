@@ -595,6 +595,38 @@ def run_ads(items, template=None):
         STATE["running"] = False
 
 
+def run_ig(items, template=None):
+    """Instagram accounts: the brand's own site first (free, exact), then Google AI for the personal account. 'IGSITE {json}' and 'IGAI {json}' lines stream back."""
+    try:
+        import ad_leads
+        for it in items:
+            if PIPE["stop"]:
+                break
+            h = ""
+            try:
+                h = ad_leads.instagram_from_site(it.get("web") or "") if it.get("web") else ""
+            except Exception:
+                pass
+            log("IGSITE " + json.dumps({"id": it["id"], "brand_handle": h}))
+            log(f"[{it['company']}] website Instagram link: {('@' + h) if h else 'none'}")
+        import tempfile
+        f = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8")
+        json.dump({"template": template, "leads": items}, f)
+        f.close()
+        proc = subprocess.Popen([sys.executable, "-u", str(HERE / "ig_finder_ai.py"), f.name], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=str(HERE),
+                                env={**os.environ, "PYTHONUNBUFFERED": "1"})
+        STATE["proc"] = proc
+        for line in proc.stdout:
+            line = line.rstrip()
+            if "asking you to verify" in line:
+                phone_notify("Google needs you", "Google is asking for a verification and the Instagram lookup is waiting (up to 5 minutes). " + REMOTE_HINT, key="captcha")
+            log(line)
+        proc.wait()
+        log("[runner] Instagram lookup finished.")
+    finally:
+        STATE["running"] = False
+
+
 def run_maps(items):
     """Google AI: owner + YouTube channel per business. 'MAPS {json}' lines stream back."""
     try:
@@ -991,6 +1023,17 @@ class H(BaseHTTPRequestHandler):
                 PIPE["stop"] = False
                 threading.Thread(target=run_find_phones, args=(leads, bool(body.get("ai", True)), str(body.get("prompt") or "")[:3000] or None), daemon=True).start()
             return self._send(200, {"ok": True, "leads": len(leads)})
+        if self.path == "/ads/ig":
+            items = [{k: str(b.get(k) or "")[:300] for k in ("id", "company", "web", "person", "title")} for b in (body.get("items") or [])][:30]
+            if not items:
+                return self._send(400, {"error": "nothing to look up"})
+            with LOCK:
+                if STATE["running"]:
+                    return self._send(409, {"error": "a run is already in progress"})
+                STATE.update(running=True, log=[f"[runner] looking up Instagram accounts for {len(items)} prospect(s)"])
+                PIPE["stop"] = False
+                threading.Thread(target=run_ig, args=(items, str(body.get("prompt") or "")[:3000] or None), daemon=True).start()
+            return self._send(200, {"ok": True, "items": len(items)})
         if self.path == "/ads/names":
             items = [{k: str(b.get(k) or "")[:200] for k in ("id", "email", "company", "person")} for b in (body.get("items") or [])][:200]
             return self._send(200, {"names": greeting.resolve(items)})

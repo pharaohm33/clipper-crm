@@ -67,6 +67,26 @@ def emails_from_site(site):
     return out
 
 
+IG_RE = re.compile(r"instagram\.com/(?!p/|reel/|reels/|explore|accounts|stories|tv/|direct|about|legal|developer|privacy|web/|share)([A-Za-z0-9._]{2,30})/?(?:[\"'?#<\s]|$)", re.I)
+
+
+def instagram_from_site(site):
+    """The brand's own Instagram handle, read from the social links on its home and contact pages ('' when it does not link one)."""
+    site = site if site.startswith("http") else "https://" + site
+    base = site.rstrip("/")
+    counts = {}
+    for p in ("", "/pages/contact", "/contact", "/pages/about-us"):
+        try:
+            html = _http(base + p)
+        except Exception:
+            continue
+        for m in IG_RE.finditer(html):
+            h = m.group(1).strip(".").lower()
+            if h and not h.endswith((".png", ".jpg", ".js", ".css")):
+                counts[h] = counts.get(h, 0) + 1
+    return max(counts, key=counts.get) if counts else ""
+
+
 def _person_match(local, person):
     """Does an address look like it belongs to this person (michelle@, michelle.sayers@, msayers@)?"""
     parts = [re.sub(r"[^a-z]", "", p) for p in str(person).lower().split()]
