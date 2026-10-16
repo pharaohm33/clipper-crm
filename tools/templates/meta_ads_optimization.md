@@ -28,7 +28,7 @@ I looked at {company}'s Meta Ad Library and saw about {ads_count} active ads, so
 
 {product} connects to your existing Meta ads account, monitors your campaigns 24/7, and automatically cuts wasteful ad spend.
 
-There is no setup fee, and we only charge 10% of the money we actually save you. We send proof of the savings every day. If we don't save you anything, you don't pay anything.
+There is no setup fee, and we only charge 20% of the money we actually save you. We send proof of the savings every day. If we don't save you anything, you don't pay anything.
 
 Want me to send over the details? Just reply here.
 
@@ -108,7 +108,7 @@ Here's what we discussed:
 
 {product} connects to your existing Meta ads account, where it monitors your campaigns 24/7 and automatically cuts wasteful ad spend.
 
-We only charge 10% of whatever money we actually save you, and we send proof every day.
+We only charge 20% of whatever money we actually save you, and we send proof every day.
 
 Based on the amount of ads {company} runs, we're confident we can save you money on your ad spend. If we don't save you anything, you don't pay us anything.
 

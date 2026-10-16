@@ -62,6 +62,18 @@ The review limit ("Keep at most") counts only drafts still waiting for you to ap
 - Numbers come from public pages only. Check the National Do Not Call list and your state's rules before calling or texting, and mark anyone who says stop as "Do not call".
 - **Google Maps import:** upload a CSV with name, phone, website and address columns. Google AI finds the owner and their YouTube channel, and businesses with no channel are skipped.
 
+## Meta ads campaign (separate from the podcast clips)
+
+Switch to **Meta ads** in the header. It has its own leads, emails and replies, and nothing from the podcast campaign is used.
+
+1. **Meta Ads tab, Import:** choose `tools/ad_leads_portal.csv` (your HALCRUS portal leads) or `tools/ad_leads.csv`. Leads you already emailed from Gmail are marked and kept out of the first touch.
+2. **Emails for this campaign:** edit the product name, your sign up link, and the seven templates (first email, follow up 1 after 3 days, follow up 2 after 7 days, and three reply templates). Pricing in the defaults is performance based: 20% of the money saved, nothing if nothing is saved. Press **Preview** to see the first email.
+3. **Save the next 10 first emails as drafts**, then **Load my Meta drafts**, tick the ones you approve, and **Send the approved drafts**. Sends are one at a time, inside your sending hours and daily limits.
+4. **Send follow ups that are due:** follow up 1 and 2 go only to people who were emailed and have not replied.
+5. **Check replies:** DeepSeek reads each reply and picks one of your reply templates (confused, interested, ready). It only saves the answer as a **draft**. Opt-outs go on the do-not-contact list, and anything unclear is left for you.
+
+The first email says you came across their company while looking at brands that advertise on Meta. Use the "we spoke already" wording (`tools/templates/meta_ads_optimization.md`, template 6) only after a real conversation.
+
 ## The Google AI Chrome window
 
 It stays **minimized** while it searches, so it does not cover your screen, and it is minimized again whenever a search ends. If Google asks you to verify, you get a Mac banner and a phone alert, but the window does **not** pop up by itself: click the Google Chrome icon in the Dock, solve it, and it waits up to 5 minutes.

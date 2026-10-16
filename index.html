@@ -585,6 +585,73 @@ function findAdContacts(n){const todo=(S.adLeads||[]).filter(l=>!l.checkedAt&&!l
   if(r.site_emails&&r.site_emails.length){l.siteEmails=r.site_emails;if(!l.email)l.email=r.site_emails[0]}
   if(r.phones&&r.phones.length){l.phones=[...new Set([...(l.phones||[]),...r.phones])]}
   save();if(tab=='ads')adsV()}})}
+
+/* ---------- Meta ads emails: templates, drafts, follow-ups, and DeepSeek-picked replies (this campaign only) ---------- */
+const DEF_META={product:'AI Ads Optimization',link:'https://portal.aiadsoptimization.com/signup',
+ subject:'Cutting wasted Meta ad spend at {business}',
+ first:"Hey {first_name},\n\nI came across {business} while looking at brands that advertise on Meta.\n\n{product} connects to your existing Meta ads account, monitors your campaigns 24/7, and automatically cuts wasteful ad spend.\n\nThere's no setup fee and no monthly fee. We only take 20% of the money we actually save you, and we send proof of the savings every day. If we don't save you anything, you don't pay us anything.\n\nWant me to send over the details? Just reply here.\n\n{sender}",
+ fu1:"Hey {first_name},\n\nFollowing up on my note about cutting wasted Meta ad spend at {business}. There's nothing for your team to do: {product} connects to your existing ads account, it's free to start, and we only take 20% of what we save you.\n\nWould it help if I sent the website again so you can see the details? {link}\n\n{sender}",
+ fu2:"Hey {first_name},\n\nI haven't heard back, so I'll assume cutting wasted ad spend isn't a priority for {business} right now. I'll leave the offer open, but I'm moving on to a few other brands.\n\nIf you'd like me to keep {business} in mind, just let me know.\n\n{sender}",
+ confused:"Hey {first_name},\n\nSorry for the confusion, I'm {sender} from {product}. I reached out because {business} looks like it advertises on Meta, and our tool cuts wasted ad spend automatically.\n\nIt connects to your existing Meta ads account, monitors your campaigns 24/7, and we only take 20% of the money it saves you (nothing if it saves nothing). Setup takes about 2 minutes and it's free to get started.\n\nHere's the sign up page if you'd like to look: {link}\n\n{sender}",
+ interested:"Hey {first_name},\n\nHappy to explain. {product} connects to your existing Meta ads account and watches your campaigns 24/7, cutting spend that isn't working. We send proof of the savings every day.\n\nPricing is performance based: 20% of the money we save you, no setup fee, and nothing if we save nothing. Setup takes about 2 minutes and you don't have to do anything after that.\n\nYou can start here: {link}\n\n{sender}",
+ ready:"Hey {first_name},\n\nGreat, glad you want to get started. Here's the sign up page, it takes about 2 minutes: {link}\n\nOnce you connect your Meta ads account we start monitoring right away. Reply here if you get stuck and I'll help.\n\n{sender}"};
+const meta=()=>Object.assign({},DEF_META,S.settings.meta||{});
+const META_LABELS=[['subject','First email subject','subject'],['first','First email (no prior contact)'],['fu1','Follow up 1 (sent 3 days later if no reply)'],['fu2','Follow up 2 (sent 7 days later if no reply)'],['confused','Reply template: they are confused'],['interested','Reply template: they want more info or ask about price'],['ready','Reply template: they are ready to start']];
+const metaTemplateObj=()=>{const m=meta();return{library:[{id:'meta-first',name:'Meta ads: cold first email',subject:m.subject,body:m.first,needs_clip:false,keep_case:true,weight:1,followups:[{days:3,body:m.fu1},{days:7,body:m.fu2}]}]}};
+const metaVars=()=>({product:meta().product,link:meta().link,phone:(ES.status&&ES.status.phone)||''});
+const metaFirst=l=>(l.person||'').trim().split(/\s+/)[0]||'there';
+const metaPayload=l=>({id:l.id,name:l.company,first_name:metaFirst(l),business:l.company,email:l.email,vars:metaVars(),tplId:'meta-first'});
+const metaFresh=()=>(S.adLeads||[]).filter(l=>l.email&&!l.contacted&&!l.emailedAt&&!l.draftedAt&&!l.dnc&&!l.msSkip);
+const MC={msg:'',preview:null,drafts:null,replies:[],busy:false};
+async function metaApi(path,body){return await (await fetch(RUNNER+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json()}
+async function metaReconcile(){try{const r=await metaApi('/email/sent',{campaign:'meta'});let n=0;for(const e of r.sent||[]){const l=(S.adLeads||[]).find(x=>String(x.email||'').toLowerCase()===String(e.to||'').toLowerCase());if(!l)continue;if((e.step||0)===0&&!l.emailedAt){l.emailedAt=Math.round(e.ts*1000);delete l.draftedAt;n++}l.emailStep=Math.max(l.emailStep||0,e.step||0)}if(n)save()}catch(e){}}
+function metaCards(){const m=meta(),fresh=metaFresh().length,drafted=(S.adLeads||[]).filter(l=>l.draftedAt&&!l.emailedAt).length,sent=(S.adLeads||[]).filter(l=>l.emailedAt).length;
+ const ta=([k,lab])=>`<label>${esc(lab)}</label><textarea data-mk="${k}" rows="${k==='subject'?1:k.startsWith('fu')?6:9}" style="width:100%">${esc(m[k])}</textarea>`;
+ const pv=MC.preview;
+ const dr=MC.drafts;
+ return `<div class="card"><b>Emails for this campaign</b> <span class=mut>${fresh} ready for a first email · ${drafted} saved as drafts · ${sent} sent. These are separate from the podcast clips emails and never use that wording. Fill-ins: {first_name} {business} {product} {link} {sender}. Your name, postal address and an opt out line are added automatically.</span>
+  <div class="grid"><div><label>Product name</label><input data-mk="product" value="${esc(m.product)}"></div><div><label>Sign up link</label><input data-mk="link" value="${esc(m.link)}"></div></div>
+  ${META_LABELS.map(ta).join('')}
+  <div class="row" style="margin-top:6px"><button class="b" id="mt-reset">Reset all to the defaults</button></div>
+  <div class="row" style="margin-top:10px"><button class="b" id="mt-prev">Preview the first email for the top lead</button><button class="b p" id="mt-draft" ${MC.busy||ES.busy||!fresh?'disabled':''}>Save the next 10 first emails as drafts</button>
+   <button class="b" id="mt-fu" ${MC.busy||ES.busy||!sent?'disabled':''} title="Sends follow up 1 (3 days) and 2 (7 days) to people who were emailed and have not replied">Send follow ups that are due</button>
+   <button class="b" id="mt-rep" ${MC.busy||ES.busy||!sent?'disabled':''} title="Reads replies, and DeepSeek picks which of your reply templates fits. The answer is only saved as a draft.">Check replies (DeepSeek picks the template)</button></div>
+  <div class="mut" id="mt-msg" style="margin-top:6px;white-space:pre-wrap">${esc(MC.msg)}</div>
+  ${pv?`<div style="border:1px solid var(--bd,#444);border-radius:6px;padding:8px;margin-top:6px"><b>Preview for ${esc(pv.company)}</b> <span class=mut>(not saved or sent)</span><div><b>Subject:</b> ${esc(pv.subject)}</div><div style="white-space:pre-wrap" class=mut>${esc(pv.body)}</div></div>`:''}
+  ${MC.replies.length?`<div style="margin-top:8px"><b>Replies found</b>${MC.replies.map(r=>`<div class=mut>${esc(r.email)}: ${esc(r.intent||r.kind)} ${r.confidence!=null?'('+Math.round(r.confidence*100)+'%)':''} · ${esc(r.summary||'')} → <b>${esc(r.auto||'')}</b></div>`).join('')}</div>`:''}
+ </div>
+ <div class="card"><b>Drafts to review</b> <span class=mut>Read them, tick the ones you approve, then send. Sends go one at a time from your rotating inboxes, inside your sending hours and daily limits. To change the wording, edit the templates above and save the drafts again.</span>
+  <div class="row" style="margin-top:6px"><button class="b" id="md-load" ${MC.busy||ES.busy?'disabled':''}>↻ Load my Meta drafts</button><button class="b p" id="md-send" ${dr&&dr.some(d=>d.ok)?'':'disabled'}>Send the approved drafts</button><button class="b" id="md-all" ${dr&&dr.length?'':'disabled'}>Tick all</button></div>
+  ${dr?(dr.length?dr.map((d,i)=>`<div style="border:1px solid var(--bd,#444);border-radius:6px;padding:8px;margin-top:6px"><label style="display:flex;gap:6px;align-items:center"><input type="checkbox" data-ok="${i}" ${d.ok?'checked':''}> <b>${esc(d.to)}</b> <span class=mut>from ${esc(d.inbox||'')}</span> <button class="b" data-dx="${i}" style="margin-left:auto">Discard</button></label><div><b>${esc(d.subject||'')}</b></div><div class=mut style="white-space:pre-wrap">${esc((d.body||'').slice(0,700))}</div></div>`).join(''):'<div class=mut style="margin-top:6px">No Meta drafts waiting.</div>'):''}
+ </div>`}
+function metaWire(){const g=id=>document.getElementById(id);
+ const sync=()=>{if(tab=='ads')adsV()};
+ $('#main').oninput=e=>{const k=e.target.dataset.mk;if(k){S.settings.meta=S.settings.meta||{};S.settings.meta[k]=e.target.value;save()}};
+ g('mt-reset').onclick=()=>{if(confirm('Replace every Meta email and reply template with the defaults?')){S.settings.meta={};save();adsV()}};
+ g('mt-prev').onclick=async()=>{const l=metaFresh()[0]||(S.adLeads||[]).find(x=>x.email);if(!l){MC.msg='No lead with an email to preview.';return sync()}
+  try{const r=await metaApi('/email/preview',{leads:[metaPayload(l)],template:metaTemplateObj(),limit:1,step:0});const it=(r.items||[])[0];MC.preview=it&&it.status==='ready'?{company:l.company,subject:it.subject,body:it.body}:null;MC.msg=it&&it.status!=='ready'?'Preview skipped: '+it.why:'';}catch(e){MC.msg='Helper not running.'}sync()};
+ g('mt-draft').onclick=async()=>{const todo=metaFresh().slice(0,10);if(!todo.length)return;MC.busy=true;MC.msg=`Saving ${todo.length} first emails as drafts in your sending inboxes…`;sync();
+  const ok=await helperJob('/email/run',{campaign:'meta',mode:'drafts',leads:todo.map(metaPayload),template:metaTemplateObj(),limit:10,step:0},t=>{const r=parseTag(t,'EMAIL');if(!r)return;const l=(S.adLeads||[]).find(x=>x.id==r.id);if(!l)return;
+   if(r.status==='drafted')l.draftedAt=Date.now();else if(r.status==='skip'&&/Microsoft/i.test(r.why||''))l.msSkip=Date.now();else if(r.status==='skip')l.skipWhy=r.why});
+  MC.busy=false;MC.msg=ok?`Done. ${todo.filter(l=>l.draftedAt).length} drafts saved, ${todo.filter(l=>l.msSkip).length} skipped because their mailbox is hosted by Microsoft.`:(ES.msg||'It did not run.');save();sync()};
+ g('mt-fu').onclick=async()=>{const todo=(S.adLeads||[]).filter(l=>l.emailedAt&&!l.replied&&!l.dnc);const step=1;if(!todo.length)return;if(!confirm('Send the follow ups that are due (follow up 1 after 3 days, follow up 2 after 7 days) for real? Anyone not due yet, or who already replied, is skipped automatically.'))return;
+  MC.busy=true;MC.msg='Sending the follow ups that are due…';sync();let sent=0,skipped=0;
+  for(const st of [1,2]){await helperJob('/email/run',{campaign:'meta',mode:'send',confirm:true,leads:todo.map(metaPayload),template:metaTemplateObj(),limit:20,step:st},t=>{const r=parseTag(t,'EMAIL');if(!r)return;if(r.status==='sent'){sent++;const l=(S.adLeads||[]).find(x=>x.id==r.id);if(l)l.emailStep=r.step}else skipped++})}
+  MC.busy=false;MC.msg=`Follow ups sent: ${sent}. Skipped (not due yet, already replied, or over today's limits): ${skipped}.`;save();sync()};
+ g('mt-rep').onclick=async()=>{const sent=(S.adLeads||[]).filter(l=>l.emailedAt).map(l=>({id:l.id,email:l.email,since_ts:Math.floor(l.emailedAt/1000)-3600,name:l.person||''}));if(!sent.length)return;MC.busy=true;MC.msg='Reading replies and asking DeepSeek which template fits…';sync();
+  try{const m=meta(),r=await metaApi('/email/check-replies',{campaign:'meta',sent,reply_templates:{confused:m.confused,interested:m.interested,ready:m.ready},vars:metaVars()});
+   MC.replies=r.found||[];for(const f of MC.replies){const l=(S.adLeads||[]).find(x=>x.id==f.id);if(l){l.replied=Date.now();l.replyIntent=f.intent||f.kind;if(f.kind==='optout'){l.dnc=1}}}
+   MC.msg=MC.replies.length?`${MC.replies.length} repl${MC.replies.length==1?'y':'ies'} found. Drafted answers are in the Drafts to review list below.`:'No new replies.'}catch(e){MC.msg='Could not check replies: '+e.message}
+  MC.busy=false;save();sync()};
+ g('md-load').onclick=async()=>{MC.busy=true;MC.msg='Reading the Drafts folders of your sending inboxes…';sync();try{const r=await metaApi('/unibox/drafts',{campaign:'meta'});MC.drafts=(r.drafts||[]).map(d=>({...d,ok:false}));MC.msg=(r.errors&&r.errors.length)?'Some inboxes could not be read: '+r.errors[0]:''}catch(e){MC.msg='Helper not running.'}MC.busy=false;sync()};
+ const sendBtn=g('md-send');if(sendBtn)sendBtn.onclick=async()=>{const ok=MC.drafts.filter(d=>d.ok);if(!ok.length)return;if(!confirm(`Send ${ok.length} approved email(s) for real? They go out one at a time, inside your sending hours.`))return;
+  const leads=ok.map(d=>(S.adLeads||[]).find(l=>String(l.email||'').toLowerCase()===String(d.to||'').toLowerCase())).filter(Boolean);
+  MC.busy=true;MC.msg='Sending…';sync();let n=0;
+  await helperJob('/email/run',{campaign:'meta',mode:'send',confirm:true,leads:leads.map(metaPayload),template:metaTemplateObj(),limit:20,step:0},t=>{const r=parseTag(t,'EMAIL');if(r&&r.status==='sent'){n++;const l=(S.adLeads||[]).find(x=>x.id==r.id);if(l){l.emailedAt=Date.now();delete l.draftedAt}}});
+  MC.busy=false;MC.msg=`${n} sent.`;MC.drafts=null;save();await metaReconcile();sync()};
+ const all=g('md-all');if(all)all.onclick=()=>{MC.drafts.forEach(d=>d.ok=true);sync()};
+ document.querySelectorAll('[data-ok]').forEach(c=>c.onchange=()=>{MC.drafts[+c.dataset.ok].ok=c.checked;const b=g('md-send');if(b)b.disabled=!MC.drafts.some(d=>d.ok)});
+ document.querySelectorAll('[data-dx]').forEach(b=>b.onclick=async e=>{e.preventDefault();const d=MC.drafts[+b.dataset.dx];if(!confirm('Discard the draft to '+d.to+'?'))return;try{await metaApi('/unibox/draft/delete',{mid:d.mid})}catch(x){}MC.drafts.splice(+b.dataset.dx,1);sync()})}
 function adsV(){const L=(S.adLeads||[]).slice().sort((a,b)=>(!!a.contacted-!!b.contacted)||((b.score||0)-(a.score||0))),g=S.settings,waiting=L.filter(l=>!l.checkedAt&&!l.contacted).length,touched=L.filter(l=>l.contacted).length;
  const link=(u,t)=>u?`<a href="${esc(u)}" target="_blank" rel="noopener">${esc(t||u.replace(/^https?:\/\/(www\.)?/,'').slice(0,34))}</a>`:'<span class=mut>-</span>';
  const row=l=>`<tr${l.contacted?' style="opacity:.85"':''}><td><b>${esc(l.company)}</b>${l.contacted?`<div style="color:#e5a000" title="${esc(l.contacted)}">⚠ Already emailed: ${esc(l.contacted)} A second touch only makes sense as a Loom follow-up, after a few days with no reply.</div>`:''}<br>${link(l.web)}${l.fb?' · '+link(l.fb,'Facebook Page'):''}${l.signal?`<div class=mut style="max-width:260px">${esc(l.signal)}</div>`:''}</td>
@@ -597,7 +664,10 @@ function adsV(){const L=(S.adLeads||[]).slice().sort((a,b)=>(!!a.contacted-!!b.c
   <div class="row" style="margin-top:6px"><label class="mut">Import a CSV (company, website, facebook_page columns; email, phone, decision_maker, title, linkedin optional). Your files: tools/ad_leads.csv (Ad Library) and tools/ad_leads_portal.csv (HALCRUS portal, 271 leads).</label><input type="file" id="ad-file" accept=".csv"></div></div>
   <div class="card"><b>Google AI prompt</b> <span class=mut>Edit it any time; it is used on the next lookup. Fill-ins: {company} {website} {facebook}. If you remove the JSON answer instructions they are added back automatically. Answers are checked before they are saved: an email must be on the company's own domain, and a phone must look like a real number.</span>
   <textarea id="ad-prompt" rows="7" style="width:100%;margin-top:6px">${esc(g.adPrompt||DEF_AD_PROMPT)}</textarea><div class="row"><button class="b" id="ad-reset">Reset to the default prompt</button></div></div>
+  ${metaCards()}
   <div class="card"><b>${L.length} advertiser${L.length==1?'':'s'}</b> <span class=mut>${L.length-touched} ready for a first email, ${touched} already emailed (kept out of the first touch)</span>${L.length?`<div class="tw"><table><tr><th>Company</th><th>Decision maker</th><th>Email</th><th>Phone</th><th></th></tr>${L.map(row).join('')}</table></div>`:'<div class=mut style="margin-top:6px">No advertisers yet. Import tools/ad_leads.csv.</div>'}</div>`;
+ metaWire();
+ if(!MC.reconciled){MC.reconciled=1;if(!ES.status)loadEmailStatus();metaReconcile().then(()=>{if(tab=='ads')adsV()})}
  $('#ad-prompt').oninput=e=>{g.adPrompt=e.target.value;save()};
  $('#ad-reset').onclick=()=>{g.adPrompt='';save();adsV()};
  $('#ad-file').onchange=async e=>{const f=e.target.files[0];if(!f)return;const n=importAdCSV(await f.text());AD.msg=n<0?'Could not find a company column.':`Added ${n} advertisers.`;adsV()};

@@ -337,6 +337,8 @@ def render(template, lead, cfg, step=0, subject_for_reply=None):
         t = _prose(spin(t, seed))
         for k, v in ph.items():
             t = t.replace(k, v)
+        for k, v in (lead.get("vars") or {}).items():  # campaign specific fill-ins, e.g. {product} {link} {phone}
+            t = t.replace("{" + str(k) + "}", str(v))
         return (t.replace("{niche}", str(lead.get("niche") or "your").replace("-", " "))
                 .replace("{name}", short_name(lead.get("name")))
                 .replace("{episode}", str(lead.get("epTitle") or "your recent episode"))
@@ -619,7 +621,7 @@ def check_replies(sent, log_fn=print, campaign="clips"):
                 if not any(e.get("to", "").lower() == s["email"].lower() and e.get("status") in ("replied", "optout") for e in read_log()):
                     fm = first_mail_for(read_log(), s["email"].lower()) or {}
                     append_log({"ts": time.time(), "id": s["id"], "to": s["email"].lower(), "status": kind, "step": 0,
-                                "variant": fm.get("variant"), "provider": fm.get("provider")})
+                                "variant": fm.get("variant"), "provider": fm.get("provider"), "campaign": campaign})
                 found.append({"id": s["id"], "email": s["email"], "kind": kind, "snippet": re.sub(r"\s+", " ", text)[:160], "text": text[:1200],
                               "msgid": msgid, "subject": rsubj, "slug": s.get("slug"), "name": s.get("name")})
                 log_fn(f"{kind}: {s['email']}")

@@ -16,7 +16,7 @@ from urllib.parse import urlparse, parse_qs
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-import cold_email, email_finder, personalize, auto_reply, phone_finder, coach_finder
+import cold_email, email_finder, personalize, auto_reply, phone_finder, coach_finder, meta_reply
 SCRIPT = os.getenv("RUNNER_SCRIPT", str(HERE / "google_ai_to_crm.py"))
 PORT = int(os.getenv("RUNNER_PORT", "8765"))
 APP_URL = os.getenv("CLIPPER_URL", "http://127.0.0.1:5001").rstrip("/")
@@ -840,7 +840,9 @@ class H(BaseHTTPRequestHandler):
                 return self._send(400, {"error": "; ".join(st["problems"])})
             campaign = str(body.get("campaign") or "clips")
             tpl = body.get("template") or {}
-            if campaign != "clips" and not (str(tpl.get("subject") or "").strip() and str(tpl.get("body") or "").strip()):
+            has_tpl = (str(tpl.get("subject") or "").strip() and str(tpl.get("body") or "").strip()) or any(
+                str(t.get("subject") or "").strip() and str(t.get("body") or "").strip() and t.get("active", True) is not False for t in (tpl.get("library") or []))
+            if campaign != "clips" and not has_tpl:
                 return self._send(400, {"error": f"the {campaign} campaign has no email template, so nothing was written or sent (the clips template is never used for another campaign)"})
             with LOCK:
                 if STATE["running"]:
@@ -855,6 +857,8 @@ class H(BaseHTTPRequestHandler):
                 res = cold_email.check_replies(body.get("sent") or [], log_fn=lambda m: None, campaign=campaign)
                 if campaign == "clips":  # the automatic "yes" answer sends the clips sheet, so it only ever runs for the clips campaign
                     handled = auto_reply.handle(res.get("found") or [], log_fn=log)
+                elif campaign == "meta":  # DeepSeek picks which of YOUR reply templates fits; the answer is only ever saved as a draft
+                    handled = meta_reply.handle(res.get("found") or [], body.get("reply_templates") or {}, body.get("vars") or {}, log_fn=log)
                 else:
                     handled = [{**f, "auto": "needs you (this campaign has no automatic reply)"} for f in (res.get("found") or [])]
                 res["found"] = [{k: v for k, v in f.items() if k != "text"} for f in handled]
