@@ -161,8 +161,10 @@ def ask_google_ai(page, prompt, timeout=120):
         time.sleep(2)
         body = page.inner_text("body")
         if re.search(r"unusual traffic|not a robot|captcha", body, re.I):
-            print("  Google is asking you to verify. Solve it in the Chrome window; waiting up to 5 minutes...")
-            AB.show_window(page)  # the window is normally minimized: bring it back so it can be solved
+            print("  Google is asking you to verify. Open the Google Chrome window (it is minimized in the Dock) and solve it; waiting up to 5 minutes...")
+            if os.getenv("AI_WINDOW_ON_VERIFY", "dock") == "show" and not getattr(AB, "_shown_once", False):
+                AB._shown_once = True
+                AB.show_window(page)  # opt in: pop the window up, once per run
             for _ in range(150):
                 time.sleep(2)
                 if not re.search(r"unusual traffic|not a robot|captcha", page.inner_text("body"), re.I):

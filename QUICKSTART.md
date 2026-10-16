@@ -64,9 +64,9 @@ The review limit ("Keep at most") counts only drafts still waiting for you to ap
 
 ## The Google AI Chrome window
 
-It stays **minimized** while it searches, so it does not cover your screen. If Google asks you to verify, the window comes back by itself and you get a phone alert. Solve it there, and it minimizes again.
+It stays **minimized** while it searches, so it does not cover your screen, and it is minimized again whenever a search ends. If Google asks you to verify, you get a Mac banner and a phone alert, but the window does **not** pop up by itself: click the Google Chrome icon in the Dock, solve it, and it waits up to 5 minutes.
 
-To keep it visible while debugging, start the helper with `AI_WINDOW=shown`.
+To keep it visible while debugging, start the helper with `AI_WINDOW=shown`. To make it pop up (once per run) when Google asks you to verify, start the helper with `AI_WINDOW_ON_VERIFY=show`.
 
 ## Phone alerts
 

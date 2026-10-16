@@ -71,7 +71,7 @@ def ensure_chrome():
         return False
     PROFILE.mkdir(parents=True, exist_ok=True)
     subprocess.Popen([exe, f"--remote-debugging-port={PORT}", f"--user-data-dir={PROFILE}", "--no-first-run", "--no-default-browser-check",
-                      "--window-size=1200,900", "--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding",
+                      "--window-size=1200,900", "--start-minimized", "--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding",
                       "--disable-background-timer-throttling", "https://www.google.com/"],
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
     for _ in range(40):
@@ -141,7 +141,18 @@ def get_page(p):
 
 
 def release(browser):
-    """Disconnects. The Chrome window keeps running. (For the temporary fallback window this closes it.)"""
+    """Disconnects. The Chrome window keeps running, minimized again in case it was opened. (For the temporary fallback window this closes it.)"""
+    try:
+        if os.getenv("AI_WINDOW", "hidden") != "shown":
+            for c in getattr(browser, "contexts", []):
+                for pg in c.pages:
+                    if not pg.url.startswith("devtools"):
+                        hide_window(pg)
+                        raise StopIteration
+    except StopIteration:
+        pass
+    except Exception:
+        pass
     try:
         browser.close()
     except Exception:
