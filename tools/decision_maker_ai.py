@@ -27,7 +27,7 @@ def who_prompt(l):
             "Use only official sources: the company website (about, team or press pages), the company's own social pages, news articles and interviews. "
             "Do not use people-search sites, do not guess, and say unknown if you are not sure. "
             "End your answer with exactly one line of JSON with these keys: company (the exact company name you answered about), person (full name, or empty), "
-            "title (their role), where (a short note on where it is stated), confidence (a number from 0 to 1).")
+            "title (their role), linkedin_url (the public linkedin.com/in address of that person if it appears in the search results, else empty), where (a short note on where it is stated), confidence (a number from 0 to 1).")
 
 
 def mail_prompt(l, person):
@@ -53,7 +53,8 @@ def parse_person(text, company):
             conf = 0
         if len(name.split()) < 2 or len(name) > 60 or not str(o.get("where") or "").strip() or conf < 0.6 or re.search(r"unknown|n/a|none", name, re.I):
             continue
-        best = {"person": name, "title": str(o.get("title") or "")[:80], "where": str(o["where"])[:140], "confidence": conf}
+        li = re.search(r"https?://(?:[a-z]{2,3}\.)?linkedin\.com/in/[A-Za-z0-9\-_%]+", str(o.get("linkedin_url") or ""))
+        best = {"person": name, "title": str(o.get("title") or "")[:80], "where": str(o["where"])[:140], "confidence": conf, "linkedin": li.group(0) if li else ""}
     return best
 
 
@@ -80,6 +81,13 @@ def main():
                 e = email_ai.parse((d2 or {}).get("text", ""), l["company"])
                 if e and own_domain(e["email"], l.get("web", "")):
                     out.update(email=e["email"], email_quality=e["quality"], email_where=e["where"])
+            try:  # the company's own pages: emails (one matching the name if there is one) and phone numbers
+                c = ad_leads.contacts(l.get("web", ""), out.get("person", ""))
+                out["site_emails"] = [e["email"] for e in c["emails"]][:4]
+                out["person_email"] = c["person_email"] or out.get("email", "")
+                out["phones"] = [p["phone"] for p in c["phones"]]
+            except Exception:
+                pass
             print("DMAKER " + json.dumps(out))
             if n < len(leads) - 1:
                 time.sleep(random.uniform(8, 16))
