@@ -29,12 +29,14 @@ a{color:var(--acc)}.hide{display:none}.mut{color:var(--mut)}pre{white-space:pre-
 .ov{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:20;padding:12px}.ov .card{width:min(600px,100%);max-height:92vh;overflow:auto;margin:0}.ov label{margin-top:8px}.ov input,.ov textarea{width:100%}
 .grip{cursor:grab;color:var(--mut);font-size:16px;padding:0 4px;user-select:none}.grip:active{cursor:grabbing}nav button.drop{outline:2px dashed #fff;background:var(--acc)}
 .sh{display:flex;gap:2px;align-items:flex-end;height:60px}.sh div{flex:1;background:var(--acc);border-radius:3px 3px 0 0;min-height:2px}
+#camp{display:flex;gap:4px;margin:0 10px}#camp button{border:1px solid var(--c);background:transparent;color:var(--fg,inherit);border-radius:999px;padding:3px 10px;cursor:pointer;font-size:12px}#camp button.on{background:var(--c);color:#fff}
 </style>
 </head>
 <body>
 <header><b>Cold Email Outreach CRM</b>
+<div id="camp"></div>
 <nav id="nav"></nav>
-<span id="cp" style="margin-left:auto" class="mut"></span><span id="aw" style="margin-left:12px;cursor:pointer" class="mut"></span><span class="mut" id="sync"></span><span class="mut" id="clock"></span></header>
+<span id="hl" style="margin-left:auto" class="mut"></span><span id="cp" style="margin-left:12px" class="mut"></span><span id="aw" style="margin-left:12px;cursor:pointer" class="mut"></span><span class="mut" id="sync"></span><span class="mut" id="clock"></span></header>
 <main id="main"></main>
 <div id="ov" class="hide"></div>
 <script>
@@ -87,8 +89,16 @@ const today=()=>iso();const money=n=>'$'+Number(n||0).toLocaleString(undefined,{
 const addDays=(d,n)=>{const x=new Date(d+'T00:00');x.setDate(x.getDate()+n);return iso(x)};
 const monthKey=()=>today().slice(0,7);
 let tab='dash';const TABS=[['dash','Dashboard'],['today','Today'],['leads','Leads'],['email','Email'],['audit','Audit'],['unibox','Unibox'],['calls','Calls'],['ads','Meta Ads'],['find','Find Podcasts'],['money','Money'],['settings','Settings']];
-function nav(){const waiting=S.leads.filter(l=>l.draftedAt&&!l.emailedAt&&!l.approved&&l.status=='New').length;$('#nav').innerHTML=TABS.map(([k,l])=>`<button class="${k===tab?'on':''}" data-t="${k}">${l}${k==='unibox'&&waiting?` (${waiting})`:''}</button>`).join('')}
+const CAMPS=[['clips','Podcast clips','#e5484d'],['meta','Meta ads','#2f6fed'],['audit','Audit','#8b5cf6']];
+const TAB_CAMP={today:'clips',leads:'clips',email:'clips',unibox:'clips',calls:'clips',find:'clips',ads:'meta',audit:'audit'}; // dashboard, money and settings are shared
+const CAMP_HOME={clips:'email',meta:'ads',audit:'audit'};
+const curCamp=()=>CAMPS.some(c=>c[0]===S.campaign)?S.campaign:'clips';
+function nav(){const camp=curCamp(),vis=TABS.filter(([k])=>!TAB_CAMP[k]||TAB_CAMP[k]===camp);if(!vis.some(t=>t[0]===tab))tab=vis[0][0];
+ $('#camp').innerHTML=CAMPS.map(([k,l,c])=>`<button class="${k===camp?'on':''}" data-camp="${k}" style="--c:${c}" title="Switch to the ${l} campaign. Each campaign has its own leads, emails and replies.">${l}</button>`).join('');
+ const col=(CAMPS.find(c=>c[0]===camp)||CAMPS[0])[2];$('#main').style.borderTop='3px solid '+col;$('#main').style.paddingTop='8px';
+ const waiting=S.leads.filter(l=>l.draftedAt&&!l.emailedAt&&!l.approved&&l.status=='New').length;$('#nav').innerHTML=vis.map(([k,l])=>`<button class="${k===tab?'on':''}" data-t="${k}">${l}${k==='unibox'&&waiting?` (${waiting})`:''}</button>`).join('')}
 $('#nav').onclick=e=>{if(e.target.dataset.t){tab=e.target.dataset.t;render()}};
+$('#camp').onclick=e=>{const k=e.target.dataset.camp;if(k&&k!==curCamp()){S.campaign=k;tab=CAMP_HOME[k];save();render()}};
 $('#nav').ondragover=e=>{if(e.target.dataset&&e.target.dataset.t==='today'){e.preventDefault();e.dataTransfer.dropEffect='move';e.target.classList.add('drop')}};
 $('#nav').ondragleave=e=>{if(e.target.classList)e.target.classList.remove('drop')};
 $('#nav').ondrop=e=>{if(!(e.target.dataset&&e.target.dataset.t==='today'))return;e.preventDefault();const t=(e.dataTransfer.getData('text/plain')||'');if(t.startsWith('lead:'))pinLead(t.slice(5));else render()};
@@ -283,7 +293,7 @@ async function sendEmails(mode,step,auto,only){const n=+S.settings.emailLimit||2
  else leads=S.leads.filter(l=>isEmailReady(l)&&(mode!='drafts'||!l.draftedAt)&&(!only||only(l))).slice(0,n).map(emailPayload);
  if(!leads.length){ES.msg=step?'No follow-ups are due yet.':'Nothing is ready to email yet (a lead needs an email AND a prepared clip).';return emailDyn()}
  if(mode=='send'&&!(auto==='drip'||(auto&&S.settings.apMode==='send'))&&!confirm(`Send up to ${leads.length} REAL email${leads.length==1?'':'s'} now?\n\nThey go out one at a time from your inboxes (rotating, within each inbox's daily cap), with your name, your postal address and an opt out line. Previews are free; this is not.`))return;
- return helperJob('/email/run',{mode,confirm:mode=='send',leads,template:tpl(),limit:n,step},t=>{const r=parseTag(t,'EMAIL');if(r)applyEmailResult(r)})}
+ return helperJob('/email/run',{campaign:'clips',mode,confirm:mode=='send',leads,template:tpl(),limit:n,step},t=>{const r=parseTag(t,'EMAIL');if(r)applyEmailResult(r)})}
 async function reconcileSent(){try{const r=await (await fetch(RUNNER+'/email/sent',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})).json();let n=0;
  for(const e of r.sent||[]){if((e.step||0)!==0)continue;const l=S.leads.find(x=>x.id===e.id)||leadByEmail(e.to);if(!l||l.emailedAt)continue;markSent(l);l.firstEmailedAt=Math.round(e.ts*1000);l.emailedAt=l.firstEmailedAt;l.emailStep=0;l.emailSubject=l.emailSubject||e.subject;l.emailFrom=e.from;l.via='email';delete l.draftedAt;n++}
  if(n){save();apLog&&apLog(`Recorded ${n} email(s) the helper had sent as sent.`)}return n}catch(e){return 0}}
@@ -769,7 +779,7 @@ async function auRun(mode,step){const n=Math.max(1,Math.min(60,+document.getElem
  if(!leads.length){auUI.msg=step?'No follow-ups are due yet.':'Nothing is ready: a prospect needs an email address and status New.';return auActionsCard()}
  if(mode=='send'&&!confirm(`Send up to ${leads.length} REAL email${leads.length==1?'':'s'} now?\n\nThey go out one at a time from your inboxes, with your name, postal address and an opt out line. Previews and drafts are free; this is not.`))return;
  auUI.msg='';auUI.lines=[];auActionsCard();
- await helperJob('/email/run',{mode,confirm:mode=='send',leads:leads.map(auPayload),template:auLib(),limit:n,step},t=>{if(!/^(COACH|CONTACT|CONTACTNONE|EMAIL) /.test(t))auUI.lines.push(t);const r=parseTag(t,'EMAIL');if(r){auApply(r);if(tab=='audit'){auActionsCard();auProspectsCard()}}});
+ await helperJob('/email/run',{campaign:'audit',mode,confirm:mode=='send',leads:leads.map(auPayload),template:auLib(),limit:n,step},t=>{if(!/^(COACH|CONTACT|CONTACTNONE|EMAIL) /.test(t))auUI.lines.push(t);const r=parseTag(t,'EMAIL');if(r){auApply(r);if(tab=='audit'){auActionsCard();auProspectsCard()}}});
  save();if(tab=='audit'){auActionsCard();auProspectsCard();auLoadStats()}}
 async function auPreview(){auUI.msg='';const leads=auS().prospects.filter(p=>p.email&&p.status=='New').slice(0,+document.getElementById('au-n').value||20).map(auPayload);
  if(!leads.length){auUI.msg='Nothing is ready: a prospect needs an email address and status New.';return auActionsCard()}
@@ -777,7 +787,7 @@ async function auPreview(){auUI.msg='';const leads=auS().prospects.filter(p=>p.e
  catch(e){auUI.msg='Helper not running. In Terminal: cd ~/clipper-crm && python3 tools/local_runner.py'}auActionsCard()}
 async function auCheckReplies(){const sent=auS().prospects.filter(p=>p.emailedAt&&['Emailed','Replied'].includes(p.status)&&p.email).map(p=>({id:p.id,email:p.email,since_ts:Math.floor((p.firstEmailedAt||p.emailedAt)/1000),slug:'',name:p.name}));
  if(!sent.length){auUI.msg='No sent emails to check.';return auActionsCard()}ES.busy=true;auUI.msg='Checking your inboxes for replies...';auActionsCard();
- try{const r=await (await fetch(RUNNER+'/email/check-replies',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sent})})).json();
+ try{const r=await (await fetch(RUNNER+'/email/check-replies',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sent,campaign:'audit'})})).json();
   if(r.error)auUI.msg=r.error;else{let rep=0,out=0,yes=0;for(const f of r.found||[]){const p=auS().prospects.find(x=>x.id==f.id);if(!p)continue;
    if(f.kind=='optout'){p.status='Not Interested';p.notes=(p.notes?p.notes+' | ':'')+(f.auto||'Asked not to be contacted');out++}
    else{const isYes=f.intent=='yes';if(p.status=='Emailed'||p.status=='Replied')p.status=isYes?'Interested':'Replied';if(isYes)yes++;p.replyIntent=f.intent||'';p.notes=(p.notes?p.notes+' | ':'')+'Replied: '+(f.snippet||'');rep++}}
@@ -1144,7 +1154,9 @@ setInterval(()=>$('#clock').textContent=new Date().toLocaleString([],{weekday:'s
 async function mergePull(){if(!S.settings.syncUrl||!S.settings.syncPw)return;const j=await syncCall('pull');if(!j)return;
  const have=new Set(S.leads.map(l=>l.id));let n=0;for(const l of j.state.leads||[]){if(!have.has(l.id)){S.leads.push(l);have.add(l.id);n++}}
  if(n){save();render();setSync(`Merged ${n} new lead(s) from the Sheet`)}else setSync('Synced ✓ (up to date)')}
-render();setSync(S.settings.syncUrl?'Sync on':'');mergePull();setTimeout(reconcileSent,3000);pollClipper();setInterval(pollClipper,6000);pollAwake();setInterval(pollAwake,10000);{const a=document.getElementById('aw');if(a)a.onclick=()=>{const j=pollAwake.last;if(j&&j.on)awakeSet(false);else awakeSet(true,180)}}if(S.settings.apOn)setTimeout(apStart,8000);
+render();setSync(S.settings.syncUrl?'Sync on':'');mergePull();setTimeout(reconcileSent,3000);pollClipper();setInterval(pollClipper,6000);pollAwake();setInterval(pollAwake,10000);
+async function pollHelperLabel(){const e=document.getElementById('hl');if(!e)return;try{const j=await (await fetch(RUNNER+'/log?since=999999999')).json();e.textContent=j.running&&j.label?'Helper busy: '+j.label:''}catch(x){e.textContent=''}}
+pollHelperLabel();setInterval(pollHelperLabel,6000);{const a=document.getElementById('aw');if(a)a.onclick=()=>{const j=pollAwake.last;if(j&&j.on)awakeSet(false);else awakeSet(true,180)}}if(S.settings.apOn)setTimeout(apStart,8000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)mergePull()});
 </script>
 </body>

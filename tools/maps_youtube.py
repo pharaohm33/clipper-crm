@@ -57,15 +57,16 @@ def main():
     items = json.load(open(sys.argv[1], encoding="utf-8"))
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
-        browser, ctx, page = AB.get_page(p)
+        sess = AB.Session(p)
+        page = sess.page
         for n, b in enumerate(items):
             print(f"[{n + 1}/{len(items)}] asking Google AI who owns {b.get('business')} and whether they have a YouTube channel ...")
-            data = G.ask_google_ai(page, build_prompt(b))
+            data = sess.ask(G.ask_google_ai, build_prompt(b))
             o = parse((data or {}).get("text", ""), b.get("business"))
             print("MAPS " + json.dumps({"id": b["id"], **(o or {"none": True})}))
             if n < len(items) - 1:
                 time.sleep(random.uniform(8, 16))
-        AB.release(browser)
+        sess.release()
     print("Done.")
 
 

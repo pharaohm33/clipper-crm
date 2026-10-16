@@ -131,10 +131,11 @@ def discover(job, log=print):
     label, count = job.get("label") or "coach", int(job.get("count") or 8)
     prompt = build_prompt(label, job.get("location") or "", count, job.get("exclude") or [])
     with sync_playwright() as p:
-        browser, ctx, page = AB.get_page(p)
+        sess = AB.Session(p)
+        page = sess.page
         print(f"asking Google AI for {count} {label}s ...")
-        data = G.ask_google_ai(page, prompt)
-        AB.release(browser)
+        data = sess.ask(G.ask_google_ai, prompt)
+        sess.release()
     cands = [c for c in parse_list((data or {}).get("text", "")) if host(c["website"]) not in set(job.get("exclude") or [])]
     print(f"Google AI suggested {len(cands)}; checking each website ...")
     kept = 0

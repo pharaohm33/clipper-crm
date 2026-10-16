@@ -8,6 +8,7 @@ only disconnects, so the window is still there for the next job. Close it yourse
 """
 import fcntl
 import os
+import re
 import subprocess
 import sys
 import time
@@ -175,3 +176,33 @@ def close_window():
     except Exception:
         pass
     return not alive()
+
+
+class Session:
+    """A Google AI window attachment that survives its tab being closed: it opens a new tab and asks the question once more."""
+
+    def __init__(self, p):
+        self.p = p
+        self.browser, self.ctx, self.page = get_page(p)
+
+    def ask(self, ask_fn, prompt):
+        for attempt in (0, 1):
+            try:
+                return ask_fn(self.page, prompt)
+            except Exception as e:
+                if attempt == 0 and re.search(r"closed|disconnected|crashed", str(e), re.I):
+                    print("  (the Google tab was closed; opening a new one and asking again)")
+                    self._reopen()
+                    continue
+                raise
+
+    def _reopen(self):
+        try:
+            self.browser.close()
+        except Exception:
+            pass
+        _release_lock()
+        self.browser, self.ctx, self.page = get_page(self.p)
+
+    def release(self):
+        release(self.browser)

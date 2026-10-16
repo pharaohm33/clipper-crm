@@ -673,11 +673,11 @@ def run_find_phones(leads, use_ai=True, template=None):
         STATE["running"] = False
 
 
-def run_email(leads, template, mode, limit, ignore_window, step):
+def run_email(leads, template, mode, limit, ignore_window, step, campaign="clips"):
     try:
         PIPE["stop"] = False
         cold_email_sleep = lambda secs: [time.sleep(1) for _ in range(int(secs)) if not PIPE["stop"]]
-        results = cold_email.run(leads, template, mode, limit=limit, ignore_window=ignore_window, step=step, log_fn=log, sleep=cold_email_sleep)
+        results = cold_email.run(leads, template, mode, limit=limit, ignore_window=ignore_window, step=step, log_fn=log, sleep=cold_email_sleep, campaign=campaign)
         for r in results:
             log("EMAIL " + json.dumps({k: r.get(k) for k in ("id", "to", "from", "status", "why", "subject", "step", "message_id", "template_id", "template_name")}))
         log(f"[runner] done: {sum(1 for r in results if r['status'] in ('sent', 'drafted'))} {mode} / {sum(1 for r in results if r['status'] == 'skip')} skipped / {sum(1 for r in results if r['status'] == 'failed')} failed")
@@ -771,7 +771,7 @@ class H(BaseHTTPRequestHandler):
             self._send(200, clipper_status())
         elif u.path == "/log":
             since = int(parse_qs(u.query).get("since", ["0"])[0] or 0)
-            self._send(200, {"lines": STATE["log"][since:], "next": len(STATE["log"]), "running": STATE["running"]})
+            self._send(200, {"lines": STATE["log"][since:], "next": len(STATE["log"]), "running": STATE["running"], "label": (STATE["log"][0] if STATE["log"] else "").replace("[runner] ", "")[:120] if STATE["running"] else ""})
         else:
             self._send(404, {"error": "not found"})
 
@@ -789,7 +789,7 @@ class H(BaseHTTPRequestHandler):
             data[c] = bool(body.get("paused", True))
             PAUSE_FILE.write_text(json.dumps(data), encoding="utf-8")
             return self._send(200, {"ok": True, "paused": data})
-        if self.path in CLIPS_ONLY_ROUTES and pause_state().get("clips") and str(body.get("campaign") or "clips") != "meta":
+        if self.path in CLIPS_ONLY_ROUTES and pause_state().get("clips") and str(body.get("campaign") or "clips") == "clips":
             return self._send(409, {"error": "Clips pitching is paused. Resume it from the Email tab (Autopilot panel) when you want it back."})
         if self.path == "/stop":
             p = STATE.get("proc")
@@ -838,17 +838,26 @@ class H(BaseHTTPRequestHandler):
             st = email_status()
             if not st["ready"]:
                 return self._send(400, {"error": "; ".join(st["problems"])})
+            campaign = str(body.get("campaign") or "clips")
+            tpl = body.get("template") or {}
+            if campaign != "clips" and not (str(tpl.get("subject") or "").strip() and str(tpl.get("body") or "").strip()):
+                return self._send(400, {"error": f"the {campaign} campaign has no email template, so nothing was written or sent (the clips template is never used for another campaign)"})
             with LOCK:
                 if STATE["running"]:
                     return self._send(409, {"error": "a run is already in progress"})
-                STATE.update(running=True, log=[f"[runner] email run ({mode})"])
+                STATE.update(running=True, log=[f"[runner] email run ({mode}, {campaign} campaign)"])
                 threading.Thread(target=run_email, args=(body.get("leads") or [], body.get("template") or {}, mode, min(60, int(body.get("limit") or 20)),
-                                 bool(body.get("ignore_window")), int(body.get("step") or 0)), daemon=True).start()
+                                 bool(body.get("ignore_window")), int(body.get("step") or 0), campaign), daemon=True).start()
             return self._send(200, {"ok": True})
         if self.path == "/email/check-replies":
             try:
-                res = cold_email.check_replies(body.get("sent") or [], log_fn=lambda m: None)
-                res["found"] = [{k: v for k, v in f.items() if k != "text"} for f in auto_reply.handle(res.get("found") or [], log_fn=log)]
+                campaign = str(body.get("campaign") or "clips")
+                res = cold_email.check_replies(body.get("sent") or [], log_fn=lambda m: None, campaign=campaign)
+                if campaign == "clips":  # the automatic "yes" answer sends the clips sheet, so it only ever runs for the clips campaign
+                    handled = auto_reply.handle(res.get("found") or [], log_fn=log)
+                else:
+                    handled = [{**f, "auto": "needs you (this campaign has no automatic reply)"} for f in (res.get("found") or [])]
+                res["found"] = [{k: v for k, v in f.items() if k != "text"} for f in handled]
                 b = cold_email.check_bounces(log_fn=lambda m: None)
                 return self._send(200, {**res, "bounced": b["bounced"], "errors": (res.get("errors") or []) + b["errors"]})
             except Exception as e:
@@ -909,10 +918,14 @@ class H(BaseHTTPRequestHandler):
                 return self._send(500, {"error": str(e)[:200]})
         if self.path in ("/unibox/drafts", "/unibox/replies", "/unibox/draft/update", "/unibox/draft/delete", "/unibox/draft/send"):
             try:
+                campaign = str(body.get("campaign") or "clips")
                 if self.path == "/unibox/drafts":
-                    return self._send(200, cold_email.list_drafts(log_fn=lambda m: None))
+                    res = cold_email.list_drafts(log_fn=lambda m: None)
+                    who = cold_email.campaign_by_recipient()
+                    res["drafts"] = [d for d in res.get("drafts", []) if who.get(str(d.get("to", "")).lower(), "clips") == campaign]
+                    return self._send(200, res)
                 if self.path == "/unibox/replies":
-                    return self._send(200, cold_email.list_replies(int(body.get("days") or 21)))
+                    return self._send(200, cold_email.list_replies(int(body.get("days") or 21), campaign=campaign))
                 mid = str(body.get("mid") or "")
                 if self.path == "/unibox/draft/update":
                     return self._send(200, {"mid": cold_email.update_draft(mid, str(body.get("subject") or ""), str(body.get("body") or ""))})
@@ -1014,7 +1027,8 @@ class H(BaseHTTPRequestHandler):
             return self._send(200, {"sent": rows})
         if self.path == "/email/sent":
             cutoff = time.time() - 30 * 86400
-            rows = [{k: e.get(k) for k in ("id", "to", "from", "ts", "step", "subject", "variant", "provider")} for e in cold_email.sent_entries() if e.get("ts", 0) > cutoff]
+            camp = str(body.get("campaign") or "clips")
+            rows = [{k: e.get(k) for k in ("id", "to", "from", "ts", "step", "subject", "variant", "provider")} for e in cold_email.sent_entries() if e.get("ts", 0) > cutoff and cold_email.campaign_of(e) == camp]
             return self._send(200, {"sent": rows})
         if self.path == "/notify":
             title = clean(body.get("title") or "Clipper CRM", 60)

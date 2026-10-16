@@ -81,10 +81,11 @@ def main():
     leads, template = (data["leads"], data.get("template")) if isinstance(data, dict) else (data, None)
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
-        browser, ctx, page = AB.get_page(p)
+        sess = AB.Session(p)
+        page = sess.page
         for n, l in enumerate(leads):
             print(f"[{n + 1}/{len(leads)}] asking Google AI who decides on ads at {l['company']} ...")
-            ans = G.ask_google_ai(page, build_prompt(l, template))
+            ans = sess.ask(G.ask_google_ai, build_prompt(l, template))
             o = parse_person((ans or {}).get("text", ""), l["company"], l.get("web", ""))
             out = {"id": l["id"], **(o or {"none": True})}
             try:  # the company's own pages: emails (one matching the name if there is one) and phone numbers
@@ -98,7 +99,7 @@ def main():
             print("DMAKER " + json.dumps(out))
             if n < len(leads) - 1:
                 time.sleep(random.uniform(8, 16))
-        AB.release(browser)
+        sess.release()
     print("Done.")
 
 

@@ -506,7 +506,12 @@ def plan(leads, template, mode="preview", limit=20, ignore_window=False, step=0)
                "template_id": tpl_id, "template_name": tpl_name}
 
 
-def run(leads, template, mode, limit=20, ignore_window=False, step=0, log_fn=print, sleep=time.sleep):
+def campaign_of(e):
+    """Which campaign a log row belongs to. Rows from before campaigns existed are the podcast clips campaign."""
+    return e.get("campaign") or "clips"
+
+
+def run(leads, template, mode, limit=20, ignore_window=False, step=0, log_fn=print, sleep=time.sleep, campaign="clips"):
     """mode 'drafts' or 'send'. Returns the list of result dicts. Sends one at a time with random spacing."""
     cfg = load_config()
     problems = []
@@ -541,7 +546,7 @@ def run(leads, template, mode, limit=20, ignore_window=False, step=0, log_fn=pri
         entry = {"ts": time.time(), "id": item["id"], "to": item["to"], "from": item["from"], "subject": item["subject"],
                  "message_id": msg["Message-ID"], "status": status, "step": item["step"], "body": str(item.get("body") or "")[:4000],
                  "variant": item.get("variant"), "provider": item.get("provider"),
-                 "template_id": item.get("template_id"), "template_name": item.get("template_name")}
+                 "template_id": item.get("template_id"), "template_name": item.get("template_name"), "campaign": campaign}
         append_log(entry)
         results.append({**item, "status": status, "message_id": msg["Message-ID"]})
         log_fn(f"{status} {item['to']} via {item['from']}")
@@ -575,12 +580,14 @@ def _reply_text(raw):
     return re.sub(r"\n{3,}", "\n\n", "\n".join(keep)).strip(), (msg.get("Message-ID") or "").strip(), str(msg.get("Subject") or "").strip()
 
 
-def check_replies(sent, log_fn=print):
+def check_replies(sent, log_fn=print, campaign="clips"):
     """sent: [{id, email, since_ts}]. Looks in each sending inbox for a reply from that address. Returns
     {found: [{id, email, kind: 'replied'|'optout', snippet}], errors: [...]} and adds opt-outs to the suppression list."""
     cfg, found, errors = load_config(), [], []
     by_acct = {}
     for e in sent_entries():
+        if campaign_of(e) != campaign:  # a reply from another campaign's prospect is not this campaign's business
+            continue
         by_acct.setdefault(e.get("from"), set()).add(e.get("to", "").lower())
     # Replies go to cfg["reply_to"]; if that inbox's login is saved as cfg["reply_account"], scan it for every prospect we emailed.
     all_sent_to = set().union(*by_acct.values()) if by_acct else set()
@@ -831,10 +838,10 @@ def send_saved_reply(mid):
     return True
 
 
-def list_replies(days=21, limit=80):
+def list_replies(days=21, limit=80, campaign="clips"):
     """Recent mail that prospects sent back, across the reply inbox and every sending inbox, newest first."""
     cfg, log = load_config(), read_log()
-    prospects = {e.get("to", "").lower() for e in log if e.get("status") in ("sent", "drafted") and e.get("to")}
+    prospects = {e.get("to", "").lower() for e in log if e.get("status") in ("sent", "drafted") and e.get("to") and campaign_of(e) == campaign}
     boxes = [dict(a, _label=a["email"]) for a in cfg.get("accounts", [])]
     ra = cfg.get("reply_account")
     if ra and ra.get("password"):
@@ -865,3 +872,8 @@ def list_replies(days=21, limit=80):
             errors.append(f"{acct['_label']}: {str(e)[:100]}")
     items.sort(key=lambda x: -x["ts"])
     return {"replies": items[:limit], "errors": errors}
+
+
+def campaign_by_recipient(log=None):
+    """{address: campaign} for everyone we have emailed or drafted to."""
+    return {str(e.get("to", "")).lower(): campaign_of(e) for e in (read_log() if log is None else log) if e.get("to") and e.get("status") in ("sent", "drafted", "auto_replied", "auto_drafted")}

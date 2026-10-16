@@ -374,7 +374,8 @@ def main():
     RUNS.mkdir(exist_ok=True)
 
     with sync_playwright() as p:
-        browser, ctx, page = AB.get_page(p)
+        sess = AB.Session(p)
+        page = sess.page
         existing = set()
         if url and pw and not a.dry_run and not a.emit:
             for l in crm(url, pw, action="pull")["state"].get("leads", []):
@@ -386,7 +387,7 @@ def main():
         jobs = [(n_, f_) for n_ in a.niches for f_ in ([x.strip() for x in a.focus.split(",") if x.strip()] or [""])]
         for n, (niche, focus) in enumerate(jobs):
             print(f"[{niche} {focus}] asking Google AI...".replace(" ]", "]"))
-            data = ask_google_ai(page, build_prompt(niche, a.count, focus))
+            data = sess.ask(ask_google_ai, build_prompt(niche, a.count, focus))
             if not data:
                 print("  no response from Google AI for this prompt; skipping")
                 continue
@@ -426,7 +427,7 @@ def main():
             if n < len(jobs) - 1:
                 time.sleep(random.uniform(20, 40))
         print(f"Done. {total} new leads.")
-        AB.release(browser)
+        sess.release()
 
 
 if __name__ == "__main__":

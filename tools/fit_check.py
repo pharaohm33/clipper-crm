@@ -57,10 +57,11 @@ def main():
     leads = json.load(open(sys.argv[1], encoding="utf-8"))
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
-        browser, ctx, page = AB.get_page(p)
+        sess = AB.Session(p)
+        page = sess.page
         for n, l in enumerate(leads):
             print(f"[{n + 1}/{len(leads)}] checking {l.get('name')} with Google AI ...")
-            data = G.ask_google_ai(page, build_prompt(l))
+            data = sess.ask(G.ask_google_ai, build_prompt(l))
             o = parse((data or {}).get("text", ""), l.get("name"))
             if not o:
                 print("  no usable answer, leaving this lead unchecked")
@@ -70,7 +71,7 @@ def main():
                 print("FIT " + json.dumps(o))
             if n < len(leads) - 1:
                 time.sleep(random.uniform(8, 16))
-        AB.release(browser)
+        sess.release()
     print("Done.")
 
 

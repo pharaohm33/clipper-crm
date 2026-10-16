@@ -75,15 +75,16 @@ def main():
     leads, template = (data["leads"], data.get("template")) if isinstance(data, dict) else (data, None)
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
-        browser, ctx, page = AB.get_page(p)
+        sess = AB.Session(p)
+        page = sess.page
         for n, l in enumerate(leads):
             print(f"[{n + 1}/{len(leads)}] asking Google AI for {l.get('name')}'s business phone ...")
-            data = G.ask_google_ai(page, build_prompt(l, template))
+            data = sess.ask(G.ask_google_ai, build_prompt(l, template))
             o = parse((data or {}).get("text", ""), l.get("name"))
             print("PHONEAI " + json.dumps({"id": l["id"], **(o or {"unchecked": True})}))
             if n < len(leads) - 1:
                 time.sleep(random.uniform(8, 16))
-        AB.release(browser)
+        sess.release()
     print("Done.")
 
 
