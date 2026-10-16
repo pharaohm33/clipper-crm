@@ -72,6 +72,16 @@ Switch to **Meta ads** in the header. It has its own leads, emails and replies, 
 4. **Send follow ups that are due:** follow up 1 and 2 go only to people who were emailed and have not replied.
 5. **Check replies:** DeepSeek reads each reply and picks one of your reply templates (confused, interested, ready). It only saves the answer as a **draft**. Opt-outs go on the do-not-contact list, and anything unclear is left for you.
 
+
+### Loom video outreach and the automatic video maker (Meta ads campaign)
+
+- **The Loom email carries only the Loom link.** It deliberately has no link to your own website, which spam filters score badly. The sign up link lives inside the video (on screen, and in the Loom comments and link area, where it is clickable).
+- **Record it yourself:** the Loom script in the templates box fills in the name and ad count. After uploading, pin a comment with your sign up link and set the call to action button to the same link.
+- **Or let the computer make it:** tick leads in the Loom card and press **Make the videos** (3 at a time, about 2 minutes each). For each lead it finds the advertiser by the email's domain, checks the ads' destination domains really match that domain (brand check), reads the real active ad count, scrolls their ads with a free voice, and shows your sign up link on screen for the last 20 seconds with no other web address visible. A lead with no active ads, or a failed brand check, gets no video and the row says why.
+- **Post it on Loom (default):** the voice says to use the link in the Loom comments and link area. Download the video, upload it to Loom, add your link there, paste the Loom link in the box, tick "I watched it, approve", then **Save the Loom emails as drafts**.
+- The Drive link option needs the video generator's Google Drive login: `cd ~/instagram-video-generator && python3 scripts/gdrive_login.py`.
+- A Loom email can be a second touch for someone emailed 3 or more days ago who has not replied. The same person never gets the video email twice.
+
 The first email says you came across their company while looking at brands that advertise on Meta. Use the "we spoke already" wording (`tools/templates/meta_ads_optimization.md`, template 6) only after a real conversation.
 
 ## The Google AI Chrome window
