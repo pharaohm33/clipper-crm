@@ -62,7 +62,7 @@ def render(template_text, lead_vars, cfg, first_name):
     return re.sub(r"\n{3,}", "\n\n", t).strip()
 
 
-def handle(found, templates, lead_vars=None, log_fn=print):
+def handle(found, templates, lead_vars=None, log_fn=print, lead_info=None):
     """Adds 'intent', 'confidence', 'summary' and 'auto' to each reply, saves the matching answer as a draft, and honours opt-outs."""
     cfg = cold_email.load_config()
     for f in found:
@@ -91,7 +91,8 @@ def handle(found, templates, lead_vars=None, log_fn=print):
         if not acct:
             f["auto"] = "needs you (the inbox that sent the first email is not set up)"
             continue
-        body = render(text, lead_vars, cfg, (f.get("name") or "").split(" ")[0] if f.get("name") else "")
+        info = (lead_info or {}).get(f.get("id")) or {}
+        body = render(text, {**(lead_vars or {}), "business": info.get("business") or (lead_vars or {}).get("business") or "your company"}, cfg, info.get("first") or "there")
         subject = "Re: " + (first.get("subject") or f.get("subject") or "your Meta ads")
         msg = cold_email.compose(acct, cfg, to, subject, body, f.get("msgid") or first.get("message_id"))
         try:

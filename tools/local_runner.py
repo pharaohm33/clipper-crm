@@ -16,7 +16,7 @@ from urllib.parse import urlparse, parse_qs
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-import cold_email, email_finder, personalize, auto_reply, phone_finder, coach_finder, meta_reply
+import cold_email, email_finder, personalize, auto_reply, phone_finder, coach_finder, meta_reply, greeting
 SCRIPT = os.getenv("RUNNER_SCRIPT", str(HERE / "google_ai_to_crm.py"))
 PORT = int(os.getenv("RUNNER_PORT", "8765"))
 APP_URL = os.getenv("CLIPPER_URL", "http://127.0.0.1:5001").rstrip("/")
@@ -858,7 +858,7 @@ class H(BaseHTTPRequestHandler):
                 if campaign == "clips":  # the automatic "yes" answer sends the clips sheet, so it only ever runs for the clips campaign
                     handled = auto_reply.handle(res.get("found") or [], log_fn=log)
                 elif campaign == "meta":  # DeepSeek picks which of YOUR reply templates fits; the answer is only ever saved as a draft
-                    handled = meta_reply.handle(res.get("found") or [], body.get("reply_templates") or {}, body.get("vars") or {}, log_fn=log)
+                    handled = meta_reply.handle(res.get("found") or [], body.get("reply_templates") or {}, body.get("vars") or {}, log_fn=log, lead_info=body.get("lead_info") or {})
                 else:
                     handled = [{**f, "auto": "needs you (this campaign has no automatic reply)"} for f in (res.get("found") or [])]
                 res["found"] = [{k: v for k, v in f.items() if k != "text"} for f in handled]
@@ -991,6 +991,9 @@ class H(BaseHTTPRequestHandler):
                 PIPE["stop"] = False
                 threading.Thread(target=run_find_phones, args=(leads, bool(body.get("ai", True)), str(body.get("prompt") or "")[:3000] or None), daemon=True).start()
             return self._send(200, {"ok": True, "leads": len(leads)})
+        if self.path == "/ads/names":
+            items = [{k: str(b.get(k) or "")[:200] for k in ("id", "email", "company", "person")} for b in (body.get("items") or [])][:200]
+            return self._send(200, {"names": greeting.resolve(items)})
         if self.path == "/ads/find":
             items = [{k: str(b.get(k) or "")[:300] for k in ("id", "company", "web", "facebook")} for b in (body.get("items") or [])][:20]
             if not items:
