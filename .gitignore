@@ -16,3 +16,4 @@ tools/voice_samples/
 tools/.loom_profile/
 tools/loom_session.json
 tools/loom_debug/
+tools/.dia_venv/

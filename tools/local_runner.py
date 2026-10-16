@@ -638,10 +638,10 @@ def run_ad_video(items, voice, product, link=None, host="loom", narrator=None):
                 break
             log(f"[{n + 1}/{len(items)}] {it.get('company')}")
             try:
-                res = ad_video.make(it, voice=voice or ad_video.DEFAULT_VOICE, sender=sender, product=product or "AI Ads Optimization", log=log, link=link or ad_video.SIGNUP_LINK, host=host, narrator=narrator)
+                res = ad_video.make(it, voice=voice or ad_video.DEFAULT_VOICE, sender=sender, product=product or "AI Ads Optimization", log=log, link=ad_video.SIGNUP_LINK, host=host, narrator=narrator)
             except Exception as e:
                 res = {"ok": False, "reason": "error: " + str(e)[:160]}
-            link = ""
+            share = ""
             if res.get("ok"):
                 slug = "adv_" + re.sub(r"[^A-Za-z0-9_-]", "", str(it.get("id")))[:40]
                 dest = REPO / "opencut-exports" / f"{slug}.mp4"
@@ -649,12 +649,12 @@ def run_ad_video(items, voice, product, link=None, host="loom", narrator=None):
                     dest.parent.mkdir(exist_ok=True)
                     _sh.copyfile(res["file"], dest)
                     code, shared = app_call("/api/outreach/share-clip", {"id": f"opencut-exports/{slug}.mp4", "name": f"{it.get('company')} - Meta ads video"}, timeout=300)
-                    link = (shared or {}).get("link", "") if code == 200 else ""
-                    if not link:
+                    share = (shared or {}).get("link", "") if code == 200 else ""
+                    if not share:
                         log("   (could not make a share link: " + ((shared or {}).get("error") or ("the clipper app is not running" if code == 0 else str(code))) + ")")
                 except Exception as e:
                     log("   (could not share the video: " + str(e)[:100] + ")")
-            log("ADVIDEO " + json.dumps({"id": it.get("id"), "ok": bool(res.get("ok")), "reason": res.get("reason", ""), "link": link, "file": res.get("file", ""),
+            log("ADVIDEO " + json.dumps({"id": it.get("id"), "ok": bool(res.get("ok")), "reason": res.get("reason", ""), "link": share, "file": res.get("file", ""),
                                          "facts": res.get("facts", {}), "script": res.get("script", ""), "seconds": res.get("seconds", 0), "display_name": res.get("display_name", ""), "voice": res.get("voice", ""), "ad_clicks": res.get("ad_clicks", 0)}))
             if n < len(items) - 1:
                 time.sleep(random.uniform(4, 8))

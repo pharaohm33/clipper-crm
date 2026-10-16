@@ -39,7 +39,7 @@ KOKORO_URL = "http://localhost:3000/api/v1/audio/speech"
 DEFAULT_VOICE = "kokoro:af_heart"          # the most natural free voice (needs the Kokoro server: docker compose up -d in the video generator)
 FALLBACK_VOICE = "edge:en-US-AndrewMultilingualNeural"
 SIGNUP_LINK = "https://portal.aiadsoptimization.com/signup"
-LINK_SECONDS = 20  # the sign up link stays on screen for at least the last 20 seconds
+LINK_SECONDS = 20  # (no longer used to start the link early: it appears only at the call to action)
 FPS = 15
 
 
@@ -362,15 +362,13 @@ def caption_chunks(words):
 
 
 def link_start(words, seconds):
-    """When the sign up link goes on screen: where the call to action is spoken, but never later than LINK_SECONDS before the end."""
+    """When the sign up link goes on screen: only at the call to action ("If that sounds worth a look"), which is spoken AFTER the performance-based pricing,
+    so nobody sees a sign up link before they have heard the pitch. If the wording is not found, it waits for the last sentence."""
     toks = [norm(w[2]) for w in words]
-    cta = None
-    for i in range(len(toks) - 1):  # "If that sounds worth a look": the call to action, not an earlier "worth checking"
+    for i in range(len(toks) - 1):
         if toks[i] == "sounds" and toks[i + 1] == "worth" and i >= 2:
-            cta = words[i - 2][0]
-            break
-    late = max(0.0, seconds - LINK_SECONDS)
-    return min(cta, late) if cta is not None else late
+            return words[i - 2][0]
+    return max(0.0, seconds - 8)
 
 
 # ------------------------------------------------------------------------------------------------ the recording
