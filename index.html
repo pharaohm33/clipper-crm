@@ -594,12 +594,18 @@ const DEF_META={product:'AI Ads Optimization',link:'https://portal.aiadsoptimiza
  fu2:"Hey {first_name},\n\nI haven't heard back, so I'll assume cutting wasted ad spend isn't a priority for {business} right now. I'll leave the offer open, but I'm moving on to a few other brands.\n\nIf you'd like me to keep {business} in mind, just let me know.\n\n{sender}",
  confused:"Hey {first_name},\n\nSorry for the confusion, I'm {sender} from {product}. I reached out because {business} looks like it advertises on Meta, and our tool cuts wasted ad spend automatically.\n\nIt connects to your existing Meta ads account, monitors your campaigns 24/7, and we only take 20% of the money it saves you (nothing if it saves nothing). Setup takes about 2 minutes and it's free to get started.\n\nHere's the sign up page if you'd like to look: {link}\n\n{sender}",
  interested:"Hey {first_name},\n\nHappy to explain. {product} connects to your existing Meta ads account and watches your campaigns 24/7, cutting spend that isn't working. We send proof of the savings every day.\n\nPricing is performance based: 20% of the money we save you, no setup fee, and nothing if we save nothing. Setup takes about 2 minutes and you don't have to do anything after that.\n\nYou can start here: {link}\n\n{sender}",
+ loomSubject:'A quick find in your Meta ads',
+ loomEmail:"Hey {first_name},\n\nJust came across one of {business}'s Meta ads, and I think it may be wasting you money.\n\nHere's what I found:\n\n{loom_link}\n\n{sender}",
+ loomScript:"Hey {first_name}, it's {sender} here.\n\nI'm looking at {business}'s Meta ads right now, and I noticed you're {ads_phrase}. I think some of these may be wasting ad budget that doesn't need to be spent, and that's money that could go right back in your pocket. [Point at the specific ad or ads you are talking about.]\n\nWe have software that monitors Meta ad accounts 24/7 and automatically cuts wasted ad spend. Given how many ads you're running, I think it could help.\n\nThere's no setup fee, and we only take 20% of the money we actually save you. If we don't save you anything, you don't pay anything.\n\nIf you want to take a look, the link is below this video: {link}. If you're open to trying it or have any questions, just reply to my email and I'm happy to help.",
+ loomFu1:"Hey {first_name},\n\nOne more thing about the video I sent over. {business} is {ads_phrase} on Meta right now, and I think what I found could save you some of that spend.\n\nThe link to the video is above in this thread. It's only about a minute long.\n\n{sender}",
+ loomFu2:"Hey {first_name},\n\nI'll leave the video up in case you want to watch it later. It's short, and if cutting ad waste isn't a priority for {business} right now, no problem at all.\n\nIf I can help in any way, just reply.\n\n{sender}",
  ready:"Hey {first_name},\n\nGreat, glad you want to get started. Here's the sign up page, it takes about 2 minutes: {link}\n\nOnce you connect your Meta ads account we start monitoring right away. Reply here if you get stuck and I'll help.\n\n{sender}"};
 const meta=()=>Object.assign({},DEF_META,S.settings.meta||{});
-const META_LABELS=[['subject','First email subject','subject'],['first','First email (no prior contact)'],['fu1','Follow up 1 (sent 3 days later if no reply)'],['fu2','Follow up 2 (sent 7 days later if no reply)'],['confused','Reply template: they are confused'],['interested','Reply template: they want more info or ask about price'],['ready','Reply template: they are ready to start']];
-const metaTemplateObj=()=>{const m=meta();return{library:[{id:'meta-first',name:'Meta ads: cold first email',subject:m.subject,body:m.first,needs_clip:false,keep_case:true,weight:1,followups:[{days:3,body:m.fu1},{days:7,body:m.fu2}]}]}};
+const META_LABELS=[['subject','First email subject','subject'],['first','First email (no prior contact)'],['fu1','Follow up 1 (sent 3 days later if no reply)'],['fu2','Follow up 2 (sent 7 days later if no reply)'],['confused','Reply template: they are confused'],['interested','Reply template: they want more info or ask about price'],['ready','Reply template: they are ready to start'],['loomSubject','Loom email subject','subject'],['loomEmail','Loom email (put the video link in {loom_link})'],['loomScript','Loom video script (read it while you record; not sent)'],['loomFu1','Loom follow up 1 (3 days later)'],['loomFu2','Loom follow up 2 (7 days later)']];
+const metaTemplateObj=()=>{const m=meta();return{library:[{id:'meta-first',name:'Meta ads: cold first email',subject:m.subject,body:m.first,needs_clip:false,keep_case:true,weight:1,followups:[{days:3,body:m.fu1},{days:7,body:m.fu2}]},{id:'meta-loom',name:'Meta ads: Loom video email',subject:m.loomSubject,body:m.loomEmail,needs_clip:false,keep_case:true,second_touch:true,weight:1,followups:[{days:3,body:m.loomFu1},{days:7,body:m.loomFu2}]}]}};
 const metaVars=()=>({product:meta().product,link:meta().link,phone:(ES.status&&ES.status.phone)||''});
-const metaPayload=l=>({id:l.id,name:l.company,first_name:(l.greet&&l.greet.first)||l.company,business:(l.greet&&l.greet.business)||l.company,email:l.email,vars:metaVars(),tplId:'meta-first'});
+const adsPhrase=l=>+l.adsCount>0?`running ${+l.adsCount} different ads`:'running several ads';
+const metaPayload=l=>({id:l.id,name:l.company,first_name:(l.greet&&l.greet.first)||l.company,business:(l.greet&&l.greet.business)||l.company,email:l.email,vars:{...metaVars(),loom_link:l.loomLink||'',ads_phrase:adsPhrase(l)},tplId:l.loomLink?'meta-loom':'meta-first'});
 /* Who the email says Hey to: a real first name when the contact is a person, otherwise the business name. The helper decides (rules plus DeepSeek). */
 async function metaGreet(list){const need=list.filter(l=>l.email&&(!l.greet||l.greet.email!==l.email));if(!need.length)return;
  try{const r=await metaApi('/ads/names',{items:need.map(l=>({id:l.id,email:l.email,company:l.company,person:l.person||''}))});for(const l of need){const g=(r.names||{})[l.id];if(g)l.greet={first:g.first,kind:g.kind,business:g.business,email:l.email}}save()}catch(e){}}
@@ -608,7 +614,7 @@ const MC={msg:'',preview:null,drafts:null,replies:[],busy:false};
 async function metaApi(path,body){return await (await fetch(RUNNER+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json()}
 async function metaReconcile(){try{const r=await metaApi('/email/sent',{campaign:'meta'});let n=0;for(const e of r.sent||[]){const l=(S.adLeads||[]).find(x=>String(x.email||'').toLowerCase()===String(e.to||'').toLowerCase());if(!l)continue;if((e.step||0)===0&&!l.emailedAt){l.emailedAt=Math.round(e.ts*1000);delete l.draftedAt;n++}l.emailStep=Math.max(l.emailStep||0,e.step||0)}if(n)save()}catch(e){}}
 function metaCards(){const m=meta(),fresh=metaFresh().length,drafted=(S.adLeads||[]).filter(l=>l.draftedAt&&!l.emailedAt).length,sent=(S.adLeads||[]).filter(l=>l.emailedAt).length;
- const ta=([k,lab])=>`<label>${esc(lab)}</label><textarea data-mk="${k}" rows="${k==='subject'?1:k.startsWith('fu')?6:9}" style="width:100%">${esc(m[k])}</textarea>`;
+ const ta=([k,lab])=>`<label>${esc(lab)}</label><textarea data-mk="${k}" rows="${k==='subject'||k==='loomSubject'?1:/^(fu|loomFu)/.test(k)?6:9}" style="width:100%">${esc(m[k])}</textarea>`;
  const pv=MC.preview;
  const dr=MC.drafts;
  return `<div class="card"><b>Emails for this campaign</b> <span class=mut>${fresh} ready for a first email · ${drafted} saved as drafts · ${sent} sent. These are separate from the podcast clips emails and never use that wording. Fill-ins: {first_name} {business} {product} {link} {sender}. Your name, postal address and an opt out line are added automatically.</span>
@@ -649,32 +655,139 @@ function metaWire(){const g=id=>document.getElementById(id);
  const sendBtn=g('md-send');if(sendBtn)sendBtn.onclick=async()=>{const ok=MC.drafts.filter(d=>d.ok);if(!ok.length)return;if(!confirm(`Send ${ok.length} approved email(s) for real? They go out one at a time, inside your sending hours.`))return;
   const leads=ok.map(d=>(S.adLeads||[]).find(l=>String(l.email||'').toLowerCase()===String(d.to||'').toLowerCase())).filter(Boolean);
   MC.busy=true;MC.msg='Sending…';sync();await metaGreet(leads);let n=0;
-  await helperJob('/email/run',{campaign:'meta',mode:'send',confirm:true,leads:leads.map(metaPayload),template:metaTemplateObj(),limit:20,step:0},t=>{const r=parseTag(t,'EMAIL');if(r&&r.status==='sent'){n++;const l=(S.adLeads||[]).find(x=>x.id==r.id);if(l){l.emailedAt=Date.now();delete l.draftedAt}}});
+  await helperJob('/email/run',{campaign:'meta',mode:'send',confirm:true,leads:leads.map(metaPayload),template:metaTemplateObj(),limit:20,step:0},t=>{const r=parseTag(t,'EMAIL');if(r&&r.status==='sent'){n++;const l=(S.adLeads||[]).find(x=>x.id==r.id);if(l){if(l.emailedAt&&l.loomLink)l.loomSentAt=Date.now();l.emailedAt=l.emailedAt||Date.now();delete l.draftedAt}}});
   MC.busy=false;MC.msg=`${n} sent.`;MC.drafts=null;save();await metaReconcile();sync()};
  const all=g('md-all');if(all)all.onclick=()=>{MC.drafts.forEach(d=>d.ok=true);sync()};
  document.querySelectorAll('[data-ok]').forEach(c=>c.onchange=()=>{MC.drafts[+c.dataset.ok].ok=c.checked;const b=g('md-send');if(b)b.disabled=!MC.drafts.some(d=>d.ok)});
  document.querySelectorAll('[data-dx]').forEach(b=>b.onclick=async e=>{e.preventDefault();const d=MC.drafts[+b.dataset.dx];if(!confirm('Discard the draft to '+d.to+'?'))return;try{await metaApi('/unibox/draft/delete',{mid:d.mid})}catch(x){}MC.drafts.splice(+b.dataset.dx,1);sync()})}
+
+/* ---------- Instagram story outreach: a manual, one-to-one extra touch for the few prospects worth it (never automated) ---------- */
+const DEF_IG_PROMPT='What are the Instagram accounts for {who}? I need the personal Instagram handle of the person, and the company\'s own Instagram handle.';
+const DEF_IG_SCRIPT="Hi {first_name}, it's {sender}.\n\nI noticed {business} advertises on Meta, and I think we can cut some of that spend. [Say ONE specific thing you noticed about their ads or store.]\n\n{product} connects to your ads account and cuts wasted spend automatically. We only take 20% of what we save you, and nothing if we save nothing.\n\nIf that sounds worth a look, reply here or sign up in 2 minutes: {link}";
+const IG_STATUS=[['','Not started'],['cf','Added to Close Friends'],['sent','Story sent'],['replied','Replied'],['booked','Booked a call'],['no','Not interested']];
+const igPrompt=()=>(S.settings.igPrompt&&S.settings.igPrompt.trim())||DEF_IG_PROMPT;
+const igScript=()=>(S.settings.igScript&&S.settings.igScript.trim())||DEF_IG_SCRIPT;
+const IGM={msg:'',busy:false,pv:''};
+const igHandle=l=>{const g=l.ig||{};return (g.use==='brand'?g.brand:g.use==='person'?g.person:g.brandSrc==='their website'?g.brand||g.person:g.person||g.brand)||''};
+const igToday=()=>{const t0=new Date().setHours(0,0,0,0);return (S.adLeads||[]).filter(l=>l.story&&l.story.status==='sent'&&l.story.sentAt>=t0).length};
+function pickTopProspects(n){const have=(S.adLeads||[]).filter(l=>l.top).length;const pool=(S.adLeads||[]).filter(l=>!l.top&&l.email&&!l.contacted&&!l.dnc&&l.person).sort((a,b)=>(b.score||0)-(a.score||0));pool.slice(0,Math.max(0,n-have)).forEach(l=>l.top=1);save();return Math.min(pool.length,Math.max(0,n-have))}
+function findInstagram(n){const todo=(S.adLeads||[]).filter(l=>l.top&&!(l.ig&&l.ig.checkedAt)).slice(0,n);if(!todo.length){IGM.msg='Every starred prospect already has an Instagram lookup.';return Promise.resolve()}
+ return helperJob('/ads/ig',{items:todo.map(l=>({id:l.id,company:l.company,web:l.web,person:l.person||'',title:l.title||''})),prompt:igPrompt()},t=>{let r;
+  if(r=parseTag(t,'IGSITE')){const l=(S.adLeads||[]).find(x=>x.id==r.id);if(l){l.ig=l.ig||{};if(r.brand_handle){l.ig.brand=r.brand_handle;l.ig.brandSrc='their website'}}}
+  else if(r=parseTag(t,'IGAI')){const l=(S.adLeads||[]).find(x=>x.id==r.id);if(l){l.ig=l.ig||{};l.ig.checkedAt=Date.now();if(!r.none){if(r.person_handle){l.ig.person=r.person_handle;l.ig.personSrc='Google AI: '+(r.where||'')}if(r.brand_handle&&!l.ig.brand){l.ig.brand=r.brand_handle;l.ig.brandSrc='Google AI: '+(r.where||'')}}save();if(tab=='ads')adsV()}}})}
+function igCard(){const m=meta(),top=(S.adLeads||[]).filter(l=>l.top),td=igToday(),cf=top.filter(l=>igHandle(l)&&['','cf'].includes((l.story&&l.story.status)||'')).map(l=>'@'+igHandle(l));
+ const row=l=>{const g=l.ig||{},st=l.story||{},hnd=igHandle(l),days=l.emailedAt?Math.floor((Date.now()-l.emailedAt)/864e5):null;
+  const lnk=(h,t)=>h?`<a href="https://instagram.com/${esc(h)}" target="_blank" rel="noopener">@${esc(h)}</a>`:'';
+  return `<tr><td><b>${esc(l.company)}</b><br><span class=mut>${esc(l.person||'')}${l.title?' · '+esc(l.title):''}</span>${days!==null&&days<3?`<div style="color:#e5a000">Emailed ${days} day(s) ago. Give the email time first.</div>`:''}</td>
+  <td>${g.checkedAt||g.brand?`${g.person?`${lnk(g.person)} <span class=mut>person, UNVERIFIED (${esc(g.personSrc||'')})</span><br>`:''}${g.brand?`${lnk(g.brand)} <span class=mut>brand${g.brandSrc==='their website'?', from their website':' (unverified)'} (${esc(g.brandSrc||'')})</span>`:''}${g.person&&g.brand?`<br><label class=mut><input type="radio" name="use-${esc(l.id)}" data-ig-use="${esc(l.id)}|person" ${g.use!=='brand'?'checked':''}> tag person <input type="radio" name="use-${esc(l.id)}" data-ig-use="${esc(l.id)}|brand" ${g.use==='brand'?'checked':''}> tag brand</label>`:''}${!g.person&&!g.brand?'<span class=mut>not found</span>':'<div class=mut>Check the profile before you use it.</div>'}`:'<span class=mut>not looked up yet</span>'}</td>
+  <td><select data-ig-st="${esc(l.id)}">${IG_STATUS.map(([v,t])=>`<option value="${v}" ${(st.status||'')===v?'selected':''}>${t}</option>`).join('')}</select>${st.sentAt?`<div class=mut>${new Date(st.sentAt).toLocaleDateString([],{month:'short',day:'numeric'})}</div>`:''}</td>
+  <td><input data-ig-note="${esc(l.id)}" value="${esc(st.note||'')}" placeholder="note" style="width:150px"></td><td><button class="b" data-star="${esc(l.id)}" title="Remove from top prospects">★ ✕</button></td></tr>`};
+ const prospects=top.map(l=>`<option value="${esc(l.id)}">${esc(l.company)}</option>`).join('');
+ return `<div class="card" style="border-color:#8b5cf6"><b>Instagram story outreach</b> <span class=mut>A manual extra touch for your best prospects only. ${top.length} top prospect${top.length==1?'':'s'} · ${td} stor${td==1?'y':'ies'} sent today (keep it to 10 or fewer).</span>
+ <details style="margin-top:6px"><summary><b>Admin guide: how to do it</b></summary><div class=mut style="white-space:pre-wrap;margin-top:6px">${esc(IG_GUIDE)}</div></details>
+ <div class="row" style="margin-top:8px"><button class="b" id="ig-pick">★ Pick my top 25 (named contact, highest score)</button><button class="b p" id="ig-find" ${IGM.busy||ES.busy||!top.length?'disabled':''}>Find their Instagram accounts (10 at a time)</button><span class=mut>${esc(IGM.msg)}</span></div>
+ <label style="margin-top:6px">Google AI prompt for Instagram accounts <span class=mut>(fill-ins: {who} {company} {website} {person} {title})</span></label><textarea id="ig-prompt" rows="3" style="width:100%">${esc(S.settings.igPrompt||DEF_IG_PROMPT)}</textarea><button class="b" id="ig-reset">Reset prompt</button>
+ ${top.length?`<div class="tw"><table><tr><th>Prospect</th><th>Instagram</th><th>Status</th><th>Note</th><th></th></tr>${top.map(row).join('')}</table></div>`:'<div class=mut style="margin-top:6px">No top prospects yet. Press "Pick my top 25", or star leads in the list below.</div>'}
+ ${cf.length?`<div style="margin-top:8px"><b>Add these to your Close Friends list this round</b> <button class="b" data-cp="${esc(cf.join(' '))}">Copy all</button><div class=mut>${esc(cf.join('  '))}</div></div>`:''}
+ <div style="margin-top:10px"><b>30 second video script</b> <span class=mut>Fill-ins: {first_name} {business} {sender} {product} {link}. Record it yourself, in your own words.</span>
+  <textarea id="ig-script" rows="8" style="width:100%">${esc(S.settings.igScript||DEF_IG_SCRIPT)}</textarea>
+  <div class="row"><button class="b" id="ig-script-reset">Reset script</button><select id="ig-pv-who"><option value="">Preview for…</option>${prospects}</select></div>${IGM.pv?`<div class=mut style="white-space:pre-wrap;border:1px solid var(--bd,#444);border-radius:6px;padding:8px;margin-top:6px">${esc(IGM.pv)}</div>`:''}</div></div>`}
+function igWire(){const g=id=>document.getElementById(id),sync=()=>{if(tab=='ads')adsV()},byId=id=>(S.adLeads||[]).find(x=>x.id==id);
+ g('ig-pick').onclick=()=>{const n=pickTopProspects(25);IGM.msg=n?`Starred ${n} more.`:'Nothing more to star (a lead needs a named contact, an email, and no earlier contact).';sync()};
+ g('ig-find').onclick=async()=>{IGM.busy=true;IGM.msg='Reading their websites, then asking Google AI. The Chrome window stays minimized.';sync();await findInstagram(10);IGM.busy=false;IGM.msg=ES.msg||'Done. Check each profile before you use it.';save();sync()};
+ g('ig-prompt').oninput=e=>{S.settings.igPrompt=e.target.value;save()};g('ig-reset').onclick=()=>{S.settings.igPrompt='';save();sync()};
+ g('ig-script').oninput=e=>{S.settings.igScript=e.target.value;save()};g('ig-script-reset').onclick=()=>{S.settings.igScript='';save();sync()};
+ g('ig-pv-who').onchange=e=>{const l=byId(e.target.value);if(!l){IGM.pv='';return sync()}const st=ES.status||{};IGM.pv=igScript().replace(/\{first_name\}/g,(l.greet&&l.greet.first)||(l.person||'').split(' ')[0]||'there').replace(/\{business\}/g,(l.greet&&l.greet.business)||l.company).replace(/\{sender\}/g,st.sender_name||'Emmanuel').replace(/\{product\}/g,meta().product).replace(/\{link\}/g,meta().link);sync()};
+ document.querySelectorAll('[data-star]').forEach(b=>b.onclick=()=>{const l=byId(b.dataset.star);if(l){delete l.top;save();sync()}});
+ document.querySelectorAll('[data-ig-use]').forEach(r=>r.onchange=()=>{const[i,u]=r.dataset.igUse.split('|'),l=byId(i);if(l){l.ig.use=u;save();sync()}});
+ document.querySelectorAll('[data-ig-st]').forEach(s=>s.onchange=()=>{const l=byId(s.dataset.igSt);if(!l)return;l.story=l.story||{};l.story.status=s.value;if(s.value==='sent'&&!l.story.sentAt)l.story.sentAt=Date.now();if(s.value==='replied')l.replied=l.replied||Date.now();if(s.value==='no')l.dnc=1;save();sync()});
+ document.querySelectorAll('[data-ig-note]').forEach(i=>i.onchange=()=>{const l=byId(i.dataset.igNote);if(l){l.story=l.story||{};l.story.note=i.value;save()}})}
+const IG_GUIDE=`WHAT THIS IS
+A manual extra touch for the few prospects worth it. You post a short video pitch to a private Instagram story and tag the prospect. The idea is that the tag notifies them and your story shows at the front of their story bar, so it gets seen even when their DMs are flooded. Nobody has verified a specific open rate, so treat it as a test and count your own results.
+
+WHEN TO USE IT
+- Top prospects only: a named owner or marketing lead at a store with a high portal score. Not your whole list.
+- One touch at a time: use it for people who have not answered email, and give an email at least 3 days first.
+- Never on anyone who said no or opted out.
+
+STEPS
+1. Pick your top 25 (the button above) and press Find their Instagram accounts. Open each profile and check it is really that person or brand. Choose "tag person" or "tag brand" when both exist.
+2. In Instagram, make a Close Friends list for this round. Add ONLY this round's prospects. The tool lists the handles to add. Set each to "Added to Close Friends".
+3. Record a video of 30 seconds or less using the script below, in your own words:
+   - Open with their name and ONE specific, true thing about their business or ads.
+   - Give one useful idea for free.
+   - One proof point or result (only a real one).
+   - One ask: reply here or sign up (your link).
+4. Post it as a story to Close Friends only, and tag the prospect with Instagram's own mention.
+5. Set their status to "Story sent". The tool dates it and counts today's sends.
+6. When they reply, set "Replied" or "Booked a call". If they decline, set "Not interested": they are marked do-not-contact.
+7. After the round, remove them from the Close Friends list and clear the story before the next batch.
+
+RULES
+- Manual only. Never automate posting, tagging or messaging.
+- 10 stories a day at most, and keep each round small. Mass tagging looks like spam and can get an account restricted.
+- Be truthful in the video: no invented results and no claiming you reviewed ads you did not look at.
+- Stop immediately if someone asks you to.
+- Instagram changes how tags and the story bar work, so check it still behaves this way.`;
+
+/* ---------- Loom video outreach (manual video per lead; the email carries the link). Also usable as a second touch. ---------- */
+const LM={msg:'',busy:false,pv:'',sel:{}};
+const loomDays=l=>l.emailedAt?Math.floor((Date.now()-l.emailedAt)/864e5):null;
+const loomCandidates=()=>(S.adLeads||[]).filter(l=>l.email&&!l.dnc&&!l.replied&&!l.contacted&&!l.loomSentAt&&(l.top||l.loomLink||(l.emailedAt&&loomDays(l)>=3))).sort((a,b)=>(!!b.loomLink-!!a.loomLink)||(!!b.top-!!a.top)||((b.score||0)-(a.score||0))).slice(0,40);
+const loomGmail=()=>(S.adLeads||[]).filter(l=>l.contacted&&!l.dnc&&!l.replied);
+const loomText=(tpl,l)=>String(tpl).replace(/\{first_name\}/g,(l.greet&&l.greet.first)||(l.person||'').split(' ')[0]||l.company).replace(/\{business\}/g,(l.greet&&l.greet.business)||l.company).replace(/\{sender\}/g,(ES.status&&ES.status.sender_name)||'Emmanuel').replace(/\{ads_phrase\}/g,adsPhrase(l)).replace(/\{product\}/g,meta().product).replace(/\{link\}/g,meta().link).replace(/\{loom_link\}/g,l.loomLink||'[Loom link]');
+function loomCard(){const m=meta(),cands=loomCandidates(),gm=loomGmail(),ready=cands.filter(l=>l.loomLink&&!l.draftedAt).length;
+ const row=l=>{const d=loomDays(l);return `<tr><td><label style="display:flex;gap:6px;align-items:center"><input type="checkbox" data-lm-sel="${esc(l.id)}" ${LM.sel[l.id]?'checked':''}> <b>${esc(l.company)}</b></label><span class=mut>${esc(l.person||l.email)}${l.top?' · ★ top prospect':''}${d!==null?` · emailed ${d} day${d==1?'':'s'} ago, no reply`:''}</span></td>
+  <td><input type="number" min="0" data-lm-ads="${esc(l.id)}" value="${esc(l.adsCount||'')}" placeholder="ads" style="width:70px"></td>
+  <td><input data-lm-link="${esc(l.id)}" value="${esc(l.loomLink||'')}" placeholder="paste the Loom link" style="width:260px"></td>
+  <td class="mut lm-st">${l.draftedAt?'draft saved':l.loomLink?'ready':'record the video'}</td></tr>`};
+ const gmRow=l=>{const d=l.contactedAt?Math.floor((Date.now()-l.contactedAt)/864e5):null,which=d===null?'':d>=7?'loomFu2':d>=3?'loomFu1':'';
+  return `<tr><td><b>${esc(l.company)}</b><br><span class=mut>${esc(l.contacted)}</span></td><td><input type="date" data-lm-date="${esc(l.id)}" value="${l.contactedAt?new Date(l.contactedAt).toISOString().slice(0,10):''}"></td>
+  <td>${d===null?'<span class=mut>enter the date you emailed them</span>':which?`<button class="b p" data-lm-copy="${esc(l.id)}|${which}">Copy ${which==='loomFu2'?'follow up 2':'follow up 1'}</button> <span class=mut>${d} days since your email</span>`:`<span class=mut>${d} day${d==1?'':'s'} since your email, follow up 1 is due on day 3</span>`}</td></tr>`};
+ return `<div class="card" style="border-color:#0ea5e9"><b>Loom video outreach</b> <span class=mut>You record a short video of what you found in their Meta ads, and the email just carries the link. It can be the first email, or a second touch for someone emailed 3+ days ago who has not replied. The same person never gets the video email twice, and never right after another email.</span>
+  <div class="row" style="margin-top:8px"><button class="b p" id="lm-draft" ${LM.busy||ES.busy||!ready?'disabled':''}>Save the Loom emails as drafts (${ready} ready)</button><button class="b" id="lm-prev">Preview for the first ticked lead</button><span class=mut>${esc(LM.msg)}</span></div>
+  ${cands.length?`<div class="tw"><table><tr><th>Lead</th><th>Ads they run</th><th>Loom link</th><th>Status</th></tr>${cands.map(row).join('')}</table></div>`:'<div class=mut style="margin-top:6px">No leads yet. Star top prospects above, or wait for emailed leads to reach day 3 with no reply.</div>'}
+  ${LM.pv?`<div style="border:1px solid var(--bd,#444);border-radius:6px;padding:8px;margin-top:6px"><b>Preview</b> <span class=mut>(not saved or sent)</span><div style="white-space:pre-wrap" class=mut>${esc(LM.pv)}</div></div>`:''}
+  <div style="margin-top:8px"><b>Your Loom script</b> <span class=mut>Pick a lead to fill in its name and ad count, then read it while you record. Say only what you really saw in their ads.</span>
+   <div class="row"><select id="lm-script-who"><option value="">Script for…</option>${cands.map(l=>`<option value="${esc(l.id)}">${esc(l.company)}</option>`).join('')}</select><button class="b" id="lm-script-copy" ${LM.script?'':'disabled'}>Copy script</button></div>${LM.script?`<div class=mut style="white-space:pre-wrap;border:1px solid var(--bd,#444);border-radius:6px;padding:8px;margin-top:6px">${esc(LM.script)}</div>`:''}</div>
+  ${gm.length?`<div style="margin-top:10px"><b>Emailed from your Gmail (follow ups are manual)</b> <span class=mut>Enter the date you sent the video email. When follow up 1 (day 3) or 2 (day 7) is due, copy it and reply in the same Gmail thread.</span><div class="tw"><table><tr><th>Lead</th><th>Date emailed</th><th>Follow up</th></tr>${gm.map(gmRow).join('')}</table></div></div>`:''}</div>`}
+function loomWire(){const g=id=>document.getElementById(id),by=id=>(S.adLeads||[]).find(x=>x.id==id),sync=()=>{if(tab=='ads')adsV()};
+ document.querySelectorAll('[data-lm-sel]').forEach(c=>c.onchange=()=>{LM.sel[c.dataset.lmSel]=c.checked});
+ const upd=()=>{const n=loomCandidates().filter(l=>l.loomLink&&!l.draftedAt).length,b=g('lm-draft');if(b){b.textContent=`Save the Loom emails as drafts (${n} ready)`;b.disabled=LM.busy||ES.busy||!n}};
+ document.querySelectorAll('[data-lm-ads]').forEach(i=>i.onchange=()=>{const l=by(i.dataset.lmAds);if(l){l.adsCount=+i.value||'';save()}});
+ document.querySelectorAll('[data-lm-link]').forEach(i=>i.onchange=()=>{const l=by(i.dataset.lmLink);if(l){const v=i.value.trim();if(v&&!/^https?:\/\//i.test(v)){alert('That does not look like a link. Paste the full Loom link, starting with https://');i.value=l.loomLink||'';return}l.loomLink=v;save();upd();const st=i.closest('tr').querySelector('.lm-st');if(st)st.textContent=l.draftedAt?'draft saved':v?'ready':'record the video'}});
+ document.querySelectorAll('[data-lm-date]').forEach(i=>i.onchange=()=>{const l=by(i.dataset.lmDate);if(l){l.contactedAt=i.value?new Date(i.value+'T12:00:00').getTime():0;save();sync()}});
+ document.querySelectorAll('[data-lm-copy]').forEach(b=>b.onclick=()=>{const[i,k]=b.dataset.lmCopy.split('|'),l=by(i);if(!l)return;navigator.clipboard.writeText(loomText(meta()[k],l)).catch(()=>{});b.textContent='Copied'});
+ g('lm-prev').onclick=async()=>{const l=(S.adLeads||[]).find(x=>LM.sel[x.id]&&x.loomLink);if(!l){LM.msg='Tick a lead that has a Loom link first.';return sync()}await metaGreet([l]);
+  try{const r=await metaApi('/email/preview',{leads:[metaPayload(l)],template:metaTemplateObj(),limit:1,step:0});const it=(r.items||[])[0];LM.pv=it&&it.status==='ready'?`To: ${it.to}\nSubject: ${it.subject}\n\n${it.body}`:'Skipped: '+(it?it.why:'no result');LM.msg=''}catch(e){LM.msg='Helper not running.'}sync()};
+ g('lm-draft').onclick=async()=>{const todo=loomCandidates().filter(l=>l.loomLink&&!l.draftedAt).slice(0,20);if(!todo.length)return;LM.busy=true;LM.msg='Working out who each email says Hey to…';sync();await metaGreet(todo);LM.msg=`Saving ${todo.length} Loom emails as drafts…`;sync();
+  await helperJob('/email/run',{campaign:'meta',mode:'drafts',leads:todo.map(metaPayload),template:metaTemplateObj(),limit:20,step:0},t=>{const r=parseTag(t,'EMAIL');if(!r)return;const l=(S.adLeads||[]).find(x=>x.id==r.id);if(!l)return;if(r.status==='drafted')l.draftedAt=Date.now();else if(r.status==='skip')l.skipWhy=r.why});
+  const ok=todo.filter(l=>l.draftedAt).length,sk=todo.filter(l=>l.skipWhy&&!l.draftedAt);LM.busy=false;LM.msg=`${ok} drafts saved.${sk.length?' Skipped: '+sk.slice(0,3).map(l=>l.company+' ('+l.skipWhy+')').join('; ')+(sk.length>3?'…':''):''} Review and send them in "Drafts to review" above.`;save();sync()};
+ g('lm-script-who').onchange=e=>{const l=by(e.target.value);LM.script=l?loomText(meta().loomScript,l):'';sync()};
+ g('lm-script-copy').onclick=()=>{if(LM.script){navigator.clipboard.writeText(LM.script).catch(()=>{});g('lm-script-copy').textContent='Copied'}}}
 function adsV(){const L=(S.adLeads||[]).slice().sort((a,b)=>(!!a.contacted-!!b.contacted)||((b.score||0)-(a.score||0))),g=S.settings,waiting=L.filter(l=>!l.checkedAt&&!l.contacted).length,touched=L.filter(l=>l.contacted).length;
  const link=(u,t)=>u?`<a href="${esc(u)}" target="_blank" rel="noopener">${esc(t||u.replace(/^https?:\/\/(www\.)?/,'').slice(0,34))}</a>`:'<span class=mut>-</span>';
  const row=l=>`<tr${l.contacted?' style="opacity:.85"':''}><td><b>${esc(l.company)}</b>${l.contacted?`<div style="color:#e5a000" title="${esc(l.contacted)}">⚠ Already emailed: ${esc(l.contacted)} A second touch only makes sense as a Loom follow-up, after a few days with no reply.</div>`:''}${l.greet?`<div class=mut>Email says: Hey ${esc(l.greet.first)}${l.greet.kind==='person'?'':' (business name)'}</div>`:''}<br>${link(l.web)}${l.fb?' · '+link(l.fb,'Facebook Page'):''}${l.signal?`<div class=mut style="max-width:260px">${esc(l.signal)}</div>`:''}</td>
   <td>${l.person?`<b>${esc(l.person)}</b><br><span class=mut>${esc(l.title||'')}</span>${l.linkedin?'<br>'+link(l.linkedin,'LinkedIn'):''}`:`<span class=mut>${l.checkedAt?'not found':'not looked up yet'}</span>`}</td>
   <td>${l.email?`${esc(l.email)} <button class="b" data-cp="${esc(l.email)}">Copy</button>`:'<span class=mut>-</span>'}${(l.siteEmails||[]).filter(e=>e!==l.email).map(e=>'<br><span class=mut>'+esc(e)+'</span>').join('')}</td>
   <td>${(l.phones||[]).length?l.phones.map(p=>`<a href="tel:+1${digits10(p)}">${esc(p)}</a>`).join('<br>'):'<span class=mut>-</span>'}</td>
-  <td><button class="b" data-adx="${esc(l.id)}" title="Remove this advertiser">✕</button></td></tr>`;
+  <td><button class="b" data-star2="${esc(l.id)}" title="${l.top?'Top prospect: click to remove':'Make this a top prospect for the Instagram story outreach'}">${l.top?'★':'☆'}</button> <button class="b" data-adx="${esc(l.id)}" title="Remove this advertiser">✕</button></td></tr>`;
  $('#main').innerHTML=`<div class="card"><b>Meta ads campaign</b> <span class=mut>Advertisers from the Meta Ad Library who likely spend $5,000+ a month. This list is separate from your podcast leads and is stored only in this browser. Nothing is sent from this tab yet.</span>
   <div class="row" style="margin-top:8px"><button class="b p" id="ad-go" ${AD.busy||ES.busy||!waiting?'disabled':''}>Find decision makers, emails and phones (${waiting} waiting, 10 at a time)</button><span class=mut>${esc(AD.msg)}</span></div>
   <div class="row" style="margin-top:6px"><label class="mut">Import a CSV (company, website, facebook_page columns; email, phone, decision_maker, title, linkedin optional). Your files: tools/ad_leads.csv (Ad Library) and tools/ad_leads_portal.csv (HALCRUS portal, 271 leads).</label><input type="file" id="ad-file" accept=".csv"></div></div>
   <div class="card"><b>Google AI prompt</b> <span class=mut>Edit it any time; it is used on the next lookup. Fill-ins: {company} {website} {facebook}. If you remove the JSON answer instructions they are added back automatically. Answers are checked before they are saved: an email must be on the company's own domain, and a phone must look like a real number.</span>
   <textarea id="ad-prompt" rows="7" style="width:100%;margin-top:6px">${esc(g.adPrompt||DEF_AD_PROMPT)}</textarea><div class="row"><button class="b" id="ad-reset">Reset to the default prompt</button></div></div>
   ${metaCards()}
+  ${igCard()}
+  ${loomCard()}
   <div class="card"><b>${L.length} advertiser${L.length==1?'':'s'}</b> <span class=mut>${L.length-touched} ready for a first email, ${touched} already emailed (kept out of the first touch)</span>${L.length?`<div class="tw"><table><tr><th>Company</th><th>Decision maker</th><th>Email</th><th>Phone</th><th></th></tr>${L.map(row).join('')}</table></div>`:'<div class=mut style="margin-top:6px">No advertisers yet. Import tools/ad_leads.csv.</div>'}</div>`;
- metaWire();
+ metaWire();igWire();loomWire();
  if(!MC.reconciled){MC.reconciled=1;if(!ES.status)loadEmailStatus();metaReconcile().then(()=>{if(tab=='ads')adsV()})}
  $('#ad-prompt').oninput=e=>{g.adPrompt=e.target.value;save()};
  $('#ad-reset').onclick=()=>{g.adPrompt='';save();adsV()};
  $('#ad-file').onchange=async e=>{const f=e.target.files[0];if(!f)return;const n=importAdCSV(await f.text());AD.msg=n<0?'Could not find a company column.':`Added ${n} advertisers.`;adsV()};
  $('#ad-go').onclick=async()=>{AD.busy=true;AD.msg='Asking Google AI, about a minute per company. The Chrome window stays minimized unless Google asks you to verify.';adsV();await findAdContacts(10);AD.busy=false;AD.msg=ES.msg||'Done.';save();adsV()};
- $('#main').onclick=e=>{const d=e.target.dataset;if(d.cp){navigator.clipboard.writeText(d.cp).catch(()=>{});e.target.textContent='Copied'}else if(d.adx){S.adLeads=(S.adLeads||[]).filter(x=>x.id!=d.adx);save();adsV()}}}
+ $('#main').onclick=e=>{const d=e.target.dataset;if(d.cp){navigator.clipboard.writeText(d.cp).catch(()=>{});e.target.textContent='Copied'}else if(d.adx){S.adLeads=(S.adLeads||[]).filter(x=>x.id!=d.adx);save();adsV()}else if(d.star2){const l=(S.adLeads||[]).find(x=>x.id==d.star2);if(l){if(l.top)delete l.top;else l.top=1;save();adsV()}}}}
 function callsV(){const L=S.leads.filter(callable).sort((a,b)=>callRank(a)-callRank(b)).slice(0,60),td=callsToday(),noNum=S.leads.filter(l=>!l.phone&&!l.dnc&&!['Removed','Not Interested','Client'].includes(l.status)&&(isHot(l)||l.emailedAt)).length,g=S.settings;
  const why=['Replied, call them now','Emailed 3+ days ago, no reply','Emailed','Hot lead, not emailed yet','Has a number'];
  const card=l=>{const last=(l.callLog||[]).slice(-1)[0],open=CS.open==l.id,cls=l.phoneHow&&/Google AI/.test(l.phoneHow);

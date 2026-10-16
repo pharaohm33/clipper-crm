@@ -151,6 +151,7 @@ def pick_template(template, lead):
     pinned = next((t for t in lib if t["id"] == lead.get("tplId")), None)
     if pinned:
         return pinned
+    lib = [t for t in lib if not t.get("second_touch")] or lib  # a second touch template is only used when a lead is pinned to it
     weights = [max(1, int(t.get("weight") or 1)) for t in lib]
     i = zlib.crc32(str(lead.get("id")).encode()) % sum(weights)
     for t, w in zip(lib, weights):
@@ -435,7 +436,20 @@ def plan(leads, template, mode="preview", limit=20, ignore_window=False, step=0)
         if is_suppressed(to):
             yield {**base, "status": "skip", "why": "on the do-not-contact list"}
             continue
-        if to in recent:
+        pre = pick_template(template, ld) if step == 0 else None
+        second = bool(pre and pre.get("second_touch"))
+        if second:  # e.g. the Loom email: allowed after an earlier, different email, but never twice, never right away, never after a reply
+            priors = [e for e in sent_entries(log) if e.get("to", "").lower() == to and e.get("step", 0) == 0]
+            if any(e.get("template_id") == pre["id"] and e.get("ts", 0) > time.time() - 90 * 86400 for e in priors):
+                yield {**base, "status": "skip", "why": "this video email was already sent to them"}
+                continue
+            if priors and time.time() - max(e.get("ts", 0) for e in priors) < 3 * 86400 - 3600:
+                yield {**base, "status": "skip", "why": "too soon after the earlier email (wait about 3 days)"}
+                continue
+            if any(e.get("to", "").lower() == to and e.get("status") in ("replied", "optout") for e in log):
+                yield {**base, "status": "skip", "why": "they already replied"}
+                continue
+        elif to in recent:
             yield {**base, "status": "skip", "why": "already emailed in the last 90 days"}
             continue
         if mode == "drafts" and step == 0 and to in drafted:
