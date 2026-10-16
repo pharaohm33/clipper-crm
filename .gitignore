@@ -9,3 +9,4 @@ tools/email_log.jsonl
 tools/suppression.txt
 tools/ad_leads.csv
 campaign_pause.json
+tools/ad_leads_portal.csv
