@@ -686,9 +686,21 @@ def email_status():
     if not (cfg.get("phone") or "").strip():
         warnings.append("Add your phone number (python3 tools/setup_email.py, option 3). Automatic replies to people who say yes need it, and nothing is written without it.")
     caps = cold_email.capacity(cfg, log_)
-    return {"sender_name": cfg.get("sender_name") or "", "phone": cfg.get("phone") or "", "warnings": warnings, "auto_reply": "send" if cfg.get("auto_reply") == "send" else "draft", "ready": not problems, "problems": problems, "inboxes": caps, "capacity_left": sum(max(0, c["cap"] - c["sent_today"]) for c in caps),
+    return {"paused": pause_state(), "sender_name": cfg.get("sender_name") or "", "phone": cfg.get("phone") or "", "warnings": warnings, "auto_reply": "send" if cfg.get("auto_reply") == "send" else "draft", "ready": not problems, "problems": problems, "inboxes": caps, "capacity_left": sum(max(0, c["cap"] - c["sent_today"]) for c in caps),
             "suppressed": len(cold_email.suppressed()), "suppressed_list": sorted(cold_email.suppressed())[:2000], "in_send_window": cold_email.in_window(cfg),
             "window": cfg.get("send_window") or {"start_hour": 9, "end_hour": 17}}
+
+
+PAUSE_FILE = HERE / "campaign_pause.json"
+# routes that belong to the podcast clips campaign: finding podcasts and their emails, making clips, writing and sending the emails
+CLIPS_ONLY_ROUTES = {"/run", "/emails/find", "/pipeline/start", "/email/run"}
+
+
+def pause_state():
+    try:
+        return json.loads(PAUSE_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
 
 
 class H(BaseHTTPRequestHandler):
@@ -750,6 +762,14 @@ class H(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(n) or b"{}")
         except Exception:
             return self._send(400, {"error": "bad json"})
+        if self.path == "/campaign/pause":
+            c = str(body.get("campaign") or "clips")
+            data = pause_state()
+            data[c] = bool(body.get("paused", True))
+            PAUSE_FILE.write_text(json.dumps(data), encoding="utf-8")
+            return self._send(200, {"ok": True, "paused": data})
+        if self.path in CLIPS_ONLY_ROUTES and pause_state().get("clips") and str(body.get("campaign") or "clips") != "meta":
+            return self._send(409, {"error": "Clips pitching is paused. Resume it from the Email tab (Autopilot panel) when you want it back."})
         if self.path == "/stop":
             p = STATE.get("proc")
             if p and STATE["running"]:

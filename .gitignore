@@ -8,3 +8,4 @@ tools/email_accounts.json
 tools/email_log.jsonl
 tools/suppression.txt
 tools/ad_leads.csv
+campaign_pause.json
