@@ -86,7 +86,7 @@ const iso=d=>{const x=d||new Date();return x.getFullYear()+'-'+String(x.getMonth
 const today=()=>iso();const money=n=>'$'+Number(n||0).toLocaleString(undefined,{maximumFractionDigits:2});
 const addDays=(d,n)=>{const x=new Date(d+'T00:00');x.setDate(x.getDate()+n);return iso(x)};
 const monthKey=()=>today().slice(0,7);
-let tab='dash';const TABS=[['dash','Dashboard'],['today','Today'],['leads','Leads'],['email','Email'],['audit','Audit'],['unibox','Unibox'],['calls','Calls'],['find','Find Podcasts'],['money','Money'],['settings','Settings']];
+let tab='dash';const TABS=[['dash','Dashboard'],['today','Today'],['leads','Leads'],['email','Email'],['audit','Audit'],['unibox','Unibox'],['calls','Calls'],['ads','Meta Ads'],['find','Find Podcasts'],['money','Money'],['settings','Settings']];
 function nav(){const waiting=S.leads.filter(l=>l.draftedAt&&!l.emailedAt&&!l.approved&&l.status=='New').length;$('#nav').innerHTML=TABS.map(([k,l])=>`<button class="${k===tab?'on':''}" data-t="${k}">${l}${k==='unibox'&&waiting?` (${waiting})`:''}</button>`).join('')}
 $('#nav').onclick=e=>{if(e.target.dataset.t){tab=e.target.dataset.t;render()}};
 $('#nav').ondragover=e=>{if(e.target.dataset&&e.target.dataset.t==='today'){e.preventDefault();e.dataTransfer.dropEffect='move';e.target.classList.add('drop')}};
@@ -106,7 +106,7 @@ function stats(){
  return{earned,owed,dl,remaining:Math.max(0,S.settings.goal-earned),sentToday:sentOn(today()),sentAll,rep,cl,
   fresh:S.leads.filter(l=>l.status=='New').length,fu:S.leads.filter(l=>l.status=='Sample Sent'&&l.follow&&l.follow<=today()).length,...mrrStats()}}
 function mrrStats(){const act=(S.retainers||[]).filter(r=>r.status=='Active'),mrr=act.reduce((a,r)=>a+(+r.fee||0),0);return{mrr,act:act.length,clipsM:act.reduce((a,r)=>a+(+r.clips||0),0),avgFee:act.length?mrr/act.length:0}}
-function render(){nav();({dash,today:todayV,leads,email:emailV,audit:auV,unibox:uniboxV,calls:callsV,find,money:moneyV,settings})[tab]()}
+function render(){nav();({dash,today:todayV,leads,email:emailV,audit:auV,unibox:uniboxV,calls:callsV,ads:adsV,find,money:moneyV,settings})[tab]()}
 function dash(){const s=stats(),g=S.settings;const pct=Math.min(100,s.earned/g.goal*100);
  const days=[...Array(14)].map((_,i)=>{const d=iso(new Date(Date.now()-(13-i)*864e5));return[d,sentOn(d)]});const mx=Math.max(g.daily,...days.map(x=>x[1]));
  const byInf={};S.payments.forEach(p=>{(byInf[p.who]=byInf[p.who]||{all:0,mo:0}).all+=p.amount;if(p.date.startsWith(monthKey()))byInf[p.who].mo+=p.amount});
@@ -558,6 +558,41 @@ function leadLinks(l){if(!l.handoffLink){const s=sheetFromReplyDraft(l);if(s){l.
   <div>Episode clipped: ${a(ep,l.epTitle||ep)}${l.clipTitle?` <span class=mut>· clip: ${esc(l.clipTitle)}</span>`:''}</div>
   ${clips.length?`<div>Clip link${clips.length>1?'s':''}: ${clips.map((u,i)=>a(u,'clip '+(i+1))).join(' · ')}</div>`:''}
   <div>Client folder (Google Sheet, the same link as in your yes-reply draft): ${l.handoffLink?`${a(l.handoffLink,'open the sheet')} <button class="b" data-cp="${esc(l.handoffLink)}">Copy link</button> ${l.handoffPublic?'<span class=mut>public</span>':`<button class="b" data-handoff="${esc(l.id)}">Make it public</button> <span class=mut>saved automatically, private until they say yes</span>`}`:(l.sampleSlug?`<button class="b" data-handoff="${esc(l.id)}">Get the link</button> <span class=mut>anyone with the link can view the sheet and clips</span>`:'<span class=mut>no clips made yet</span>')}</div></div>`}
+
+/* ---------- Meta ads campaign: advertisers from the Ad Library, their decision makers and contact info (separate from the podcast leads) ---------- */
+const DEF_AD_PROMPT='Who is the founder, owner or head of marketing or e-commerce at {company} ({website}), the person who decides how much to spend on advertising? Give me their email address and phone number.';
+const adPrompt=()=>(S.settings.adPrompt&&S.settings.adPrompt.trim())||DEF_AD_PROMPT;
+const AD={busy:false,msg:''};
+function importAdCSV(text){const rows=parseCSV(text);if(rows.length<2)return 0;const hd=rows[0].map(x=>x.toLowerCase().trim()),col=(...re)=>hd.findIndex(x=>re.some(r=>r.test(x)));
+ const c={co:col(/^(company|name|business|brand)$/),web:col(/website|web|url|site/),fb:col(/facebook|fb/),em:col(/^email/),ph:col(/phone/),pe:col(/decision|person|owner/),ti:col(/title/),li:col(/linkedin/),sig:col(/signal/),est:col(/likely|5k/)};
+ if(c.co<0)return -1;S.adLeads=S.adLeads||[];const have=new Set(S.adLeads.map(x=>x.company.toLowerCase()));let n=0;
+ for(const r of rows.slice(1)){const g=i=>i>=0?(r[i]||'').trim():'',co=g(c.co);if(!co||have.has(co.toLowerCase()))continue;have.add(co.toLowerCase());
+  S.adLeads.push({id:'AD'+Date.now().toString(36)+n,company:co,web:g(c.web),fb:g(c.fb),email:g(c.em),phones:g(c.ph)?[g(c.ph)]:[],person:g(c.pe),title:g(c.ti),linkedin:g(c.li),signal:g(c.sig),est:g(c.est),checkedAt:g(c.pe)?Date.now():0});n++}
+ save();return n}
+function findAdContacts(n){const todo=(S.adLeads||[]).filter(l=>!l.checkedAt&&l.company).slice(0,n);if(!todo.length){AD.msg='Every advertiser here was already looked up.';return Promise.resolve()}
+ return helperJob('/ads/find',{items:todo.map(l=>({id:l.id,company:l.company,web:l.web,facebook:l.fb})),prompt:adPrompt()},t=>{let r;if(r=parseTag(t,'DMAKER')){const l=(S.adLeads||[]).find(x=>x.id==r.id);if(!l)return;l.checkedAt=Date.now();
+  if(!r.none){l.person=r.person||l.person;l.title=r.title||l.title;l.linkedin=r.linkedin||l.linkedin;l.dmSource=r.where||'';if(r.email)l.email=r.email;l.emailSource=r.email?'Google AI / company site':l.emailSource;if(r.phone)l.phones=[r.phone,...(l.phones||[]).filter(p=>p!==r.phone)];}
+  if(r.site_emails&&r.site_emails.length){l.siteEmails=r.site_emails;if(!l.email)l.email=r.site_emails[0]}
+  if(r.phones&&r.phones.length){l.phones=[...new Set([...(l.phones||[]),...r.phones])]}
+  save();if(tab=='ads')adsV()}})}
+function adsV(){const L=S.adLeads||[],g=S.settings,waiting=L.filter(l=>!l.checkedAt).length;
+ const link=(u,t)=>u?`<a href="${esc(u)}" target="_blank" rel="noopener">${esc(t||u.replace(/^https?:\/\/(www\.)?/,'').slice(0,34))}</a>`:'<span class=mut>-</span>';
+ const row=l=>`<tr><td><b>${esc(l.company)}</b><br>${link(l.web)}${l.fb?' · '+link(l.fb,'Facebook Page'):''}${l.signal?`<div class=mut style="max-width:260px">${esc(l.signal)}</div>`:''}</td>
+  <td>${l.person?`<b>${esc(l.person)}</b><br><span class=mut>${esc(l.title||'')}</span>${l.linkedin?'<br>'+link(l.linkedin,'LinkedIn'):''}`:`<span class=mut>${l.checkedAt?'not found':'not looked up yet'}</span>`}</td>
+  <td>${l.email?`${esc(l.email)} <button class="b" data-cp="${esc(l.email)}">Copy</button>`:'<span class=mut>-</span>'}${(l.siteEmails||[]).filter(e=>e!==l.email).map(e=>'<br><span class=mut>'+esc(e)+'</span>').join('')}</td>
+  <td>${(l.phones||[]).length?l.phones.map(p=>`<a href="tel:+1${digits10(p)}">${esc(p)}</a>`).join('<br>'):'<span class=mut>-</span>'}</td>
+  <td><button class="b" data-adx="${esc(l.id)}" title="Remove this advertiser">✕</button></td></tr>`;
+ $('#main').innerHTML=`<div class="card"><b>Meta ads campaign</b> <span class=mut>Advertisers from the Meta Ad Library who likely spend $5,000+ a month. This list is separate from your podcast leads and is stored only in this browser. Nothing is sent from this tab yet.</span>
+  <div class="row" style="margin-top:8px"><button class="b p" id="ad-go" ${AD.busy||ES.busy||!waiting?'disabled':''}>Find decision makers, emails and phones (${waiting} waiting, 10 at a time)</button><span class=mut>${esc(AD.msg)}</span></div>
+  <div class="row" style="margin-top:6px"><label class="mut">Import a CSV (company, website, facebook_page columns; email, phone, decision_maker, title, linkedin optional). Yours is at tools/ad_leads.csv.</label><input type="file" id="ad-file" accept=".csv"></div></div>
+  <div class="card"><b>Google AI prompt</b> <span class=mut>Edit it any time; it is used on the next lookup. Fill-ins: {company} {website} {facebook}. If you remove the JSON answer instructions they are added back automatically. Answers are checked before they are saved: an email must be on the company's own domain, and a phone must look like a real number.</span>
+  <textarea id="ad-prompt" rows="7" style="width:100%;margin-top:6px">${esc(g.adPrompt||DEF_AD_PROMPT)}</textarea><div class="row"><button class="b" id="ad-reset">Reset to the default prompt</button></div></div>
+  <div class="card"><b>${L.length} advertiser${L.length==1?'':'s'}</b>${L.length?`<div class="tw"><table><tr><th>Company</th><th>Decision maker</th><th>Email</th><th>Phone</th><th></th></tr>${L.map(row).join('')}</table></div>`:'<div class=mut style="margin-top:6px">No advertisers yet. Import tools/ad_leads.csv.</div>'}</div>`;
+ $('#ad-prompt').oninput=e=>{g.adPrompt=e.target.value;save()};
+ $('#ad-reset').onclick=()=>{g.adPrompt='';save();adsV()};
+ $('#ad-file').onchange=async e=>{const f=e.target.files[0];if(!f)return;const n=importAdCSV(await f.text());AD.msg=n<0?'Could not find a company column.':`Added ${n} advertisers.`;adsV()};
+ $('#ad-go').onclick=async()=>{AD.busy=true;AD.msg='Asking Google AI, about a minute per company. The Chrome window stays minimized unless Google asks you to verify.';adsV();await findAdContacts(10);AD.busy=false;AD.msg=ES.msg||'Done.';save();adsV()};
+ $('#main').onclick=e=>{const d=e.target.dataset;if(d.cp){navigator.clipboard.writeText(d.cp).catch(()=>{});e.target.textContent='Copied'}else if(d.adx){S.adLeads=(S.adLeads||[]).filter(x=>x.id!=d.adx);save();adsV()}}}
 function callsV(){const L=S.leads.filter(callable).sort((a,b)=>callRank(a)-callRank(b)).slice(0,60),td=callsToday(),noNum=S.leads.filter(l=>!l.phone&&!l.dnc&&!['Removed','Not Interested','Client'].includes(l.status)&&(isHot(l)||l.emailedAt)).length,g=S.settings;
  const why=['Replied, call them now','Emailed 3+ days ago, no reply','Emailed','Hot lead, not emailed yet','Has a number'];
  const card=l=>{const last=(l.callLog||[]).slice(-1)[0],open=CS.open==l.id,cls=l.phoneHow&&/Google AI/.test(l.phoneHow);
