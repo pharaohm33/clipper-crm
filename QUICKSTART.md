@@ -120,3 +120,12 @@ Cold email for fitness, weight loss and executive coaches, offering a free 3 min
 - **Sending:** 5 inboxes, warm-up limits per inbox, sending hours 9 to 5 Arizona time, a 60 to 90 second gap between sends.
 - **Skip Microsoft-hosted mailboxes** is on by default because they filter cold mail harder.
 - Settings and data live in your browser. Use Settings, **Export JSON**, to back them up.
+
+### Approved video to Loom to sent email (hands-free option)
+
+1. **Connect Loom once:** in the Loom card press **Connect Loom (log in once)**. A Chrome window opens with its own saved profile (not your everyday Chrome); log in to Loom there and it closes by itself. Your password is never seen or stored by this software.
+2. **Make the videos, watch them, tick "I watched it, approve".** Only approved videos are ever uploaded or sent.
+3. **Upload and draft:** press **Upload N approved videos to Loom and save the emails as drafts**. For each video it uploads to your Loom, renames it to "A quick look at {business}'s Meta ads", plays to near the end and posts a comment with your sign up link (Loom turns that link into its own clickable chip on the video), then puts the Loom link into the email and saves the draft. Tick **show the Loom window while it works** for the first run so you can watch.
+4. **Hands-free:** tick **Hands-free while this tab is open** to do step 3 automatically as soon as you approve a video. Tick **and send the approved ones in my sending hours** to also send them, only inside your sending hours (9 to 5 Arizona time) and within each inbox's daily limit.
+5. If Loom shows a login again, the row says so: press Connect Loom. If an upload fails, a screenshot is saved in `tools/loom_debug/` and the row shows the reason.
+6. Each uploaded video counts toward your Loom plan's video limit.

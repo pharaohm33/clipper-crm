@@ -12,3 +12,7 @@ campaign_pause.json
 tools/ad_leads_portal.csv
 tools/sample_ad_video.mp4
 tools/ad_videos/
+tools/voice_samples/
+tools/.loom_profile/
+tools/loom_session.json
+tools/loom_debug/

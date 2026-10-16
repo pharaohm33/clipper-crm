@@ -627,7 +627,7 @@ def run_ig(items, template=None):
         STATE["running"] = False
 
 
-def run_ad_video(items, voice, product, link=None, host="loom"):
+def run_ad_video(items, voice, product, link=None, host="loom", narrator=None):
     """Makes the face-free ad video for each lead, shares it as a view link, and streams 'ADVIDEO {json}' lines. One lead at a time, spaced out."""
     try:
         import ad_video, shutil as _sh
@@ -638,7 +638,7 @@ def run_ad_video(items, voice, product, link=None, host="loom"):
                 break
             log(f"[{n + 1}/{len(items)}] {it.get('company')}")
             try:
-                res = ad_video.make(it, voice=voice or ad_video.DEFAULT_VOICE, sender=sender, product=product or "AI Ads Optimization", log=log, link=link or ad_video.SIGNUP_LINK, host=host)
+                res = ad_video.make(it, voice=voice or ad_video.DEFAULT_VOICE, sender=sender, product=product or "AI Ads Optimization", log=log, link=link or ad_video.SIGNUP_LINK, host=host, narrator=narrator)
             except Exception as e:
                 res = {"ok": False, "reason": "error: " + str(e)[:160]}
             link = ""
@@ -655,10 +655,45 @@ def run_ad_video(items, voice, product, link=None, host="loom"):
                 except Exception as e:
                     log("   (could not share the video: " + str(e)[:100] + ")")
             log("ADVIDEO " + json.dumps({"id": it.get("id"), "ok": bool(res.get("ok")), "reason": res.get("reason", ""), "link": link, "file": res.get("file", ""),
-                                         "facts": res.get("facts", {}), "script": res.get("script", ""), "seconds": res.get("seconds", 0)}))
+                                         "facts": res.get("facts", {}), "script": res.get("script", ""), "seconds": res.get("seconds", 0), "display_name": res.get("display_name", ""), "voice": res.get("voice", ""), "ad_clicks": res.get("ad_clicks", 0)}))
             if n < len(items) - 1:
                 time.sleep(random.uniform(4, 8))
         log("[runner] video maker finished.")
+    finally:
+        STATE["running"] = False
+
+
+def run_loom_login():
+    """Opens a visible Chrome window (with the helper's own saved profile) for the one-time Loom login."""
+    try:
+        import loom_upload
+        loom_upload.login(timeout=600, log=log)
+        log("[runner] Loom login finished.")
+    finally:
+        STATE["running"] = False
+
+
+def run_loom_upload(items, show):
+    """Uploads each approved video to Loom, posts the link comment near the end, and streams 'LOOM {json}' lines with the share link."""
+    try:
+        import loom_upload
+        root = (HERE / "ad_videos").resolve()
+        for n, it in enumerate(items):
+            if PIPE["stop"]:
+                break
+            log(f"[{n + 1}/{len(items)}] {it.get('title')}")
+            f = Path(str(it.get("file") or ""))
+            f = (f if f.is_absolute() else HERE.parent / f).resolve()
+            if root not in f.parents or f.suffix.lower() != ".mp4":
+                res = {"ok": False, "error": "only the videos made by the video maker can be uploaded"}
+            else:
+                res = loom_upload.upload_and_comment(f, it.get("title") or "A quick look at your Meta ads", it.get("comment") or "", show=show, log=log)
+            log("LOOM " + json.dumps({"id": it.get("id"), **res}))
+            if res.get("needs_login"):
+                break
+            if n < len(items) - 1:
+                time.sleep(random.uniform(5, 9))
+        log("[runner] Loom upload finished.")
     finally:
         STATE["running"] = False
 
@@ -1059,6 +1094,28 @@ class H(BaseHTTPRequestHandler):
                 PIPE["stop"] = False
                 threading.Thread(target=run_find_phones, args=(leads, bool(body.get("ai", True)), str(body.get("prompt") or "")[:3000] or None), daemon=True).start()
             return self._send(200, {"ok": True, "leads": len(leads)})
+        if self.path == "/loom/status":
+            import loom_upload
+            ok, at = loom_upload.connected()
+            return self._send(200, {"connected": ok, "at": at})
+        if self.path == "/loom/login":
+            with LOCK:
+                if STATE["running"]:
+                    return self._send(409, {"error": "a run is already in progress"})
+                STATE.update(running=True, log=["[runner] opening Loom so you can log in (a Chrome window will appear)"])
+                threading.Thread(target=run_loom_login, daemon=True).start()
+            return self._send(200, {"ok": True})
+        if self.path == "/loom/upload":
+            items = [{k: str(b.get(k) or "")[:300] for k in ("id", "file", "title", "comment")} for b in (body.get("items") or [])][:5]
+            if not items:
+                return self._send(400, {"error": "nothing to upload"})
+            with LOCK:
+                if STATE["running"]:
+                    return self._send(409, {"error": "a run is already in progress"})
+                STATE.update(running=True, log=[f"[runner] uploading {len(items)} approved video(s) to Loom"])
+                PIPE["stop"] = False
+                threading.Thread(target=run_loom_upload, args=(items, bool(body.get("show"))), daemon=True).start()
+            return self._send(200, {"ok": True, "items": len(items)})
         if self.path == "/ads/video":
             items = [{k: str(b.get(k) or "")[:300] for k in ("id", "company", "email", "web", "first", "business")} for b in (body.get("items") or [])][:5]
             if not items:
@@ -1068,7 +1125,7 @@ class H(BaseHTTPRequestHandler):
                     return self._send(409, {"error": "a run is already in progress"})
                 STATE.update(running=True, log=[f"[runner] making {len(items)} ad video(s)"])
                 PIPE["stop"] = False
-                threading.Thread(target=run_ad_video, args=(items, str(body.get("voice") or "")[:60], str(body.get("product") or "")[:60], str(body.get("link") or "")[:200] or None, "drive" if body.get("host") == "drive" else "loom"), daemon=True).start()
+                threading.Thread(target=run_ad_video, args=(items, str(body.get("voice") or "")[:60], str(body.get("product") or "")[:60], str(body.get("link") or "")[:200] or None, "drive" if body.get("host") == "drive" else "loom", (str(body.get("narrator"))[:40] if body.get("narrator") is not None else None)), daemon=True).start()
             return self._send(200, {"ok": True, "items": len(items)})
         if self.path == "/ads/ig":
             items = [{k: str(b.get(k) or "")[:300] for k in ("id", "company", "web", "person", "title")} for b in (body.get("items") or [])][:30]
