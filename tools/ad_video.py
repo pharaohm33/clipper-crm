@@ -293,17 +293,21 @@ def _speak_kokoro(text, voice_id, mp3, log):
     try:
         files, words, t = [], [], 0.0
         sil = tmp / "sil.mp3"
-        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono", "-t", "0.32", "-q:a", "5", str(sil)], check=True)
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono", "-t", "0.12", "-q:a", "5", str(sil)], check=True)
         for i, s in enumerate(sentences):
             r = requests.post(KOKORO_URL, json={"model": "model_q8f16", "voice": voice_id, "input": s, "response_format": "mp3"}, timeout=240)
             if r.status_code != 200 or len(r.content) < 2000:
                 raise RuntimeError(f"Kokoro answered {r.status_code}")
-            f = tmp / f"s{i}.mp3"
-            f.write_bytes(r.content)
+            raw = tmp / f"r{i}.mp3"
+            raw.write_bytes(r.content)
+            f = tmp / f"s{i}.mp3"  # cut the silence Kokoro leaves at the start and end of each sentence, so the voice does not hang between them
+            subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(raw), "-af",
+                            "silenceremove=start_periods=1:start_threshold=-45dB:start_silence=0.02,areverse,silenceremove=start_periods=1:start_threshold=-45dB:start_silence=0.02,areverse",
+                            "-c:a", "libmp3lame", "-q:a", "3", str(f)], check=True)
             d = _duration(f)
-            words += _spread(s.split(), t + 0.04, max(0.2, d - 0.12))
+            words += _spread(s.split(), t, d)
             files += [f, sil]
-            t += d + 0.32
+            t += d + 0.12
         lst = tmp / "list.txt"
         lst.write_text("".join(f"file '{p}'\n" for p in files[:-1]), encoding="utf-8")
         subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", str(lst), "-c:a", "libmp3lame", "-q:a", "3", str(mp3)], check=True)
@@ -312,17 +316,30 @@ def _speak_kokoro(text, voice_id, mp3, log):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+SPEED = 1.25  # every video is spoken at this tempo
+
+
+def _speed_up(mp3, words):
+    """Plays the voice SPEED times faster and moves every word time with it."""
+    tmp = Path(str(mp3) + ".fast.mp3")
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(mp3), "-af", f"atempo={SPEED}", "-c:a", "libmp3lame", "-q:a", "3", str(tmp)], check=True)
+    tmp.replace(mp3)
+    return _duration(mp3), [(a / SPEED, b / SPEED, w) for a, b, w in words]
+
+
 def speak(text, voice, mp3, log):
     """Returns (seconds, [(start, end, word_with_punctuation), ...], voice_used). Falls back to the Microsoft HD voice if Kokoro is not running."""
     engine, vid = parse_voice(voice)
     if engine == "kokoro":
         try:
             secs, words = _speak_kokoro(text, vid, mp3, log)
+            secs, words = _speed_up(mp3, words)
             return secs, words, f"kokoro:{vid}"
         except Exception as e:
             log(f"  (Kokoro is not available: {str(e)[:80]}. Start it with: cd ~/instagram-video-generator && docker compose up -d. Using the HD fallback voice.)")
             engine, vid = parse_voice(FALLBACK_VOICE)
     secs, words = _speak_edge(text, vid, mp3)
+    secs, words = _speed_up(mp3, words)
     return secs, words, f"edge:{vid}"
 
 
@@ -339,8 +356,8 @@ def caption_chunks(words):
     out = []
     for i, c in enumerate(chunks):
         s, e = c[0][0], c[-1][1]
-        nxt = chunks[i + 1][0][0] if i + 1 < len(chunks) else e + 0.6
-        out.append((max(0.0, s - 0.05), min(nxt - 0.02, e + 0.4), " ".join(x[2] for x in c)))
+        nxt = chunks[i + 1][0][0] if i + 1 < len(chunks) else e + 0.15
+        out.append((max(0.0, s - 0.05), min(nxt - 0.02, e + 0.12), " ".join(x[2] for x in c)))
     return out
 
 
@@ -433,6 +450,62 @@ def close_ad(pg):
         pass
 
 
+FACE = HERE / "assets" / "narrator.jpg"
+BUBBLE = 210  # diameter of the talking circle, in pixels of the 1280x720 frame
+
+
+def voice_levels(mp3, n, fps):
+    """How loud the voice is in each of the n frames, 0 to 1 (smoothed), so the rings can pulse with the words."""
+    import array
+    raw = subprocess.run(["ffmpeg", "-loglevel", "error", "-i", str(mp3), "-f", "s16le", "-ac", "1", "-ar", "8000", "-"], capture_output=True).stdout
+    a = array.array("h")
+    a.frombytes(raw[: len(raw) // 2 * 2])
+    win = 8000 // fps
+    rms = []
+    for i in range(n):
+        seg = a[i * win:(i + 1) * win]
+        rms.append(math.sqrt(sum(x * x for x in seg) / len(seg)) if len(seg) else 0.0)
+    top = sorted(rms)[int(len(rms) * 0.95)] or 1.0
+    out, prev = [], 0.0
+    for r in rms:
+        v = min(1.0, r / top)
+        prev = prev * 0.45 + v * 0.55 if v > prev else prev * 0.7 + v * 0.3  # quick to rise, slower to fall
+        out.append(prev)
+    return out
+
+
+def make_bubble(level, t):
+    """The circular face with a white edge and soft rings that swell and fade with the voice. Returns an RGBA image."""
+    from PIL import Image, ImageDraw
+    S, K = 340, 3  # canvas size, supersampling for smooth edges
+    big = Image.new("RGBA", (S * K, S * K), (0, 0, 0, 0))
+    d = ImageDraw.Draw(big)
+    c, r0 = S * K / 2, BUBBLE * K / 2
+    for j in range(3):  # rings drift outward and fade, strength follows the voice
+        ph = (t * 0.9 + j / 3) % 1.0
+        rad = r0 + (8 + ph * 48 * (0.35 + level)) * K
+        al = int(150 * (1 - ph) * (0.15 + level))
+        if al > 4:
+            d.ellipse([c - rad, c - rad, c + rad, c + rad], outline=(110, 90, 255, al), width=3 * K)
+    glow = r0 + (4 + 7 * level) * K
+    d.ellipse([c - glow, c - glow, c + glow, c + glow], outline=(110, 90, 255, int(120 + 120 * level)), width=5 * K)
+    big = big.resize((S, S), Image.LANCZOS)
+    face = Image.open(FACE).convert("RGB").resize((BUBBLE, BUBBLE), Image.LANCZOS)
+    mask = Image.new("L", (BUBBLE * K, BUBBLE * K), 0)
+    ImageDraw.Draw(mask).ellipse([0, 0, BUBBLE * K - 1, BUBBLE * K - 1], fill=255)
+    mask = mask.resize((BUBBLE, BUBBLE), Image.LANCZOS)
+    big.paste(face, ((S - BUBBLE) // 2, (S - BUBBLE) // 2), mask)
+    return big
+
+
+def add_bubble(jpg, level, t):
+    from PIL import Image
+    im = Image.open(jpg).convert("RGB")
+    b = make_bubble(level, t)
+    im.paste(b, (14, VIEWPORT["height"] - b.height - 6), b)
+    im.save(jpg, quality=80)
+
+
 def record(pg, pid, seconds, mp3, out_mp4, log, words, link=SIGNUP_LINK, show_from=None, seed=None):
     """Browses the active view for `seconds`, wandering near the top and clicking into a few ads, with captions that follow the words,
     and stitches the frames with the narration. No loading screens, no cursor, no face."""
@@ -450,6 +523,7 @@ def record(pg, pid, seconds, mp3, out_mp4, log, words, link=SIGNUP_LINK, show_fr
     n = max(30, int((seconds + 0.8) * FPS))
     path = make_path(n, FPS, top_limit, seed if seed is not None else random.randrange(10 ** 6))
     chunks = caption_chunks(words)
+    levels = voice_levels(mp3, n, FPS) if FACE.exists() else None
     events = [seconds * f for f in (0.20, 0.47, 0.72)] if seconds >= 22 else [seconds * 0.45]
     events = [e for e in events if not (show_from is not None and e > show_from + 12)] or events[:1]
     ev, in_ad, ad_until, clicks = 0, False, 0.0, 0
@@ -473,6 +547,8 @@ def record(pg, pid, seconds, mp3, out_mp4, log, words, link=SIGNUP_LINK, show_fr
                 pg.evaluate("([y,a,b])=>{window.scrollTo(0,y);window.__fx(a,b)}", [int(path[i]), cap, cta])
             pg.wait_for_timeout(25)
             pg.screenshot(path=str(tmp / f"f{i:04d}.jpg"), type="jpeg", quality=72)
+            if levels:
+                add_bubble(tmp / f"f{i:04d}.jpg", levels[i], t)
             if i % 30 == 0:
                 pg.evaluate(STRIP_JS)
         if in_ad:
@@ -487,6 +563,9 @@ def record(pg, pid, seconds, mp3, out_mp4, log, words, link=SIGNUP_LINK, show_fr
 
 
 def make(item, voice=DEFAULT_VOICE, sender="Emmanuel", product="AI Ads Optimization", log=print, link=SIGNUP_LINK, host="loom", narrator=None):
+    if link != SIGNUP_LINK:  # the on-screen link is ALWAYS the sign up page, whatever a caller passes (never a Drive or any other link)
+        log(f"  (ignoring link {str(link)[:60]}; the video always shows {SIGNUP_LINK})")
+        link = SIGNUP_LINK
     """Returns {'ok': bool, 'reason': str, 'file': path, 'facts': {...}, 'script': str}.
     narrator: the name said in the video. None = the sender's own name for a male voice and no name for a female voice. '' = no name."""
     from playwright.sync_api import sync_playwright
