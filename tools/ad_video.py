@@ -87,8 +87,11 @@ def name_close(a, b):
     return bool(a and b) and (a in b or b in a or difflib.SequenceMatcher(None, a, b).ratio() >= 0.8)
 
 
+COUNTRY = ["US"]  # the Ad Library country for this video: US first; ALL when the advertiser is only found outside the US (a .co.uk shop, for example)
+
+
 def lib_url(**kw):
-    q = {"active_status": "all", "ad_type": "all", "country": "US", "media_type": "all"}
+    q = {"active_status": "all", "ad_type": "all", "country": COUNTRY[0], "media_type": "all"}
     q.update(kw)
     return LIB + "?" + urllib.parse.urlencode(q)
 
@@ -802,6 +805,7 @@ def make(item, voice=DEFAULT_VOICE, sender="Emmanuel", product="AI Ads Optimizat
     narrator: the name said in the video. None = the sender's own name for a male voice and no name for a female voice. '' = no name."""
     from playwright.sync_api import sync_playwright
     OUT.mkdir(exist_ok=True)
+    COUNTRY[0] = "US"
     company = item.get("company") or ""
     domain = brand_domain(item.get("email"), item.get("web"))
     label = root_label(domain)
@@ -817,21 +821,34 @@ def make(item, voice=DEFAULT_VOICE, sender="Emmanuel", product="AI Ads Optimizat
         try:
             ctx = browser.new_context(viewport=VIEWPORT, locale="en-US")
             pg = ctx.new_page()
-            cands = candidates(pg, domain, company, log)
-            if not cands:
-                return {"ok": False, "reason": f"no advertiser found in the Ad Library for {domain} or {company}"}
-            chosen, rejected = None, []
-            for pid, pname in cands[:3]:
-                facts = inspect(pg, pid, label, log)
-                facts["page_name"] = pname
-                good = facts.get("ok") and facts["host_match_rate"] >= 0.5 and facts["matching_hosts"]
-                log(f"  candidate {pname} ({pid}): " + (f"{len(facts['matching_hosts'])} brand domain(s), match rate {facts['host_match_rate']}, {facts['active']} active of {facts['total']}" if facts.get("ok") else facts.get("reason", "")))
-                if good:
-                    chosen = facts
+            chosen, rejected, any_cands, seen = None, [], False, set()
+            for country in ("US", "ALL"):  # the US Ad Library first; all countries when nothing there is this brand (a UK or Canadian shop)
+                COUNTRY[0] = country
+                if country == "ALL":
+                    log("  nothing matching in the US ads; looking in the all-countries Ad Library")
+                cands = candidates(pg, domain, company, log)
+                any_cands = any_cands or bool(cands)
+                if country == "ALL":  # only pages that are named like this brand: the all-countries keyword search is full of unrelated pages
+                    cands = [(i, nm) for i, nm in cands if i not in seen and (name_close(nm, company) or name_close(nm, label))]
+                for pid, pname in cands[:3]:
+                    seen.add(pid)
+                    facts = inspect(pg, pid, label, log)
+                    facts["page_name"] = pname
+                    good = facts.get("ok") and facts["host_match_rate"] >= 0.5 and facts["matching_hosts"]
+                    log(f"  candidate {pname} ({pid}): " + (f"{len(facts['matching_hosts'])} brand domain(s), match rate {facts['host_match_rate']}, {facts['active']} active of {facts['total']}" if facts.get("ok") else facts.get("reason", "")))
+                    if good:
+                        chosen = facts
+                        break
+                    if f"{pname}: ads point" not in " ".join(rejected):
+                        rejected.append(f"{pname}: ads point to {', '.join(facts.get('hosts', [])[:3]) or 'no domain'}")
+                if chosen:
                     break
-                rejected.append(f"{pname}: ads point to {', '.join(facts.get('hosts', [])[:3]) or 'no domain'}")
+            if not any_cands:
+                COUNTRY[0] = "US"
+                return {"ok": False, "reason": f"no advertiser found in the Ad Library for {domain} or {company}"}
             if not chosen:
-                return {"ok": False, "reason": "brand check failed: " + "; ".join(rejected)[:300], "candidates": [c[1] for c in cands]}
+                COUNTRY[0] = "US"
+                return {"ok": False, "reason": "brand check failed: " + "; ".join(rejected)[:300]}
             if chosen["active"] < 1:
                 return {"ok": False, "reason": f"{chosen['page_name']} has no active ads right now ({chosen['total']} in the library), so there is nothing true to show", "facts": chosen}
             display = business if name_close(business, chosen["page_name"]) else chosen["page_name"]

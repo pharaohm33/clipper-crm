@@ -69,6 +69,10 @@ By hand, once per computer: in the CRM press "Connect Loom" and log in (the help
 - tools/email_ai_check.py: reports the quick check per lead at once, then asks Google AI 5 addresses per (single-line) question and reports each lead as it is answered, so a cut-short run keeps what it learned. Turn it on in "Automatic mode and settings".
 - Loom upload: finds the new video as the library card that was not there before (Loom auto-renames uploads), retries the rename, and Stop cancels it.
 
+## Ad Library lookup and template tracking (Oct 17)
+- ad_video.make(): US Ad Library first; if nothing there is this brand (no candidates, or the brand check fails), it looks in the all-countries Ad Library, but only at pages named like the brand (finds UK/Canadian shops such as homemadebrownie.co.uk). HALCRUS rows carry no ad data (the "why" text is the same generic scoring blurb), so nothing in them can predict who advertises.
+- Each lead in the advertisers table shows its template: Template 2 (Loom) sent / scheduled / draft saved, Template 1 sent, "Free for Template 1" (no Loom possible: no Meta ads found or ads are not this brand), Not used yet, or Do not email. Filter buttons above the table. The "1 · First email" button writes drafts for the Free leads first (metaFresh sorts them first and skips leads whose email is not usable). HALCRUS leads now also keep their category (l.category) for later learning which categories advertise.
+
 ## Photo
 tools/assets/narrator.jpg is cropped with the face centered in the circle bubble.
 
