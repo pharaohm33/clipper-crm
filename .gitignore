@@ -23,3 +23,7 @@ tools/.venv/
 tools/.vibevoice/
 tools/.vibevoice_venv/
 tools/.kokoro_venv/
+tools/.halcrus_profile/
+tools/halcrus_session.json
+tools/halcrus_state.json
+tools/send_queue.json

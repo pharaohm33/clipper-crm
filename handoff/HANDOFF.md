@@ -20,6 +20,13 @@ By hand, once per computer: in the CRM press "Connect Loom" and log in (the help
 - SPEED = 1.25 in ad_video.py (1.0 = the voice's own speed).
 - VibeVoice-Realtime was tried (tools/.vibevoice, ignored by git): fixed preset voices only, no cloning, not used.
 
+## Start outreach button, HALCRUS leads and the scheduled-send queue (CRM, Meta Ads tab)
+- "Start outreach": if fewer leads are ready than "Videos per press", it asks HALCRUS for more (tools/halcrus_leads.py: its own Chrome profile tools/.halcrus_profile, log in once with "Connect HALCRUS"; reads /leads with the page's tier dropdown (Hot by default), skips leads already in the CRM, "weaker fit" rows, repeat brand domains, and remembers the page it reached in tools/halcrus_state.json). Then it makes the videos (3 at a time, more rounds if a brand check rejects some), uploads to Loom, saves drafts and queues the sends.
+- Scheduled sends live in the helper (tools/send_queue.py, file tools/send_queue.json, thread started by local_runner): each approved email gets a slot (now if inside the sending hours and an inbox has capacity left, else the next sending day, spread by min/max_delay_seconds and capped by the inboxes' warm-up and daily limits). They go out even if the CRM page is closed, as long as the helper runs and the Mac is awake.
+- The queue is the memory of when each email goes out, kept until it is sent (sent entries 7 more days). States: scheduled, sending, sent, canceled, failed (3 refused sends), bounced, skipped. When one drops out the ones behind it move up; a send blocked by the day ending or a cap moves to the next free slot. A bounce found in the inbox marks it bounced and it is never retried. Cancel / Reschedule buttons are in the "Scheduled sends" table. The page applies the queue's state to the leads (sent, bounced, canceled), and a lead that was canceled, failed, bounced or skipped is never queued again by itself.
+- Helper endpoints: /queue/add (needs confirm: true), /queue/list, /queue/cancel, /queue/reschedule, /halcrus/status, /halcrus/login, /halcrus/leads.
+- Restart the helper after pulling these changes.
+
 ## Photo
 tools/assets/narrator.jpg is cropped with the face centered in the circle bubble.
 

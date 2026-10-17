@@ -16,7 +16,7 @@ from urllib.parse import urlparse, parse_qs
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-import cold_email, email_finder, personalize, auto_reply, phone_finder, coach_finder, meta_reply, greeting
+import cold_email, email_finder, personalize, auto_reply, phone_finder, coach_finder, meta_reply, greeting, send_queue
 SCRIPT = os.getenv("RUNNER_SCRIPT", str(HERE / "google_ai_to_crm.py"))
 PORT = int(os.getenv("RUNNER_PORT", "8765"))
 APP_URL = os.getenv("CLIPPER_URL", "http://127.0.0.1:5001").rstrip("/")
@@ -830,6 +830,57 @@ def pause_state():
         return {}
 
 
+def run_halcrus_login():
+    """Opens a visible Chrome window (with the helper's own saved profile) for the one-time HALCRUS login."""
+    try:
+        import halcrus_leads
+        halcrus_leads.login(timeout=600, log=log)
+        log("[runner] HALCRUS login finished.")
+    finally:
+        STATE["running"] = False
+
+
+def run_halcrus_leads(want, emails, companies, tier):
+    """Reads new leads from the HALCRUS portal and streams 'HALCRUS {json}' per lead, then 'HALCRUSEND {json}'."""
+    try:
+        import halcrus_leads
+        leads = halcrus_leads.fetch(want, emails, companies, tier=tier, log=log)
+        for ld in leads:
+            log("HALCRUS " + json.dumps(ld))
+        log("HALCRUSEND " + json.dumps({"found": len(leads)}))
+    except Exception as e:
+        log("HALCRUSEND " + json.dumps({"found": 0, "error": str(e)[:200], "needs_login": e.__class__.__name__ == "NotLoggedIn"}))
+    finally:
+        STATE["running"] = False
+
+
+QUEUE_TICK = 20
+QUEUE_RECONCILE = 1800
+
+
+def queue_loop():
+    """The scheduled-send queue (tools/send_queue.py): sends each approved email at its slot, whether or not the CRM page is open."""
+    try:
+        send_queue.recover()
+    except Exception as e:
+        print("send queue recover:", e)
+    last = 0
+    while True:
+        time.sleep(QUEUE_TICK)
+        try:
+            if time.time() - last > QUEUE_RECONCILE:
+                last = time.time()
+                send_queue.prune()
+                send_queue.reconcile()
+            if STATE["running"] or not email_status()["ready"]:
+                continue
+            r = send_queue.tick(paused=lambda c: bool(pause_state().get(c or "meta")))
+            if r:
+                print("send queue:", r)
+        except Exception as e:
+            print("send queue error:", e)
+
+
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
@@ -1097,6 +1148,51 @@ class H(BaseHTTPRequestHandler):
                 PIPE["stop"] = False
                 threading.Thread(target=run_find_phones, args=(leads, bool(body.get("ai", True)), str(body.get("prompt") or "")[:3000] or None), daemon=True).start()
             return self._send(200, {"ok": True, "leads": len(leads)})
+        if self.path == "/queue/add":
+            if body.get("confirm") is not True:
+                return self._send(400, {"error": "scheduling sends needs confirm: true"})
+            st = email_status()
+            if not st["ready"]:
+                return self._send(400, {"error": "; ".join(st["problems"])})
+            tpl = body.get("template") or {}
+            if not (str(tpl.get("subject") or "").strip() and str(tpl.get("body") or "").strip()) and not (tpl.get("library") or []):
+                return self._send(400, {"error": "no email template, so nothing was scheduled"})
+            items = [{"id": str(b.get("id") or "")[:80], "to": str(b.get("to") or (b.get("lead") or {}).get("email") or "")[:200], "company": str(b.get("company") or "")[:80],
+                      "lead": b.get("lead") or {}, "template": tpl, "campaign": str(body.get("campaign") or "meta"), "step": int(body.get("step") or 0)} for b in (body.get("items") or [])][:60]
+            return self._send(200, {"items": send_queue.add(items)})
+        if self.path == "/queue/list":
+            st = email_status()
+            return self._send(200, {"items": send_queue.listing(), "now": time.time(), "in_send_window": st["in_send_window"], "window": st["window"], "capacity_left": st["capacity_left"], "ready": st["ready"]})
+        if self.path == "/queue/cancel":
+            return self._send(200, {"ok": send_queue.cancel(str(body.get("id") or ""))})
+        if self.path == "/queue/reschedule":
+            when = body.get("when")
+            return self._send(200, {"due_at": send_queue.reschedule(str(body.get("id") or ""), float(when) if when else None)})
+        if self.path == "/halcrus/status":
+            import halcrus_leads
+            ok, at = halcrus_leads.connected()
+            return self._send(200, {"connected": ok, "at": at})
+        if self.path == "/halcrus/login":
+            with LOCK:
+                if STATE["running"]:
+                    return self._send(409, {"error": "a run is already in progress"})
+                STATE.update(running=True, log=["[runner] opening HALCRUS so you can log in (a Chrome window will appear)"])
+                threading.Thread(target=run_halcrus_login, daemon=True).start()
+            return self._send(200, {"ok": True})
+        if self.path == "/halcrus/leads":
+            tier = str(body.get("tier") or "Hot")
+            if tier not in ("Hot", "Warm", "Nurture", "All"):
+                tier = "Hot"
+            want = max(1, min(40, int(body.get("want") or 10)))
+            emails = [str(x)[:200] for x in (body.get("known_emails") or [])][:20000]
+            companies = [str(x)[:120] for x in (body.get("known_companies") or [])][:20000]
+            with LOCK:
+                if STATE["running"]:
+                    return self._send(409, {"error": "a run is already in progress"})
+                STATE.update(running=True, log=[f"[runner] looking for {want} more {tier} leads in HALCRUS"])
+                PIPE["stop"] = False
+                threading.Thread(target=run_halcrus_leads, args=(want, emails, companies, tier), daemon=True).start()
+            return self._send(200, {"ok": True})
         if self.path == "/loom/status":
             import loom_upload
             ok, at = loom_upload.connected()
@@ -1276,6 +1372,7 @@ if __name__ == "__main__":
     if os.getenv("KEEP_CLIPPER_ALIVE", "1") != "0":
         threading.Thread(target=keep_clipper_awake, daemon=True).start()
     load_env()
+    threading.Thread(target=queue_loop, daemon=True).start()
     srv = ThreadingHTTPServer(("127.0.0.1", PORT), H)
     print(f"Clipper runner listening on http://127.0.0.1:{PORT}  (leave this window open, Ctrl+C to stop)")
     if not (os.getenv("CRM_SYNC_URL") and os.getenv("CRM_SYNC_PASSWORD")):

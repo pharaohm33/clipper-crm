@@ -753,7 +753,7 @@ function loomCard(){const m=meta(),cands=loomCandidates(),gm=loomGmail(),ready=c
  const gmRow=l=>{const d=l.contactedAt?Math.floor((Date.now()-l.contactedAt)/864e5):null,which=d===null?'':d>=7?'loomFu2':d>=3?'loomFu1':'';
   return `<tr><td><b>${esc(l.company)}</b><br><span class=mut>${esc(l.contacted)}</span></td><td><input type="date" data-lm-date="${esc(l.id)}" value="${l.contactedAt?new Date(l.contactedAt).toISOString().slice(0,10):''}"></td>
   <td>${d===null?'<span class=mut>enter the date you emailed them</span>':which?`<button class="b p" data-lm-copy="${esc(l.id)}|${which}">Copy ${which==='loomFu2'?'follow up 2':'follow up 1'}</button> <span class=mut>${d} days since your email</span>`:`<span class=mut>${d} day${d==1?'':'s'} since your email, follow up 1 is due on day 3</span>`}</td></tr>`};
- return `<div class="card" style="border-color:#0ea5e9"><b>Loom video outreach</b> <span class=mut>You record a short video of what you found in their Meta ads, and the email just carries the link. It can be the first email, or a second touch for someone emailed 3+ days ago who has not replied. The same person never gets the video email twice, and never right after another email.</span>
+ return `${startCard()}<div class="card" style="border-color:#0ea5e9"><b>Loom video outreach</b> <span class=mut>You record a short video of what you found in their Meta ads, and the email just carries the link. It can be the first email, or a second touch for someone emailed 3+ days ago who has not replied. The same person never gets the video email twice, and never right after another email.</span>
   <div class="row" style="margin-top:8px"><button class="b p" id="lm-draft" ${LM.busy||ES.busy||!ready?'disabled':''}>Save the Loom emails as drafts (${ready} ready)</button><button class="b p" id="lm-make" ${LM.busy||ES.busy||!ticked?'disabled':''} title="Reads their ads in the Meta Ad Library, checks the brand matches the email domain, records the page scrolling, adds a free voice, and shares the video as a link. About 2 minutes each.">Make the videos for ticked leads (${Math.min(ticked,3)} of ${ticked}, 3 at a time)</button><select id="lm-host" title="Where you will post the video. This changes what the voice says about the link."><option value="loom" ${(S.settings.videoHost||'loom')==='loom'?'selected':''}>Post on Loom (link in the comments)</option><option value="drive" ${S.settings.videoHost==='drive'?'selected':''}>Use the Drive link</option></select><select id="lm-voice" title="Free voice">${VOICES.map(([v,t])=>`<option value="${v}" ${voiceSel()===v?'selected':''}>${t}</option>`).join('')}</select><input id="lm-name" value="${esc(narratorName())}" placeholder="name said in the video (blank = none)" title="The name the voice says, as in 'it's Emmanuel'. Leave it blank to say no name. It should be the person the email is signed by." style="width:200px"><button class="b" id="lm-prev">Preview for the first ticked lead</button><span class=mut>${esc(LM.msg)}</span></div>
   <div style="border:1px solid var(--bd,#444);border-radius:8px;padding:8px;margin-top:8px"><b>Approved video to Loom to sent email</b> <span class=mut>When you tick "I watched it, approve", the video is uploaded to your Loom, gets a comment with your sign up link near the end (Loom turns it into its own clickable link on the video), and its Loom link goes into the email.</span>
    <div class="row" style="margin-top:6px"><span class=mut>Loom: <b style="color:${LM.connected?'#22c55e':'#e5a000'}">${LM.connected?'connected':LM.connected===false?'not connected':'checking…'}</b></span><button class="b" id="lp-connect" ${LM.pipeBusy||ES.busy?'disabled':''}>${LM.connected?'Reconnect Loom':'Connect Loom (log in once)'}</button>
@@ -775,7 +775,8 @@ LM.connected=null;LM.pipeBusy=false;LM.pipeMsg='';
 async function loomStatus(){try{const r=await metaApi('/loom/status',{});LM.connected=!!r.connected}catch(e){LM.connected=null}}
 const loomToUpload=()=>(S.adLeads||[]).filter(l=>l.video&&l.video.ok&&l.video.file&&l.videoApproved&&!l.loomLink&&!l.loomFail&&!l.dnc&&!l.emailedAt);
 const loomToDraft=()=>(S.adLeads||[]).filter(l=>l.videoAuto&&l.videoApproved&&l.loomLink&&!l.draftedAt&&!l.emailedAt&&!l.dnc&&!l.loomSentAt);
-const loomToSend=()=>(S.adLeads||[]).filter(l=>l.videoAuto&&l.videoApproved&&(!l.videoAutoApproved||S.settings.loomSendChecked)&&l.loomLink&&l.draftedAt&&!l.emailedAt&&!l.dnc);
+const queued=l=>['scheduled','sending','sent','canceled','failed','bounced','skipped'].includes(l.queueStatus);
+const loomToSend=()=>(S.adLeads||[]).filter(l=>l.videoAuto&&l.videoApproved&&(!l.videoAutoApproved||S.settings.loomSendChecked)&&l.loomLink&&l.draftedAt&&!l.emailedAt&&!l.dnc&&!queued(l));
 const loomTitle=l=>`A quick look at ${l.brandName||(l.greet&&l.greet.business)||l.company}'s Meta ads`;
 async function loomUploadApproved(){const todo=loomToUpload().slice(0,3);if(!todo.length)return 0;let n=0;
  await helperJob('/loom/upload',{items:todo.map(l=>({id:l.id,file:l.video.file,title:loomTitle(l),comment:meta().link})),show:!!S.settings.loomShow},t=>{const r=parseTag(t,'LOOM');if(!r)return;const l=(S.adLeads||[]).find(x=>x.id==r.id);if(!l)return;
@@ -791,17 +792,96 @@ async function loomSendApproved(){const todo=loomToSend().slice(0,8);if(!todo.le
 /* One pass of the pipeline. auto=true is the hands-free timer: it also sends, but only inside your sending hours and daily limits. */
 async function loomPipeline(auto){if(LM.pipeBusy||ES.busy)return;LM.pipeBusy=true;const say=m=>{LM.pipeMsg=m;if(tab=='ads')adsV()};
  try{
-  await loomStatus();
+  await loomStatus();await queueSync();
   const up=loomToUpload().length;
   if(up&&LM.connected===false){say('Loom is not connected. Press "Connect Loom" and log in once.');return}
   let u=0,d=0,s=0;
   if(up){say(`Uploading ${Math.min(up,3)} approved video(s) to Loom…`);u=await loomUploadApproved()}
   if(loomToDraft().length){say('Saving the emails as drafts…');d=await loomMakeDrafts()}
-  if(auto&&S.settings.loomAutoSend&&loomToSend().length){await loadEmailStatus();const st=ES.status||{};if(st.ready&&st.in_send_window&&st.capacity_left>0){say('Sending in your sending hours…');s=await loomSendApproved()}else say(`Waiting to send: ${!st.in_send_window?'outside your sending hours':'no inbox capacity left today'}.`)}
-  if(u||d||s)say(`Uploaded ${u}, saved ${d} draft(s)${auto&&S.settings.loomAutoSend?`, sent ${s}`:''}.`);else if(!up&&!loomToDraft().length&&!(auto&&loomToSend().length))say('Nothing waiting.')
+  if(auto&&S.settings.loomAutoSend&&loomToSend().length){say('Scheduling the approved emails…');s=await loomQueueApproved()}
+  if(u||d||s)say(`Uploaded ${u}, saved ${d} draft(s)${auto&&S.settings.loomAutoSend?`, scheduled ${s} to send`:''}.`);else if(!up&&!loomToDraft().length&&!(auto&&loomToSend().length))say('Nothing waiting.')
  }finally{LM.pipeBusy=false;save();if(tab=='ads')adsV()}}
 setInterval(()=>{if(S.settings.loomAuto&&!LM.pipeBusy&&!ES.busy)loomPipeline(true)},120000);
+/* ---------- Start outreach: one button. Finds more leads in HALCRUS only when the pool runs low, makes the videos, uploads, drafts, and hands the sends to the helper's own scheduled queue ---------- */
+const SO={busy:false,msg:'',log:[]},HC={connected:null},SQ={items:[],inWin:null,win:null};
+const whenText=ts=>{const d=new Date(ts*1000),n=new Date(),same=d.toDateString()===n.toDateString(),tom=d.toDateString()===new Date(n.getTime()+864e5).toDateString();return (same?'today':tom?'tomorrow':d.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'}))+' '+d.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})};
+async function hcStatus(){try{const r=await metaApi('/halcrus/status',{});HC.connected=!!r.connected}catch(e){HC.connected=null}}
+async function hcConnect(){SO.msg='A Chrome window is opening. Log in to HALCRUS there. It closes by itself when you are in.';if(tab=='ads')adsV();try{await helperJob('/halcrus/login',{},()=>{})}catch(e){}await hcStatus();SO.msg=HC.connected?'HALCRUS is connected.':'HALCRUS was not connected. Try again.';if(tab=='ads')adsV()}
+/* What the helper's queue holds is the truth about sending: apply it to the leads (sent, bounced, cancelled...) */
+async function queueSync(){try{const r=await metaApi('/queue/list',{});if(!r||!r.items)return;SQ.items=r.items;SQ.inWin=r.in_send_window;SQ.win=r.window;
+ for(const q of r.items){const l=(S.adLeads||[]).find(x=>String(x.id)===String(q.id));if(!l)continue;l.queueStatus=q.status;l.sendDue=q.due_at||0;
+  if(q.status==='sent'||q.status==='bounced'){if(!l.emailedAt){l.emailedAt=(q.sent_at||0)*1000||Date.now();l.loomSentAt=l.emailedAt}delete l.draftedAt;delete l.skipWhy;if(q.status==='bounced')l.bounced=l.bounced||Date.now()}
+  else if(q.status==='skipped')l.skipWhy=q.why||'skipped'}
+ save()}catch(e){}}
+async function loomQueueApproved(){const todo=loomToSend().slice(0,60);if(!todo.length)return 0;await metaGreet(todo);let r;
+ try{r=await metaApi('/queue/add',{confirm:true,campaign:'meta',template:metaTemplateObj(),items:todo.map(l=>({id:l.id,to:l.email,company:l.brandName||l.company,lead:metaPayload(l)}))})}catch(e){LM.pipeMsg='Helper not running, nothing was scheduled.';return 0}
+ if(!r||r.error){LM.pipeMsg='Not scheduled: '+((r&&r.error)||'no answer');return 0}
+ let n=0;for(const x of r.items||[]){const l=(S.adLeads||[]).find(y=>String(y.id)===String(x.id));if(!l)continue;if(x.status==='scheduled'){l.queueStatus='scheduled';l.sendDue=x.due_at;n++}else if(x.status==='skipped')l.skipWhy=x.why}
+ save();await queueSync();return n}
+const startPool=()=>(S.adLeads||[]).filter(l=>l.email&&!l.dnc&&!l.replied&&!l.contacted&&!l.emailedAt&&!l.loomSentAt&&!l.loomLink&&!l.bounced&&!(l.video&&(l.video.ok||l.video.madeAt))).sort((a,b)=>(!!b.top-!!a.top)||((b.score||0)-(a.score||0)));
+function addHalcrusLead(r){S.adLeads=S.adLeads||[];const have=new Set(S.adLeads.map(x=>String(x.company).toLowerCase())),em=new Set(S.adLeads.map(x=>String(x.email||'').toLowerCase()));
+ if(!r.company||have.has(r.company.toLowerCase())||em.has(String(r.email).toLowerCase()))return 0;
+ S.adLeads.push({id:'AD'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),company:r.company,web:'',fb:'',email:r.email,phones:[],person:r.name&&r.name!=='—'?r.name:'',title:'',linkedin:'',signal:r.why||'',est:'',siteEmails:r.others||[],contacted:'',score:+r.score||0,checkedAt:r.name?Date.now():0,top:1,source:'halcrus'});return 1}
+async function halcrusMore(n){await hcStatus();if(!HC.connected)return -1;
+ const adl=S.adLeads||[],known_emails=adl.flatMap(l=>[l.email,...(l.siteEmails||[])]).filter(Boolean).map(x=>String(x).toLowerCase()),known_companies=adl.map(l=>l.company).filter(Boolean);
+ let got=0,end=null;await helperJob('/halcrus/leads',{want:n,tier:S.settings.halcrusTier||'Hot',known_emails,known_companies},t=>{let r;if(r=parseTag(t,'HALCRUS'))got+=addHalcrusLead(r);else if(r=parseTag(t,'HALCRUSEND'))end=r});
+ save();if(end&&end.needs_login){HC.connected=false;return -1}if(end&&end.error)return -2;return got}
+async function makeAdVideos(todo){const by=id=>(S.adLeads||[]).find(x=>x.id==id),nm=x=>String(x||'').toLowerCase().replace(/[^a-z0-9]/g,'');
+ await helperJob('/ads/video',{items:todo.map(l=>({id:l.id,company:l.company,email:l.email,web:l.web||'',first:(l.greet&&l.greet.first)||l.company,business:(l.greet&&l.greet.business)||l.company})),voice:voiceSel(),narrator:narratorName(),product:meta().product,link:'https://portal.aiadsoptimization.com/signup',host:S.settings.videoHost||'loom'},t=>{
+  const r=parseTag(t,'ADVIDEO');if(!r)return;const l=by(r.id);if(!l)return;l.video={ok:r.ok,reason:r.reason,link:r.link,facts:r.facts,script:r.script,madeAt:Date.now()};
+  if(r.ok&&r.display_name&&nm(r.display_name)!==nm(l.company))l.brandName=r.display_name;
+  if(r.ok){l.video.file=r.file;if(r.facts&&r.facts.active)l.adsCount=r.facts.active;l.videoAuto=1;l.videoQa=r.qa||null;l.videoApproved=(r.qa&&r.qa.ok&&S.settings.videoAutoApprove!==false)?Date.now():0;l.videoAutoApproved=l.videoApproved?1:0;l.video.host=S.settings.videoHost||'loom';if(r.link&&l.video.host==='drive')l.loomLink=r.link}
+  save()});
+ return todo.filter(l=>l.video&&l.video.ok).length}
+async function startOutreach(){if(SO.busy||LM.pipeBusy||ES.busy)return;SO.busy=true;SO.log=[];const say=m=>{SO.msg=m;SO.log.push(new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})+'  '+m);if(tab=='ads')adsV()};
+ try{
+  if(!S.settings.startConfirmed){
+   if(!confirm('Start outreach will make videos, upload them to your Loom, save the emails and SCHEDULE them to send in your sending hours (the helper sends them even if this page is closed; you can cancel any of them in the table). Videos you tick yourself are always sent. Continue?'))return;
+   S.settings.startConfirmed=1;S.settings.loomAuto=true;S.settings.loomAutoSend=true;
+   S.settings.loomSendChecked=confirm('Also send the videos that pass the automatic check without you watching them?\n\nOK = yes, they are scheduled too.\nCancel = only the ones you tick "approve" on are sent (the rest wait for you).');save()}
+  const target=Math.max(1,Math.min(10,+S.settings.startTarget||3));
+  say('Checking the helper…');await loadEmailStatus();if(!ES.status){say('The helper is not running. Start it with tools/start_outreach.command, then press Start again.');return}
+  if(!ES.status.ready){say('Email is not set up yet: '+(ES.status.problems||[]).join('; '));return}
+  await queueSync();await loomStatus();
+  if(LM.connected===false)say('Note: Loom is not connected, so videos will be made but not uploaded until you press "Connect Loom".');
+  let made=0,tries=0,noHc=false;
+  while(made<target&&tries<5){tries++;
+   let pool=startPool();
+   if(pool.length<target-made&&!noHc){say(`Only ${pool.length} lead(s) ready, looking for more in HALCRUS…`);
+    const got=await halcrusMore(Math.max(10,(target-made)*3));
+    if(got===-1){say('HALCRUS is not connected. Press "Connect HALCRUS" and log in once. Continuing with the leads I have.');noHc=true}
+    else if(got===-2){say('Could not read HALCRUS right now. Continuing with the leads I have.');noHc=true}
+    else say(got?`Added ${got} new lead(s) from HALCRUS.`:'HALCRUS had no new matching leads on the pages it looked at.');
+    if(got===0)noHc=true;
+    pool=startPool()}
+   const batch=pool.slice(0,Math.min(3,target-made));if(!batch.length){say(made?'No more leads to make videos for.':'There are no leads to make videos for.');break}
+   say(`Making ${batch.length} video(s): ${batch.map(l=>l.company).join(', ')}…`);await metaGreet(batch);
+   const ok=await makeAdVideos(batch);made+=ok;
+   const bad=batch.filter(l=>!(l.video&&l.video.ok));say(`${ok} of ${batch.length} made${bad.length?`; skipped ${bad.map(l=>l.company+' ('+((l.video&&l.video.reason)||'failed')+')').join(', ')}`:''}.`)}
+  const auto=(S.adLeads||[]).filter(l=>l.videoAuto&&l.videoAutoApproved&&!l.emailedAt&&!queued(l)).length,look=(S.adLeads||[]).filter(l=>l.videoAuto&&!l.videoApproved&&!l.emailedAt&&!l.loomLink).length;
+  say(`Videos ready: ${made}.${look?` ${look} need a human look before they go on.`:''} Uploading, saving drafts and scheduling…`);
+  LM.pipeBusy=false;await loomPipeline(true);await queueSync();
+  const act=(SQ.items||[]).filter(x=>x.status==='scheduled'),nx=act.length?Math.min(...act.map(x=>x.due_at)):0;
+  say(act.length?`${act.length} email(s) scheduled. The first goes out ${whenText(nx)}.`:(LM.connected===false?'Videos are ready. Connect Loom, then press Start again to upload and schedule them.':'Nothing scheduled yet; anything that needs your approval is listed above.'));
+ }catch(e){say('Stopped: '+(e&&e.message||e))}finally{SO.busy=false;save();if(tab=='ads')adsV()}}
+const sqLabel={scheduled:'scheduled',sending:'sending now',sent:'sent',canceled:'canceled',failed:'failed',bounced:'bounced',skipped:'skipped'};
+function sqTable(){const q=SQ.items||[];if(!q.length)return '';const cnt=k=>q.filter(x=>x.status===k).length;
+ const row=x=>{const h=(x.history||[]).slice(-1)[0],note=h?`${h.event}${h.note?': '+h.note:''}`:'',act=x.status==='scheduled'?`<button class="b" data-sq="cancel" data-id="${esc(x.id)}">Cancel</button>`:(x.status==='canceled'||x.status==='failed')?`<button class="b" data-sq="resched" data-id="${esc(x.id)}">Reschedule</button>`:'',ts=(x.status==='scheduled'||x.status==='sending')?x.due_at:x.sent_at;
+  return `<tr><td><b>${esc(x.company||x.to)}</b><br><span class=mut>${esc(x.to)}</span></td><td>${sqLabel[x.status]||esc(x.status)}${x.replied?' · replied':''}</td><td>${ts?esc(whenText(ts)):''}</td><td class=mut>${esc(note)}</td><td>${act}</td></tr>`};
+ return `<div class="tw" style="margin-top:8px"><b>Scheduled sends</b> <span class=mut>${cnt('scheduled')} waiting · ${cnt('sent')} sent · ${cnt('bounced')} bounced · ${cnt('canceled')+cnt('failed')} need a decision. The helper keeps this list until each email is really sent, and moves the rest up when one drops out.</span><table><tr><th>Lead</th><th>Status</th><th>When</th><th>Last note</th><th></th></tr>${q.slice(0,40).map(row).join('')}</table></div>`}
+function startCard(){const st=ES.status||{},w=st.window||SQ.win||{start_hour:9,end_hour:17};
+ return `<div class="card" style="border-color:var(--acc)"><b>Start outreach</b> <span class=mut>One button. It finds more leads in HALCRUS only when you are running low, makes the videos, checks them, uploads them to Loom, saves the emails and schedules each one for your sending hours (${w.start_hour}:00 to ${w.end_hour}:00). Anything approved outside those hours waits in the queue and goes out by itself when they open, even if this page is closed.</span>
+  <div class="row" style="margin-top:8px"><button class="b p" id="so-go" ${SO.busy||LM.pipeBusy||ES.busy?'disabled':''}>${SO.busy?'Working…':'Start outreach'}</button>
+  <label>Videos per press <input type="number" id="so-n" min="1" max="10" value="${+S.settings.startTarget||3}" style="width:56px"></label>
+  <span class=mut>HALCRUS: <b style="color:${HC.connected?'#22c55e':'#e5a000'}">${HC.connected?'connected':HC.connected===false?'not connected':'checking…'}</b></span><button class="b" id="so-hc" ${SO.busy||ES.busy?'disabled':''}>${HC.connected?'Reconnect HALCRUS':'Connect HALCRUS (log in once)'}</button></div>
+  <div class=mut style="margin-top:6px">${esc(SO.msg||'')}</div>${SO.log.length?`<details style="margin-top:4px"><summary class=mut>What it did</summary><div class=mut>${SO.log.slice(-14).map(esc).join('<br>')}</div></details>`:''}${sqTable()}</div>`}
+document.addEventListener('click',async e=>{const b=e.target.closest('[data-sq]');if(!b)return;const id=b.dataset.id;b.disabled=true;
+ try{if(b.dataset.sq==='cancel')await metaApi('/queue/cancel',{id});else await metaApi('/queue/reschedule',{id})}catch(_){}
+ await queueSync();if(tab=='ads')adsV()});
+setInterval(()=>{queueSync().then(()=>{if(tab=='ads'&&!SO.busy&&!LM.pipeBusy&&!ES.busy)adsV()})},60000);
+setTimeout(()=>{queueSync();hcStatus()},3000);
 function loomWire(){const g=id=>document.getElementById(id),by=id=>(S.adLeads||[]).find(x=>x.id==id),sync=()=>{if(tab=='ads')adsV()};
+ if(g('so-go')){g('so-go').onclick=()=>startOutreach();g('so-hc').onclick=()=>hcConnect();g('so-n').onchange=e=>{S.settings.startTarget=Math.max(1,Math.min(10,+e.target.value||3));save()}}
  document.querySelectorAll('[data-lm-sel]').forEach(c=>c.onchange=()=>{LM.sel[c.dataset.lmSel]=c.checked;const n=loomCandidates().filter(l=>LM.sel[l.id]&&!l.loomLink).length,b=g('lm-make');if(b){b.textContent=`Make the videos for ticked leads (${Math.min(n,3)} of ${n}, 3 at a time)`;b.disabled=LM.busy||ES.busy||!n}});
 
  g('lp-show').onchange=e=>{S.settings.loomShow=e.target.checked;save()};
