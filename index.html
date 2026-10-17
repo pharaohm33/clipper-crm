@@ -818,7 +818,7 @@ async function loomQueueApproved(){const todo=loomToSend().slice(0,60);if(!todo.
  if(!r||r.error){LM.pipeMsg='Not scheduled: '+((r&&r.error)||'no answer');return 0}
  let n=0;for(const x of r.items||[]){const l=(S.adLeads||[]).find(y=>String(y.id)===String(x.id));if(!l)continue;if(x.status==='scheduled'){l.queueStatus='scheduled';l.sendDue=x.due_at;n++}else if(x.status==='skipped')l.skipWhy=x.why}
  save();await queueSync();return n}
-const startPool=()=>(S.adLeads||[]).filter(l=>l.email&&!l.dnc&&!l.replied&&!l.contacted&&!l.emailedAt&&!l.loomSentAt&&!l.loomLink&&!l.bounced&&!(l.video&&(l.video.ok||l.video.madeAt))).sort((a,b)=>(!!b.top-!!a.top)||((b.score||0)-(a.score||0)));
+const startPool=()=>(S.adLeads||[]).filter(l=>l.email&&!l.dnc&&!l.replied&&!l.contacted&&!l.emailedAt&&!l.loomSentAt&&!l.loomLink&&!l.bounced&&!queued(l)&&!(l.video&&(l.video.ok||l.video.madeAt))).sort((a,b)=>(!!b.top-!!a.top)||((b.score||0)-(a.score||0)));
 function addHalcrusLead(r){S.adLeads=S.adLeads||[];const have=new Set(S.adLeads.map(x=>String(x.company).toLowerCase())),em=new Set(S.adLeads.map(x=>String(x.email||'').toLowerCase()));
  if(!r.company||have.has(r.company.toLowerCase())||em.has(String(r.email).toLowerCase()))return 0;
  S.adLeads.push({id:'AD'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),company:r.company,web:'',fb:'',email:r.email,phones:[],person:r.name&&r.name!=='—'?r.name:'',title:'',linkedin:'',signal:r.why||'',est:'',siteEmails:r.others||[],contacted:'',score:+r.score||0,checkedAt:r.name?Date.now():0,top:1,source:'halcrus'});return 1}
@@ -833,13 +833,13 @@ async function makeAdVideos(todo){const by=id=>(S.adLeads||[]).find(x=>x.id==id)
   if(r.ok){l.video.file=r.file;if(r.facts&&r.facts.active)l.adsCount=r.facts.active;l.videoAuto=1;l.videoQa=r.qa||null;l.videoApproved=(r.qa&&r.qa.ok&&S.settings.videoAutoApprove!==false)?Date.now():0;l.videoAutoApproved=l.videoApproved?1:0;l.video.host=S.settings.videoHost||'loom';if(r.link&&l.video.host==='drive')l.loomLink=r.link}
   save()});
  return todo.filter(l=>l.video&&l.video.ok).length}
-async function startOutreach(){if(SO.busy||LM.pipeBusy||ES.busy)return;SO.busy=true;SO.log=[];const say=m=>{SO.msg=m;SO.log.push(new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})+'  '+m);if(tab=='ads')adsV()};
+async function startOutreach(count){if(SO.busy||LM.pipeBusy||ES.busy)return;SO.busy=true;SO.log=[];const say=m=>{SO.msg=m;SO.log.push(new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})+'  '+m);if(tab=='ads')adsV()};
  try{
   if(!S.settings.startConfirmed){
-   if(!confirm('Start outreach will make videos, upload them to your Loom, save the emails and SCHEDULE them to send in your sending hours (the helper sends them even if this page is closed; you can cancel any of them in the table). Videos you tick yourself are always sent. Continue?'))return;
-   S.settings.startConfirmed=1;S.settings.loomAuto=true;S.settings.loomAutoSend=true;
+   if(!confirm('Start outreach will make videos, upload them to your Loom, save the emails and SCHEDULE them to send in your sending hours (the helper sends them even if this page is closed; you can cancel any of them in the table). Videos you tick yourself are always sent.\n\nIt will then keep going by itself while this page is open (you can switch that off in the Start card). Continue?'))return;
+   S.settings.startConfirmed=1;S.settings.loomAuto=true;S.settings.loomAutoSend=true;S.settings.autoStart=true;
    S.settings.loomSendChecked=confirm('Also send the videos that pass the automatic check without you watching them?\n\nOK = yes, they are scheduled too.\nCancel = only the ones you tick "approve" on are sent (the rest wait for you).');save()}
-  const target=Math.max(1,Math.min(10,+S.settings.startTarget||3));
+  const target=Math.max(1,Math.min(10,+count>0?+count:(+S.settings.startTarget||3)));
   say('Checking the helper…');await loadEmailStatus();if(!ES.status){say('The helper is not running. Start it with tools/start_outreach.command, then press Start again.');return}
   if(!ES.status.ready){say('Email is not set up yet: '+(ES.status.problems||[]).join('; '));return}
   await queueSync();await loomStatus();
@@ -874,14 +874,36 @@ function startCard(){const st=ES.status||{},w=st.window||SQ.win||{start_hour:9,e
   <div class="row" style="margin-top:8px"><button class="b p" id="so-go" ${SO.busy||LM.pipeBusy||ES.busy?'disabled':''}>${SO.busy?'Working…':'Start outreach'}</button>
   <label>Videos per press <input type="number" id="so-n" min="1" max="10" value="${+S.settings.startTarget||3}" style="width:56px"></label>
   <span class=mut>HALCRUS: <b style="color:${HC.connected?'#22c55e':'#e5a000'}">${HC.connected?'connected':HC.connected===false?'not connected':'checking…'}</b></span><button class="b" id="so-hc" ${SO.busy||ES.busy?'disabled':''}>${HC.connected?'Reconnect HALCRUS':'Connect HALCRUS (log in once)'}</button></div>
+  <div class="row" style="margin-top:4px"><label><input type="checkbox" id="so-auto" ${S.settings.autoStart?'checked':''}> Keep going by itself while this page is open: whenever fewer than <input type="number" id="so-keep" min="1" max="60" value="${+S.settings.keepScheduled||15}" style="width:56px"> emails are scheduled or on their way, find leads, make videos and schedule more</label></div>
   <div class=mut style="margin-top:6px">${esc(SO.msg||'')}</div>${SO.log.length?`<details style="margin-top:4px"><summary class=mut>What it did</summary><div class=mut>${SO.log.slice(-14).map(esc).join('<br>')}</div></details>`:''}${sqTable()}</div>`}
 document.addEventListener('click',async e=>{const b=e.target.closest('[data-sq]');if(!b)return;const id=b.dataset.id;b.disabled=true;
  try{if(b.dataset.sq==='cancel')await metaApi('/queue/cancel',{id});else await metaApi('/queue/reschedule',{id})}catch(_){}
  await queueSync();if(tab=='ads')adsV()});
 setInterval(()=>{queueSync().then(()=>{if(tab=='ads'&&!SO.busy&&!LM.pipeBusy&&!ES.busy)adsV()})},60000);
 setTimeout(()=>{queueSync();hcStatus()},3000);
+/* ---------- Keep going by itself: no button press. Every 10 minutes (and when the page opens) it tops the pipeline up, with guards ---------- */
+async function notifyNeeds(title,message,key){try{await fetch(RUNNER+'/notify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,message,key,every:21600})})}catch(e){}}
+async function autoKeep(){const g=S.settings;if(!g.autoStart||!g.startConfirmed||SO.busy||LM.pipeBusy||ES.busy)return;if(Date.now()<(g.autoStartAfter||0))return;
+ const later=(h,why)=>{g.autoStartAfter=Date.now()+h*3600e3;save();if(why)SO.msg=why;if(tab=='ads')adsV()};
+ try{await loadEmailStatus();if(!ES.status||!ES.status.ready)return;
+  if(ES.status.paused&&ES.status.paused.meta)return;
+  await queueSync();
+  const act=(SQ.items||[]).filter(x=>x.status==='scheduled'||x.status==='sending').length,
+   flight=(S.adLeads||[]).filter(l=>l.videoAuto&&l.videoApproved&&!l.emailedAt&&!l.dnc&&!l.loomFail&&!queued(l)).length,
+   look=(S.adLeads||[]).filter(l=>l.videoAuto&&!l.videoApproved&&!l.emailedAt&&!l.dnc&&!l.loomLink&&l.video&&l.video.ok).length,
+   keep=Math.max(1,Math.min(60,+g.keepScheduled||15)),need=keep-act-flight;
+  if(need<=0)return;
+  if(look>=5){notifyNeeds('Videos need a look',`${look} videos did not pass the automatic check and are waiting for you in the CRM (Meta Ads tab). Nothing new is being made until you review them.`,'look');return later(1)}
+  await loomStatus();if(LM.connected===false){notifyNeeds('Loom needs you','Loom is not connected, so new videos cannot be uploaded. Open the CRM, Meta Ads tab, and press Connect Loom.','loom-login');return later(1,'Waiting for you to connect Loom.')}
+  await startOutreach(Math.min(10,need));await queueSync();
+  const after=(SQ.items||[]).filter(x=>x.status==='scheduled'||x.status==='sending').length;
+  if(after<=act){if(HC.connected===false)notifyNeeds('HALCRUS needs you','HALCRUS is not connected, so no new leads can be found. Open the CRM, Meta Ads tab, and press Connect HALCRUS.','hc-login');later(3)}
+ }catch(e){}}
+setInterval(autoKeep,600000);setTimeout(autoKeep,30000);
 function loomWire(){const g=id=>document.getElementById(id),by=id=>(S.adLeads||[]).find(x=>x.id==id),sync=()=>{if(tab=='ads')adsV()};
- if(g('so-go')){g('so-go').onclick=()=>startOutreach();g('so-hc').onclick=()=>hcConnect();g('so-n').onchange=e=>{S.settings.startTarget=Math.max(1,Math.min(10,+e.target.value||3));save()}}
+ if(g('so-go')){g('so-go').onclick=()=>startOutreach();g('so-hc').onclick=()=>hcConnect();g('so-n').onchange=e=>{S.settings.startTarget=Math.max(1,Math.min(10,+e.target.value||3));save()};
+  g('so-auto').onchange=e=>{S.settings.autoStart=e.target.checked;if(e.target.checked&&!S.settings.startConfirmed){e.target.checked=false;S.settings.autoStart=false;alert('Press Start outreach once first; it asks the questions that decide what may be sent.');return}S.settings.autoStartAfter=0;save();if(e.target.checked)setTimeout(autoKeep,500)};
+  g('so-keep').onchange=e=>{S.settings.keepScheduled=Math.max(1,Math.min(60,+e.target.value||15));save()}}
  document.querySelectorAll('[data-lm-sel]').forEach(c=>c.onchange=()=>{LM.sel[c.dataset.lmSel]=c.checked;const n=loomCandidates().filter(l=>LM.sel[l.id]&&!l.loomLink).length,b=g('lm-make');if(b){b.textContent=`Make the videos for ticked leads (${Math.min(n,3)} of ${n}, 3 at a time)`;b.disabled=LM.busy||ES.busy||!n}});
 
  g('lp-show').onchange=e=>{S.settings.loomShow=e.target.checked;save()};

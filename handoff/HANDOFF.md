@@ -27,6 +27,13 @@ By hand, once per computer: in the CRM press "Connect Loom" and log in (the help
 - Helper endpoints: /queue/add (needs confirm: true), /queue/list, /queue/cancel, /queue/reschedule, /halcrus/status, /halcrus/login, /halcrus/leads.
 - Restart the helper after pulling these changes.
 
+## Running by itself once you are logged in
+- Logins you do once (CRM, Meta Ads tab): Connect Loom, Connect HALCRUS. Everything else runs without clicks.
+- "Keep going by itself" (Start outreach card, on after the first Start press, off switch included): every 10 minutes while the CRM page is open, if fewer than N emails are scheduled or on their way (default 15), it finds leads in HALCRUS, makes videos, uploads, drafts and schedules more. Guards: it stops and alerts your phone if 5 videos wait for a human look, if Loom or HALCRUS needs a login, and waits 1 to 3 hours after a run that added nothing.
+- The helper keeps the Mac from idle-sleeping (caffeinate, renewed) while any email is due in the next 13 hours, and releases it when the queue is empty. Closing a laptop lid still sleeps it unless it is on power with an external display.
+- Phone alerts (Telegram, PHONE_BOT_TOKEN and PHONE_CHAT_ID in tools/.env): Loom or HALCRUS needs a login, a send failed for good, a send was skipped, bounces, and one summary at the end of each sending day.
+- tools/install_autostart.sh (not installed by default): starts the helper at every login and restarts it if it stops; --open-crm also opens the CRM page at login (the keep-going loop runs in that page); --remove undoes it; --print shows what it writes.
+
 ## Photo
 tools/assets/narrator.jpg is cropped with the face centered in the circle bubble.
 

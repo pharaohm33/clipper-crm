@@ -11,6 +11,7 @@ tools/.env (copy tools/.env.example) and are never sent to the browser.
 import json, os, random, re, subprocess, sys, threading, time
 import urllib.request, urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
@@ -693,6 +694,7 @@ def run_loom_upload(items, show):
                 res = loom_upload.upload_and_comment(f, it.get("title") or "A quick look at your Meta ads", it.get("comment") or "", show=show, log=log)
             log("LOOM " + json.dumps({"id": it.get("id"), **res}))
             if res.get("needs_login"):
+                phone_notify("Loom needs you", "Loom asked for a login again, so videos are waiting. Open the CRM, Meta Ads tab, and press Connect Loom.", key="loom-login", every=6 * 3600)
                 break
             if n < len(items) - 1:
                 time.sleep(random.uniform(5, 9))
@@ -850,12 +852,55 @@ def run_halcrus_leads(want, emails, companies, tier):
         log("HALCRUSEND " + json.dumps({"found": len(leads)}))
     except Exception as e:
         log("HALCRUSEND " + json.dumps({"found": 0, "error": str(e)[:200], "needs_login": e.__class__.__name__ == "NotLoggedIn"}))
+        if e.__class__.__name__ == "NotLoggedIn":
+            phone_notify("HALCRUS needs you", "HALCRUS asked for a login again, so no new leads can be found. Open the CRM, Meta Ads tab, and press Connect HALCRUS.", key="hc-login", every=6 * 3600)
     finally:
         STATE["running"] = False
 
 
 QUEUE_TICK = 20
 QUEUE_RECONCILE = 1800
+
+
+QUEUE_AWAKE = {"mine": False}
+
+
+def queue_keep_awake():
+    """While emails are waiting to go out in the next 13 hours the Mac is kept from idle-sleeping (caffeinate, renewed before it ends), and released when the queue is empty.
+    Closing the lid still sleeps a laptop unless it is on power with an external display."""
+    now = time.time()
+    soon = [i for i in send_queue.listing() if i["status"] in ("scheduled", "sending") and (i.get("due_at") or 0) - now < 13 * 3600]
+    st = awake_status()
+    if soon:
+        if not st["on"] or st["seconds_left"] < 1800:
+            awake_set(True, 720)
+            QUEUE_AWAKE["mine"] = True
+    elif QUEUE_AWAKE["mine"]:
+        if st["on"]:
+            awake_set(False)
+        QUEUE_AWAKE["mine"] = False
+
+
+def queue_alerts(r=None, bounced=0):
+    """Phone alerts for what needs a person: a send that failed for good, a skip, bounces, and one short summary at the end of each sending day."""
+    if r and r.get("status") == "failed":
+        phone_notify("A send failed", f"{r.get('id')}: {str(r.get('why') or '')[:120]}. It is in the Scheduled sends table; Reschedule it when fixed.", key="send-fail-" + str(r.get("id")), every=86400)
+    if r and r.get("status") == "skipped":
+        phone_notify("A send was skipped", f"{r.get('id')}: {str(r.get('why') or '')[:120]}", key="send-skip-" + str(r.get("id")), every=86400)
+    if bounced:
+        phone_notify("Bounces", f"{bounced} email(s) bounced. They will not be retried.", key="bounce-" + time.strftime("%Y%m%d%H"), every=3600)
+    cfg = cold_email.load_config()
+    now = datetime.now()
+    if now.hour >= int((cfg.get("send_window") or {}).get("end_hour", 17)):
+        items = send_queue.listing()
+        today = now.date()
+        sent = [i for i in items if i["status"] == "sent" and i.get("sent_at") and datetime.fromtimestamp(i["sent_at"]).date() == today]
+        left = [i for i in items if i["status"] in ("scheduled", "sending")]
+        bad = [i for i in items if i["status"] in ("failed", "bounced", "canceled") ]
+        if sent or left:
+            nxt = min((i["due_at"] for i in left if i.get("due_at")), default=0)
+            phone_notify("Today's sending", f"Sent {sent and len(sent) or 0} today, {len(left)} still scheduled{(' (next ' + datetime.fromtimestamp(nxt).strftime('%a %-I:%M %p') + ')') if nxt else ''}, {len(bad)} need a look.",
+                         key="summary-" + today.isoformat(), every=86400)
 
 
 def queue_loop():
@@ -868,15 +913,19 @@ def queue_loop():
     while True:
         time.sleep(QUEUE_TICK)
         try:
+            n = 0
             if time.time() - last > QUEUE_RECONCILE:
                 last = time.time()
                 send_queue.prune()
-                send_queue.reconcile()
+                n = send_queue.reconcile()
+            queue_keep_awake()
             if STATE["running"] or not email_status()["ready"]:
+                queue_alerts(None, n)
                 continue
             r = send_queue.tick(paused=lambda c: bool(pause_state().get(c or "meta")))
             if r:
                 print("send queue:", r)
+            queue_alerts(r, n)
         except Exception as e:
             print("send queue error:", e)
 
