@@ -147,8 +147,25 @@ def phone_ready():
     return bool(os.getenv("PHONE_BOT_TOKEN") and os.getenv("PHONE_CHAT_ID"))
 
 
-def phone_notify(title, message, key=None, every=600):
+NOTIFY_PREFS = HERE / "notify_prefs.json"
+
+
+def notify_prefs():
+    try:
+        return json.loads(NOTIFY_PREFS.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def clips_alerts():
+    """Alerts about the podcast clips side (the Clipper app restarting, Autopilot, drafts from podcast leads). Off unless you switch them on in the CRM settings."""
+    return bool(notify_prefs().get("clips"))
+
+
+def phone_notify(title, message, key=None, every=600, topic=""):
     """A push message to your phone through your Telegram bot. The same alert is not repeated within `every` seconds. Returns True if sent."""
+    if topic == "clips" and not clips_alerts():
+        return False
     if not phone_ready():
         return False
     k = key or title
@@ -686,6 +703,132 @@ def run_ad_video(items, voice, product, link=None, host="loom", narrator=None):
         STATE["running"] = False
 
 
+CFORM_LOG = HERE / "contact_form_log.jsonl"
+
+
+def cform_today():
+    """How many contact-form messages this helper sent (or may have sent) today."""
+    n, day = 0, time.strftime("%Y-%m-%d")
+    try:
+        for line in CFORM_LOG.read_text(encoding="utf-8").splitlines():
+            e = json.loads(line)
+            if e.get("day") == day and e.get("status") in ("sent", "unsure"):
+                n += 1
+    except Exception:
+        pass
+    return n
+
+
+def cform_record(id_, url, status):
+    with open(CFORM_LOG, "a", encoding="utf-8") as f:
+        f.write(json.dumps({"ts": time.time(), "day": time.strftime("%Y-%m-%d"), "id": id_, "url": url, "status": status}) + "\n")
+
+
+def cform_values(body):
+    """Who the message comes from: the sender's name, the Reply-To inbox (answers must reach the inbox this tool reads), the phone; subject, company and website from the page."""
+    cfg = cold_email.load_config()
+    v = body.get("values") or {}
+    mail = cfg.get("reply_to") or ((cfg.get("accounts") or [{}])[0].get("email") or "")
+    return {"name": str(cfg.get("sender_name") or "Emmanuel"), "email": mail, "phone": str(cfg.get("phone") or ""), "subject": str(v.get("subject") or "")[:150],
+            "company": str(v.get("company") or "")[:100], "website": str(v.get("website") or "")[:200]}
+
+
+def run_cform_find(items):
+    """Looks for a contact form on each lead's website and streams 'CFORM {json}' (id plus what was found)."""
+    try:
+        import contact_form
+        for n, it in enumerate(items):
+            if PIPE["stop"]:
+                break
+            log(f"[{n + 1}/{len(items)}] looking for a contact form: {it.get('domain') or it.get('web')}")
+            try:
+                res = contact_form.find(it.get("domain") or it.get("web") or "", web=it.get("web") or "", log=log)
+            except Exception as e:
+                res = {"found": False, "why": "error: " + str(e)[:120], "error": True}
+            log("CFORM " + json.dumps({"id": it.get("id"), **res}))
+        log("[runner] contact form look finished.")
+    finally:
+        STATE["running"] = False
+
+
+def run_cform_send(items, body):
+    """Sends each message through its lead's contact form (only forms without a CAPTCHA), spaced out, up to the daily limit. Streams 'CFORMSEND {json}'."""
+    try:
+        import contact_form
+        values = cform_values(body)
+        limit = int(cold_email.load_config().get("cform_daily_limit") or 25)
+        for n, it in enumerate(items):
+            if PIPE["stop"]:
+                break
+            if cform_today() >= limit:
+                log("CFORMSEND " + json.dumps({"id": it.get("id"), "status": "later", "note": f"today's contact form limit ({limit}) is used up"}))
+                continue
+            log(f"[{n + 1}/{len(items)}] sending through the contact form: {it.get('url')}")
+            try:
+                res = contact_form.submit(it["url"], {**values, "message": it.get("message", "")}, confirm=True, log=log)
+            except Exception as e:
+                res = {"status": "failed", "note": "error: " + str(e).splitlines()[0][:120]}
+            cform_record(it.get("id"), it.get("url"), res["status"])
+            log("CFORMSEND " + json.dumps({"id": it.get("id"), **res}))
+            if n < len(items) - 1:
+                time.sleep(random.uniform(25, 70))
+        log("[runner] contact form sending finished.")
+    finally:
+        STATE["running"] = False
+
+
+def run_cform_batch(items, body):
+    """CAPTCHA forms: a visible Chrome window, every form filled in; you solve each CAPTCHA, it presses send and moves on. Tabs left alone for 10 minutes are saved for later."""
+    try:
+        import contact_form
+        values = cform_values(body)
+
+        def result(r):
+            if r.get("status") in ("sent", "unsure"):
+                cform_record(r.get("id"), "", r["status"])
+            log("CFORMSEND " + json.dumps(r))
+        contact_form.captcha_batch(items, values, wait_minutes=10, on_result=result, stop=lambda: PIPE["stop"])
+        log("[runner] CAPTCHA forms finished.")
+    finally:
+        STATE["running"] = False
+
+
+def cform_replies(items):
+    """Answers to contact form messages arrive in the Reply-To inbox from someone at the lead's company: look there for mail from the lead's domain since the message was sent.
+    items: [{id, domain, since_ts, email}]. Returns [{id, kind: 'replied'|'optout', snippet}]."""
+    import imaplib
+    from datetime import datetime
+    cfg = cold_email.load_config()
+    inboxes = [a for a in cfg.get("accounts", [])]
+    ra = cfg.get("reply_account")
+    if ra and ra.get("password"):
+        inboxes.append({**ra, "smtp_host": ra.get("imap_host", "")})
+    found = {}
+    for acct in inboxes:
+        try:
+            imap = imaplib.IMAP4_SSL(acct.get("imap_host") or acct["smtp_host"].replace("smtp.", "imap."))
+            imap.login(acct.get("username") or acct["email"], acct["password"])
+            imap.select("INBOX", readonly=True)
+            for it in items:
+                if it["id"] in found or not it.get("domain"):
+                    continue
+                since = datetime.fromtimestamp(it.get("since_ts") or time.time() - 14 * 86400).strftime("%d-%b-%Y")
+                typ, data = imap.search(None, f'(FROM "@{it["domain"]}" SINCE {since})')
+                ids = data[0].split() if typ == "OK" and data and data[0] else []
+                if not ids:
+                    continue
+                typ, raw = imap.fetch(ids[-1], "(BODY.PEEK[]<0.30000>)")
+                text, _msgid, _subj = cold_email._reply_text(raw[0][1] if raw and raw[0] else b"")
+                kind = "optout" if cold_email.OPT_OUT.search(text) else "replied"
+                if kind == "optout" and it.get("email"):
+                    cold_email.suppress(it["email"], "asked to stop (contact form reply)")
+                found[it["id"]] = {"id": it["id"], "kind": kind, "snippet": re.sub(r"\s+", " ", text)[:160]}
+            imap.logout()
+        except Exception as e:
+            log(f"could not check {acct.get('email')}: {str(e)[:100]}")
+    return list(found.values())
+
+
 def run_loom_login():
     """Opens a visible Chrome window (with the helper's own saved profile) for the one-time Loom login."""
     try:
@@ -1030,6 +1173,8 @@ class H(BaseHTTPRequestHandler):
             data[c] = bool(body.get("paused", True))
             PAUSE_FILE.write_text(json.dumps(data), encoding="utf-8")
             return self._send(200, {"ok": True, "paused": data})
+        if (self.path in CLIPS_ONLY_ROUTES or self.path == "/clipper/send") and str(body.get("campaign") or "clips") == "clips" and not pause_state().get("clips"):
+            ensure_clipper_up()   # the watchdog no longer restarts the Clipper app on its own (clip alerts are off by default): start it when a clip task needs it
         if self.path in CLIPS_ONLY_ROUTES and pause_state().get("clips") and str(body.get("campaign") or "clips") == "clips":
             return self._send(409, {"error": "Clips pitching is paused. Resume it from the Email tab (Autopilot panel) when you want it back."})
         if self.path == "/stop":
@@ -1283,6 +1428,33 @@ class H(BaseHTTPRequestHandler):
                 PIPE["stop"] = False
                 threading.Thread(target=run_halcrus_leads, args=(want, emails, companies, tier), daemon=True).start()
             return self._send(200, {"ok": True})
+        if self.path in ("/cform/find", "/cform/send", "/cform/batch"):
+            kind = self.path.rsplit("/", 1)[1]
+            raw = body.get("items") or []
+            if kind == "find":
+                items = [{"id": str(b.get("id") or "")[:80], "domain": str(b.get("domain") or "")[:200], "web": str(b.get("web") or "")[:200]} for b in raw][:20]
+                target, args, label = run_cform_find, (items,), f"looking for contact forms on {len(items)} site(s)"
+            else:
+                if body.get("confirm") is not True:
+                    return self._send(400, {"error": "needs confirm: true"})
+                items = [{"id": str(b.get("id") or "")[:80], "url": str(b.get("url") or "")[:500], "message": str(b.get("message") or "")[:3000]} for b in raw
+                         if str(b.get("url") or "").startswith("http")][:(25 if kind == "send" else 10)]
+                target, args, label = (run_cform_send if kind == "send" else run_cform_batch), (items, body), (f"sending {len(items)} message(s) through contact forms" if kind == "send" else f"{len(items)} CAPTCHA form(s) open for you")
+            if not items:
+                return self._send(400, {"error": "nothing to do"})
+            with LOCK:
+                if STATE["running"]:
+                    return self._send(409, {"error": "a run is already in progress"})
+                STATE.update(running=True, log=[f"[runner] {label}"])
+                PIPE["stop"] = False
+                threading.Thread(target=target, args=args, daemon=True).start()
+            return self._send(200, {"ok": True, "items": len(items), "sent_today": cform_today()})
+        if self.path == "/cform/replies":
+            items = [{"id": str(b.get("id") or ""), "domain": str(b.get("domain") or "").lower(), "since_ts": int(b.get("since_ts") or 0), "email": str(b.get("email") or "")} for b in (body.get("items") or [])][:100]
+            try:
+                return self._send(200, {"ok": True, "replies": cform_replies(items), "sent_today": cform_today()})
+            except Exception as e:
+                return self._send(200, {"ok": False, "error": str(e)[:160], "replies": []})
         if self.path == "/emails/check":
             items = [{"id": str(b.get("id") or "")[:80], "email": str(b.get("email") or "")[:200], "company": str(b.get("company") or "")[:100], "web": str(b.get("web") or "")[:200]} for b in (body.get("items") or [])][:40]
             if not items:
@@ -1393,6 +1565,8 @@ class H(BaseHTTPRequestHandler):
         if self.path == "/notify":
             title = clean(body.get("title") or "Clipper CRM", 60)
             msg = clean(body.get("message") or "", 160)
+            if str(body.get("topic") or "") == "clips" and not clips_alerts():
+                return self._send(200, {"ok": True, "phone": False, "phone_configured": phone_ready(), "muted": "clips alerts are off"})
             if sys.platform == "darwin" and msg:
                 subprocess.run(["osascript", "-e", 'display notification "%s" with title "%s" sound name "Glass"' % (msg.replace('"', "'"), ("ClipperCRM: " + title).replace('"', "'"))],
                                capture_output=True, timeout=10)
@@ -1401,6 +1575,12 @@ class H(BaseHTTPRequestHandler):
                 extra = (" " + REMOTE_HINT) if "needs you" in title.lower() else ""
                 sent = phone_notify(title, msg + extra, key=str(body.get("key") or title), every=int(body.get("every") or 600))
             return self._send(200, {"ok": True, "phone": sent, "phone_configured": phone_ready()})
+        if self.path == "/notify/prefs":
+            if "clips" in body:
+                prefs = notify_prefs()
+                prefs["clips"] = bool(body.get("clips"))
+                NOTIFY_PREFS.write_text(json.dumps(prefs), encoding="utf-8")
+            return self._send(200, {"ok": True, "clips": clips_alerts()})
         if self.path == "/email/stats":
             return self._send(200, cold_email.stats())
         if self.path == "/pipeline/stop":
@@ -1455,6 +1635,24 @@ def start_clipper_app():
         return False
 
 
+def ensure_clipper_up():
+    try:
+        urllib.request.urlopen(urllib.request.Request(APP_URL + "/api/heartbeat", data=b"{}", headers={"Content-Type": "application/json"}), timeout=4).read()
+        return True
+    except Exception:
+        pass
+    if not start_clipper_app():
+        return False
+    for _ in range(20):
+        time.sleep(1)
+        try:
+            urllib.request.urlopen(urllib.request.Request(APP_URL + "/api/heartbeat", data=b"{}", headers={"Content-Type": "application/json"}), timeout=3).read()
+            return True
+        except Exception:
+            continue
+    return False
+
+
 def keep_clipper_awake():
     """Keeps the clipper app alive and running while this helper runs:
     - pings it every 30 seconds so its idle watchdog never shuts it down;
@@ -1467,7 +1665,7 @@ def keep_clipper_awake():
             misses = 0
         except Exception:
             misses += 1
-            if misses >= 3 and os.getenv("AUTO_RESTART_CLIPPER", "1") != "0" and time.time() - last_restart > 300:
+            if misses >= 3 and clips_alerts() and os.getenv("AUTO_RESTART_CLIPPER", "1") != "0" and time.time() - last_restart > 300:
                 last_restart = time.time()
                 ok = start_clipper_app()
                 phone_notify("Clipper app restarted" if ok else "Clipper app is down", "The clipper app stopped" + (", so I started it again." if ok else " and I could not restart it. Start it in Terminal: cd ~/instagram-video-generator && python3 app.py"), key="clipper-restart", every=1800)
