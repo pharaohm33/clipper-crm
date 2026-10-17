@@ -49,6 +49,12 @@ By hand, once per computer: in the CRM press "Connect Loom" and log in (the help
 - The Unibox tab now exists in both campaigns. In Meta mode it reads the Meta drafts and replies (campaign sent to the helper), uses the Meta leads, and "Schedule the approved" puts the approved emails in the send queue (same rules as everything else). Edits you save in the Unibox are what is sent (body_override / subject_override in the lead payload). Removing a draft removes the lead from all lead pools (removedAt). Marking a reply Interested or Not Interested stops follow-ups (replied).
 - The Start card counts how your approvals go (as written, edited, removed). When about 20 or more are 90% as written it suggests unticking "I press Send myself" to run it all day (automatic mode). Add inboxes after that (Growth guide).
 
+## Loom step (tools/loom_upload.py), as of the Oct 2026 Loom page
+- Loom's video page changed: the comment box is now behind the "Comment" button (a composer with a "Comment at m:ss" button), comments are listed in the Activity tab, and links live in a "Links" area ("Add a link": Link URL, Title, Pin this link, Save). The account has the sign-up link as a default link, so new videos already show it; the step checks for it and only adds it (pinned) when missing, keeps "Only show links at the end of the video" OFF so the link stays on the video, and reports any other links listed.
+- The comment with the sign-up link is stamped at the call to action (video JSON link_from: right after the video says nothing is charged up front / only performance), found by playing the video to that second before opening the composer. A comment that is already there is detected through the Activity tab, so a retry never posts twice.
+- Every upload's link is saved in tools/loom_uploads.json (git-ignored) as soon as it shows in the library, and a retry reuses it (no second upload, even if the local file is gone). A failure after the upload still returns the link. A new press of the main button retries leads whose Loom step failed.
+- The Instagram story card is collapsible (closed by default) like the templates.
+
 ## Photo
 tools/assets/narrator.jpg is cropped with the face centered in the circle bubble.
 

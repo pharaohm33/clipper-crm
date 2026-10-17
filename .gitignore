@@ -27,3 +27,4 @@ tools/.halcrus_profile/
 tools/halcrus_session.json
 tools/halcrus_state.json
 tools/send_queue.json
+tools/loom_uploads.json

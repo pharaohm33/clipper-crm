@@ -709,7 +709,7 @@ function igCard(){const m=meta(),top=(S.adLeads||[]).filter(l=>l.top),td=igToday
   <td><select data-ig-st="${esc(l.id)}">${IG_STATUS.map(([v,t])=>`<option value="${v}" ${(st.status||'')===v?'selected':''}>${t}</option>`).join('')}</select>${st.sentAt?`<div class=mut>${new Date(st.sentAt).toLocaleDateString([],{month:'short',day:'numeric'})}</div>`:''}</td>
   <td><input data-ig-note="${esc(l.id)}" value="${esc(st.note||'')}" placeholder="note" style="width:150px"></td><td><button class="b" data-star="${esc(l.id)}" title="Remove from top prospects">★ ✕</button></td></tr>`};
  const prospects=top.map(l=>`<option value="${esc(l.id)}">${esc(l.company)}</option>`).join('');
- return `<div class="card" style="border-color:#8b5cf6"><b>Instagram story outreach</b> <span class=mut>A manual extra touch for your best prospects only. ${top.length} top prospect${top.length==1?'':'s'} · ${td} stor${td==1?'y':'ies'} sent today (keep it to 10 or fewer).</span>
+ return `<details class="card" data-sec="ig" ${secOpen('ig')} style="border-color:#8b5cf6"><summary><b>Instagram story outreach</b> <span class=mut>A manual extra touch for your best prospects only. Click to open or close.</span></summary><span class=mut>A manual extra touch for your best prospects only. ${top.length} top prospect${top.length==1?'':'s'} · ${td} stor${td==1?'y':'ies'} sent today (keep it to 10 or fewer).</span>
  <details style="margin-top:6px"><summary><b>Admin guide: how to do it</b></summary><div class=mut style="white-space:pre-wrap;margin-top:6px">${esc(IG_GUIDE)}</div></details>
  <div class="row" style="margin-top:8px"><button class="b" id="ig-pick">★ Pick my top 25 (named contact, highest score)</button><button class="b p" id="ig-find" ${IGM.busy||ES.busy||!top.length?'disabled':''}>Find their Instagram accounts (10 at a time)</button><span class=mut>${esc(IGM.msg)}</span></div>
  <label style="margin-top:6px">Google AI prompt for Instagram accounts <span class=mut>(fill-ins: {who} {company} {website} {person} {title})</span></label><textarea id="ig-prompt" rows="3" style="width:100%">${esc(S.settings.igPrompt||DEF_IG_PROMPT)}</textarea><button class="b" id="ig-reset">Reset prompt</button>
@@ -717,7 +717,7 @@ function igCard(){const m=meta(),top=(S.adLeads||[]).filter(l=>l.top),td=igToday
  ${cf.length?`<div style="margin-top:8px"><b>Add these to your Close Friends list this round</b> <button class="b" data-cp="${esc(cf.join(' '))}">Copy all</button><div class=mut>${esc(cf.join('  '))}</div></div>`:''}
  <div style="margin-top:10px"><b>30 second video script</b> <span class=mut>Fill-ins: {first_name} {business} {sender} {product} {link}. Record it yourself, in your own words.</span>
   <textarea id="ig-script" rows="8" style="width:100%">${esc(S.settings.igScript||DEF_IG_SCRIPT)}</textarea>
-  <div class="row"><button class="b" id="ig-script-reset">Reset script</button><select id="ig-pv-who"><option value="">Preview for…</option>${prospects}</select></div>${IGM.pv?`<div class=mut style="white-space:pre-wrap;border:1px solid var(--bd,#444);border-radius:6px;padding:8px;margin-top:6px">${esc(IGM.pv)}</div>`:''}</div></div>`}
+  <div class="row"><button class="b" id="ig-script-reset">Reset script</button><select id="ig-pv-who"><option value="">Preview for…</option>${prospects}</select></div>${IGM.pv?`<div class=mut style="white-space:pre-wrap;border:1px solid var(--bd,#444);border-radius:6px;padding:8px;margin-top:6px">${esc(IGM.pv)}</div>`:''}</div></details>`}
 function igWire(){const g=id=>document.getElementById(id),sync=()=>{if(tab=='ads')adsV()},byId=id=>(S.adLeads||[]).find(x=>x.id==id);
  g('ig-pick').onclick=()=>{const n=pickTopProspects(25);IGM.msg=n?`Starred ${n} more.`:'Nothing more to star (a lead needs a named contact, an email, and no earlier contact).';sync()};
  g('ig-find').onclick=async()=>{IGM.busy=true;IGM.msg='Reading their websites, then asking Google AI. The Chrome window stays minimized.';sync();await findInstagram(10);IGM.busy=false;IGM.msg=ES.msg||'Done. Check each profile before you use it.';save();sync()};
@@ -808,7 +808,7 @@ const sendAuto=()=>S.settings.sendMode==='auto';   // default: you press Send yo
 const loomTitle=l=>`A quick look at ${l.brandName||(l.greet&&l.greet.business)||l.company}'s Meta ads`;
 async function loomUploadApproved(){const todo=loomToUpload().slice(0,3);if(!todo.length)return 0;let n=0;
  await helperJob('/loom/upload',{items:todo.map(l=>({id:l.id,file:l.video.file,title:loomTitle(l),comment:meta().link})),show:!!S.settings.loomShow,keep_local:!!S.settings.keepLocalVideos},t=>{const r=parseTag(t,'LOOM');if(!r)return;const l=(S.adLeads||[]).find(x=>x.id==r.id);if(!l)return;
-  if(r.ok&&r.link){l.loomLink=r.link;l.loomUploadedAt=Date.now();delete l.loomFail;if(r.deleted&&l.video){l.video.file='';l.video.inLoomOnly=1}n++}else{l.loomFail=r.error||'upload failed';if(r.link&&!r.ok){l.loomPartial=r.link}if(r.needs_login)LM.connected=false}});
+  if(r.ok&&r.link){l.loomLink=r.link;l.loomUploadedAt=Date.now();delete l.loomFail;l.loomNoComment=r.comment_posted===false?1:0;l.loomOther=r.other_links||0;if(r.deleted&&l.video){l.video.file='';l.video.inLoomOnly=1}n++}else{l.loomFail=r.error||'upload failed';if(r.link&&!r.ok){l.loomPartial=r.link}if(r.needs_login)LM.connected=false}});
  save();return n}
 async function loomMakeDrafts(){const todo=loomToDraft().slice(0,10);if(!todo.length)return 0;await metaGreet(todo);
  await helperJob('/email/run',{campaign:'meta',mode:'drafts',leads:todo.map(metaPayload),template:metaTemplateObj(),limit:10,step:0},t=>{const r=parseTag(t,'EMAIL');if(!r)return;const l=(S.adLeads||[]).find(x=>x.id==r.id);if(!l)return;if(r.status==='drafted')l.draftedAt=Date.now();else if(r.status==='skip'){l.skipWhy=r.why;if(/Microsoft/i.test(r.why||''))l.msSkip=Date.now()}});
@@ -913,6 +913,7 @@ async function startOutreach(count){if(SO.busy||LM.pipeBusy||ES.busy)return {bus
    S.settings.startConfirmed=1;S.settings.loomAuto=true;S.settings.loomAutoSend=true;S.settings.autoStart=true;if(!S.settings.sendMode)S.settings.sendMode='ask';
    S.settings.loomSendChecked=!!S.settings.loomSendChecked;save()}
   const target=Math.max(1,Math.min(10,+count>0?+count:(+S.settings.startTarget||3)));
+  (S.adLeads||[]).forEach(l=>{if(l.loomFail&&!l.loomLink&&l.video&&l.video.ok&&l.video.file)delete l.loomFail});   // a new run retries videos whose Loom step failed (the helper remembers what is already uploaded, so nothing is uploaded twice)
   say('Checking the helper…');await loadEmailStatus();if(!ES.status){return {fatal:'The helper is not running, so nothing could be done. It starts at login. If it is not running, open Terminal and run tools/start_outreach.command.'}}
   if(!ES.status.ready){return {fatal:'Email is not set up yet: '+(ES.status.problems||[]).join('; ')}}
   await queueSync();await loomStatus();
@@ -937,6 +938,9 @@ async function startOutreach(count){if(SO.busy||LM.pipeBusy||ES.busy)return {bus
   LM.pipeBusy=false;await loomPipeline(true);await queueSync();
   const act=(SQ.items||[]).filter(x=>x.status==='scheduled'),nx=act.length?Math.min(...act.map(x=>x.due_at)):0;
   const rdy=loomToSendBase(true).length;say(!sendAuto()&&rdy?`${rdy} approved email${rdy==1?' is':'s are'} ready. Press "Send ${rdy} approved email${rdy==1?'':'s'}" when you want ${rdy==1?'it':'them'} to go out.`:act.length?`${act.length} email(s) scheduled. The first goes out ${whenText(nx)}.`:(LM.connected===false?'Videos are ready. Connect Loom, then press Start again to upload and schedule them.':'Nothing scheduled yet; anything that needs your approval is listed above.'));
+  const nc=(S.adLeads||[]).filter(l=>l.loomNoComment&&!l.emailedAt).length,ot=(S.adLeads||[]).filter(l=>l.loomOther&&!l.emailedAt).length;
+  if(nc)notes.push(`${nc} video${nc==1?' is':'s are'} on Loom but the comment with the sign up link was not posted: add it in Loom, or run again.`);
+  if(ot)notes.push(`${ot} video${ot==1?'':'s'} show other links under them in Loom. Only the sign up link is wanted: remove the others in Loom.`);
   const s1=snap();return {made,rejected,notes,noLeads,uploaded:Math.max(0,s1.loom-s0.loom),drafted:Math.max(0,s1.drafted-s0.drafted),ready:rdy,loomDown:LM.connected===false};
  }catch(e){say('Stopped: '+(e&&e.message||e));return {fatal:'Stopped by an error: '+(e&&e.message||e)}}finally{SO.busy=false;save();if(tab=='ads')adsV()}}
 const sqLabel={scheduled:'scheduled',sending:'sending now',sent:'sent',canceled:'canceled',failed:'failed',bounced:'bounced',skipped:'skipped'};
