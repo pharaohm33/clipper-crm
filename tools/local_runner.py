@@ -1256,6 +1256,9 @@ class H(BaseHTTPRequestHandler):
                 PIPE["stop"] = False
                 threading.Thread(target=run_halcrus_leads, args=(want, emails, companies, tier), daemon=True).start()
             return self._send(200, {"ok": True})
+        if self.path == "/loom/uploads":
+            import loom_upload
+            return self._send(200, {"uploads": loom_upload._uploads()})
         if self.path == "/loom/status":
             import loom_upload
             ok, at = loom_upload.connected()

@@ -820,7 +820,7 @@ async function loomSendApproved(){const todo=loomToSend().slice(0,8);if(!todo.le
 /* One pass of the pipeline. auto=true is the hands-free timer: it also sends, but only inside your sending hours and daily limits. */
 async function loomPipeline(auto){if(LM.pipeBusy||ES.busy)return;LM.pipeBusy=true;const say=m=>{LM.pipeMsg=m;if(tab=='ads')adsV()};
  try{
-  await loomStatus();await queueSync();
+  await loomStatus();await queueSync();await loomSyncUploads();
   const up=loomToUpload().length;
   if(up&&LM.connected===false){say('Loom is not connected. Press "Connect Loom" and log in once.');return}
   let u=0,d=0,s=0;
@@ -834,6 +834,9 @@ setInterval(()=>{if(S.settings.loomAuto&&!LM.pipeBusy&&!ES.busy)loomPipeline(tru
 /* ---------- Start outreach: one button. Finds more leads in HALCRUS only when the pool runs low, makes the videos, uploads, drafts, and hands the sends to the helper's own scheduled queue ---------- */
 const SO={busy:false,msg:'',log:[]},HC={connected:null},SQ={items:[],inWin:null,win:null};
 const whenText=ts=>{const d=new Date(ts*1000),n=new Date(),same=d.toDateString()===n.toDateString(),tom=d.toDateString()===new Date(n.getTime()+864e5).toDateString();return (same?'today':tom?'tomorrow':d.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'}))+' '+d.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})};
+async function loomSyncUploads(){try{const r=await metaApi('/loom/uploads',{});if(!r||!r.uploads)return 0;const key=s=>String(s).replace(/[^A-Za-z0-9]/g,'').slice(0,24);let n=0;
+ for(const [stem,v] of Object.entries(r.uploads)){const l=(S.adLeads||[]).find(x=>key(x.id)===key(stem));if(l&&!l.loomLink&&v.link){l.loomLink=v.link;l.loomUploadedAt=(v.at||0)*1000||Date.now();delete l.loomFail;l.strategy=l.strategy||'loom';n++}}
+ if(n){save();if(tab=='ads')adsV()}return n}catch(e){return 0}}
 async function hcStatus(){try{const r=await metaApi('/halcrus/status',{});HC.connected=!!r.connected}catch(e){HC.connected=null}}
 async function hcConnect(){SO.msg='A Chrome window is opening. Log in to HALCRUS there. It closes by itself when you are in.';if(tab=='ads')adsV();try{await helperJob('/halcrus/login',{},()=>{})}catch(e){}await hcStatus();SO.msg=HC.connected?'HALCRUS is connected.':'HALCRUS was not connected. Try again.';if(tab=='ads')adsV()}
 /* What the helper's queue holds is the truth about sending: apply it to the leads (sent, bounced, cancelled...) */
@@ -957,11 +960,20 @@ async function sendReadyNow(){if(SO.busy||LM.pipeBusy||ES.busy)return;const list
  if(!confirm(`Start sending ${list.length} approved email${list.length==1?'':'s'}?${auto?`\n\n${auto} of them passed the automatic video check and were not watched by you.`:''}\n\nThey go out one by one in your sending hours (right away if you are inside them, otherwise from the next opening), spaced by your delay and inbox limits. You can cancel any of them in the Scheduled sends table.`))return;
  SO.busy=true;if(tab=='ads')adsV();let n=0;try{await loomStatus();n=await loomQueueApproved(true);await queueSync();
   const act=(SQ.items||[]).filter(x=>x.status==='scheduled'),nx=act.length?Math.min(...act.map(x=>x.due_at)):0;SO.msg=n?`${n} email(s) scheduled. The first goes out ${whenText(nx)}.`:(LM.pipeMsg||'Nothing was scheduled.');S.settings.readyNotified=0;save()}finally{SO.busy=false;if(tab=='ads')adsV()}}
+/* Your Loom videos: every video made, where it is, and what is still to do */
+function videosPanel(){const L=(S.adLeads||[]).filter(l=>(l.video&&l.video.ok)||l.loomLink).sort((a,b)=>(((b.video||{}).madeAt)||b.loomUploadedAt||0)-(((a.video||{}).madeAt)||a.loomUploadedAt||0)).slice(0,25);
+ const open=(S.settings.secOpen||{}).vids===false?'':'open';
+ const chip=(ok,t,warn)=>`<span style="white-space:nowrap;margin-right:6px;color:${ok?'#22c55e':warn?'#e5a000':'var(--mut,#888)'}">${ok?'✓':warn?'⚠':'·'} ${t}</span>`;
+ const row=l=>{const v=l.video||{},sent=l.emailedAt||l.queueStatus==='sent',sch=l.queueStatus==='scheduled'||l.queueStatus==='sending';
+  const next=l.loomFail?`Loom step failed (${esc(String(l.loomFail).slice(0,80))}). It is retried on the next run.`:!l.loomLink&&v.ok&&!l.videoApproved&&l.videoQa&&!l.videoQa.ok?`Needs your look: ${esc(l.videoQa.reason||'')}`:!l.loomLink&&v.ok?'Waiting to upload to Loom (next run or the automatic pass).':l.loomLink&&!l.draftedAt&&!sent?'Waiting to be saved as a draft (next run or the automatic pass).':l.draftedAt&&!sent&&!sch?'Draft saved. Review it, then Send.':sch?'Scheduled to send.':sent?'Sent.':'';
+  return `<tr><td><b>${esc(l.brandName||l.company)}</b><br><span class=mut>${esc(l.email||'')}</span></td><td>${chip(!!v.ok,'made')}${chip(!!l.loomLink,'on Loom')}${chip(!!l.videoApproved,'approved',!l.videoApproved&&!!v.ok)}${l.loomLink?chip(!l.loomNoComment,'link + comment',!!l.loomNoComment):''}${chip(!!(l.draftedAt||sent),'draft')}${chip(sch||sent,sent?'sent':sch?'scheduled':'send')}<div class=mut style="margin-top:2px">${next}</div></td><td>${l.loomLink?`<a href="${esc(l.loomLink)}" target="_blank" rel="noopener">Open in Loom</a>`:'<span class=mut>not on Loom yet</span>'}</td></tr>`};
+ return `<details data-sec="vids" ${open} style="margin-top:8px"><summary><b>Your Loom videos</b> <span class=mut>${L.length?`${L.length} · ${L.filter(l=>l.loomLink).length} on Loom · ${L.filter(l=>l.draftedAt&&!(l.emailedAt||l.queueStatus==='sent')).length} with a draft saved`:'none yet'}</span></summary>${L.length?`<div class="tw"><table><tr><th>Lead</th><th>Progress</th><th>Video</th></tr>${L.map(row).join('')}</table></div>`:`<div class=mut>No videos yet. Press the big button to make some; each one is listed here with its Loom link.</div>`}</details>`}
 function startCard(){const st=ES.status||{},w=st.window||SQ.win||{start_hour:9,end_hour:17};
  return `<div class="card" style="border-color:var(--acc)"><b>Start outreach</b> <span class=mut>Pick a template, then press the big button. For the Loom it reads your drafts, finds more leads in HALCRUS only when you are running low, makes the videos, checks them, uploads them to Loom and saves the emails as drafts. Nothing is sent until you press Send (or switch to automatic). Sending hours: ${w.start_hour}:00 to ${w.end_hour}:00. Progress and the result show right here.</span>
   <div class="row" style="margin-top:8px"><span class=mut>Template:</span><button class="b ${runStrat()==='loom'?'p':''}" id="md-s2" title="Strategy 2: a video of their ads, the Loom email and the Loom follow-ups">2 · The Loom</button><button class="b ${runStrat()==='proposal'?'p':''}" id="md-s1" title="Strategy 1: the plain first email and its follow-ups">1 · First email</button>
   <button class="b p" id="md-load" ${MC.busy||ES.busy||SO.busy||LM.pipeBusy||RUN.state==='working'?'disabled':''} title="${runStrat()==='loom'?'Loads your drafts, finds leads if you are running low, makes the videos, uploads them to Loom and saves the emails as drafts, then reloads the list':'Loads your drafts, writes first-email drafts for fresh leads, then reloads the list'}">${RUN.state==='working'?'⏳ Working… (see below)':runStrat()==='loom'?'▶ Load my Meta drafts + make the Loom videos':'▶ Load my Meta drafts + write first emails'}</button><button class="b" id="md-ub" title="Read, edit and approve every draft and reply from all your inboxes">📥 Open Unibox</button></div>
   <div class="run-panel">${runPanelHTML()}</div>
+  ${videosPanel()}
   <div class="row" style="margin-top:8px"><label>Videos per press <input type="number" id="so-n" min="1" max="10" value="${+S.settings.startTarget||3}" style="width:56px"></label>
   <span class=mut>Loom: <b style="color:${LM.connected?'#22c55e':'#e5a000'}">${LM.connected?'connected':LM.connected===false?'not connected':'checking…'}</b></span><button class="b" id="so-lm" ${SO.busy||ES.busy||LM.pipeBusy?'disabled':''}>${LM.connected?'Reconnect Loom':'Connect Loom (log in once)'}</button>
   <span class=mut>HALCRUS: <b style="color:${HC.connected?'#22c55e':'#e5a000'}">${HC.connected?'connected':HC.connected===false?'not connected':'checking…'}</b></span><button class="b" id="so-hc" ${SO.busy||ES.busy?'disabled':''}>${HC.connected?'Reconnect HALCRUS':'Connect HALCRUS (log in once)'}</button></div>
@@ -975,7 +987,7 @@ document.addEventListener('click',async e=>{const b=e.target.closest('[data-sq]'
  try{if(b.dataset.sq==='cancel')await metaApi('/queue/cancel',{id});else await metaApi('/queue/reschedule',{id})}catch(_){}
  await queueSync();if(tab=='ads')adsV()});
 setInterval(()=>{queueSync().then(()=>{if(tab=='ads'&&!SO.busy&&!LM.pipeBusy&&!ES.busy)adsV()})},60000);
-setTimeout(()=>{queueSync();hcStatus();loomStatus()},3000);
+setTimeout(()=>{loomSyncUploads();queueSync();hcStatus();loomStatus()},3000);
 /* ---------- Keep going by itself: no button press. Every 10 minutes (and when the page opens) it tops the pipeline up, with guards ---------- */
 async function notifyNeeds(title,message,key){try{await fetch(RUNNER+'/notify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,message,key,every:21600})})}catch(e){}}
 async function autoKeep(){const g=S.settings;if(!g.autoStart||!g.startConfirmed||SO.busy||LM.pipeBusy||ES.busy)return;if(Date.now()<(g.autoStartAfter||0))return;
