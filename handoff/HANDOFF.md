@@ -41,7 +41,7 @@ By hand, once per computer: in the CRM press "Connect Loom" and log in (the help
 ## The two strategies (never mixed)
 - Strategy 1 (plain first email, follow-ups 3 and 7 days) and Strategy 2 (the Loom: video, "Weird find in your ads" email with only the Loom link, Loom follow-ups 3 and 7 days) are separate. A lead is tagged (l.strategy: 'proposal' or 'loom'; stratOf() infers it for older leads) and the two lead pools exclude each other. The Loom template is no longer a "second touch" after another email; cold_email.plan refuses a first email of either kind within 90 days of any earlier first email, and a follow-up always uses the template of the first email actually sent.
 - The Loom email, follow-ups and the manual Loom script are the Strategy 2 text from the client acquisition document (defaults in index.html; a saved copy of the OLD defaults is replaced, edited ones are kept). The automated video script (ad_video.build_script) is the same script, spoken as a recording; no pricing percentage, and the sign-up banner starts at "If you want to take a look at our website".
-- Changed for accuracy: "I took a look at" instead of "I'm actually looking ... right now" in the recorded video; follow-up 2 no longer claims the video expires in 48 hours or that there is nothing being sold.
+- Changed for accuracy: "I took a look at" instead of "I'm actually looking ... right now" in the recorded video; follow-up 2 no longer claims the video expires in 48 hours or that there is nothing being sold; it says there is no cost to take a look or start saving money on ads.
 - Not loaded: the "We spoke already" wording of Strategy 1 (claims a conversation that did not happen).
 
 ## Photo
