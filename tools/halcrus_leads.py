@@ -196,7 +196,7 @@ def fetch(want, known_emails=(), known_companies=(), tier="Hot", log=print, url=
             cur, last = _page_no(page)
             while cur < target and _next(page):  # jump to where the last run stopped
                 cur = _page_no(page)[0]
-            log(f"HALCRUS {tier} tier: starting at page {cur} of {last or '?'}")
+            log(f"Reading the {tier} tier of the portal, starting at page {cur} of {last or '?'}")
             scanned = 0
             while scanned < max_pages and len(found) < want:
                 cur, last = _page_no(page)

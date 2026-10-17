@@ -853,6 +853,8 @@ def run_halcrus_leads(want, emails, companies, tier):
     """Reads new leads from the HALCRUS portal and streams 'HALCRUS {json}' per lead, then 'HALCRUSEND {json}'."""
     try:
         import halcrus_leads
+        # whatever the CRM page knows, never bring back anyone this helper has already emailed or drafted to, anyone who replied or bounced, or the do-not-contact list
+        emails = list({*emails, *(e.get("to", "").lower() for e in cold_email.read_log() if e.get("to")), *(a.lower() for a in cold_email.suppressed())})
         leads = halcrus_leads.fetch(want, emails, companies, tier=tier, log=log)
         for ld in leads:
             log("HALCRUS " + json.dumps(ld))

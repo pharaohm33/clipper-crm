@@ -261,7 +261,7 @@ async function helperJob(path,body,onLine){
  let since=0,go=true;while(go){await new Promise(x=>setTimeout(x,1000));
   try{const j=await (await fetch(RUNNER+'/log?since='+since)).json();since=j.next;j.lines.forEach(t=>{ES.lines.push(t);onLine&&onLine(t)});go=j.running;save();emailDyn();if(tab=='today')todayV()}catch(e){ES.msg='Lost contact with the helper.';go=false}}
  ES.busy=false;save();emailDyn();if(tab=='today')todayV();if(path==='/email/run'){ST_T=0;refreshStatusSoon()}return true}
-const parseTag=(t,tag)=>t.startsWith(tag+' ')?JSON.parse(t.slice(tag.length+1)):null;
+const parseTag=(t,tag)=>{if(!t.startsWith(tag+' '))return null;try{return JSON.parse(t.slice(tag.length+1))}catch(e){return null}};
 function findEmails(n){const now=Date.now();
  const todo=S.leads.filter(l=>l.status=='New'&&isHot(l)&&!l.email&&l.name&&!(l.emailChecked&&now-l.emailChecked<14*DAY)).slice(0,n).map(l=>({id:l.id,name:l.name,url:l.url,web:l.web,episode:l.episode}));
  if(!todo.length){ES.msg='Every fresh lead already has an email, or was checked in the last 14 days.';return emailDyn()}
@@ -865,7 +865,7 @@ function addHalcrusLead(r){S.adLeads=S.adLeads||[];const have=new Set(S.adLeads.
 async function halcrusMore(n){await hcStatus();if(!HC.connected)return -1;
  const adl=S.adLeads||[],known_emails=adl.flatMap(l=>[l.email,...(l.siteEmails||[])]).filter(Boolean).map(x=>String(x).toLowerCase()),known_companies=adl.map(l=>l.company).filter(Boolean);
  let got=0,end=null;await helperJob('/halcrus/leads',{want:n,tier:S.settings.halcrusTier||'Hot',known_emails,known_companies},t=>{let r;if(r=parseTag(t,'HALCRUS'))got+=addHalcrusLead(r);else if(r=parseTag(t,'HALCRUSEND'))end=r});
- save();if(end&&end.needs_login){HC.connected=false;return -1}if(end&&end.error)return -2;return got}
+ HC.lastFound=end?end.found||0:0;save();if(end&&end.needs_login){HC.connected=false;return -1}if(end&&end.error)return -2;return got}
 async function makeAdVideos(todo){const by=id=>(S.adLeads||[]).find(x=>x.id==id),nm=x=>String(x||'').toLowerCase().replace(/[^a-z0-9]/g,'');
  await helperJob('/ads/video',{items:todo.map(l=>({id:l.id,company:l.company,email:l.email,web:l.web||'',first:(l.greet&&l.greet.first)||l.company,business:(l.greet&&l.greet.business)||l.company})),voice:voiceSel(),narrator:narratorName(),product:meta().product,link:'https://portal.aiadsoptimization.com/signup',host:S.settings.videoHost||'loom'},t=>{
   const r=parseTag(t,'ADVIDEO');if(!r)return;const l=by(r.id);if(!l)return;l.video={ok:r.ok,reason:r.reason,link:r.link,facts:r.facts,script:r.script,madeAt:Date.now()};
@@ -925,7 +925,7 @@ async function startOutreach(count){if(SO.busy||LM.pipeBusy||ES.busy)return {bus
     const got=await halcrusMore(Math.max(10,(target-made)*3));
     if(got===-1){say('HALCRUS is not connected. Press "Connect HALCRUS" and log in once. Continuing with the leads I have.');notes.push('HALCRUS is not connected, so no new leads could be found: press "Connect HALCRUS" and log in.');noHc=true}
     else if(got===-2){say('Could not read HALCRUS right now. Continuing with the leads I have.');notes.push('HALCRUS could not be read just now.');noHc=true}
-    else say(got?`Added ${got} new lead(s) from HALCRUS.`:'HALCRUS had no new matching leads on the pages it looked at.');
+    else say(got?`Added ${got} new lead(s) from HALCRUS.`:(HC.lastFound?`HALCRUS returned ${HC.lastFound} lead(s) but every one is already in your CRM.`:'HALCRUS had no new matching leads on the pages it looked at.'));
     if(got===0)noHc=true;
     pool=startPool()}
    const batch=pool.slice(0,Math.min(3,target-made));if(!batch.length){say(made?'No more leads to make videos for.':'There are no leads to make videos for.');if(!made)noLeads=true;break}
