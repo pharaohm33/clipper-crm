@@ -92,6 +92,25 @@ def run_fit(path):
         STATE["running"] = False
 
 
+def run_email_check(path, ai):
+    """Checks lead emails (tools/email_ai_check.py) and streams its 'EMAILCHECK {json}' lines to the page."""
+    env = {**os.environ, "PYTHONUNBUFFERED": "1"}
+    try:
+        proc = subprocess.Popen([sys.executable, "-u", str(HERE / "email_ai_check.py"), path] + ([] if ai else ["--no-ai"]), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                text=True, env=env, cwd=str(HERE))
+        STATE["proc"] = proc
+        for line in proc.stdout:
+            STATE["log"].append(line.rstrip())
+            if "asking you to verify" in line:
+                phone_notify("Google needs you", "Google is asking for a verification and the email check is waiting (up to 5 minutes).", key="captcha")
+        proc.wait()
+        STATE["log"].append(f"[runner] email check finished (exit {proc.returncode})")
+    except Exception as e:
+        STATE["log"].append(f"[runner] email check failed to start: {e}")
+    finally:
+        STATE["running"] = False
+
+
 def outreach_settings():
     """The clipper settings every outreach template starts with (tools/outreach_settings.json; edit that file to change them)."""
     try:
@@ -1256,6 +1275,20 @@ class H(BaseHTTPRequestHandler):
                 PIPE["stop"] = False
                 threading.Thread(target=run_halcrus_leads, args=(want, emails, companies, tier), daemon=True).start()
             return self._send(200, {"ok": True})
+        if self.path == "/emails/check":
+            items = [{"id": str(b.get("id") or "")[:80], "email": str(b.get("email") or "")[:200], "company": str(b.get("company") or "")[:100], "web": str(b.get("web") or "")[:200]} for b in (body.get("items") or [])][:40]
+            if not items:
+                return self._send(400, {"error": "nothing to check"})
+            import tempfile
+            fh = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8")
+            json.dump(items, fh)
+            fh.close()
+            with LOCK:
+                if STATE["running"]:
+                    return self._send(409, {"error": "a run is already in progress"})
+                STATE.update(running=True, log=[f"[runner] checking {len(items)} email(s)" + (" with Google AI" if body.get("ai") else "")])
+                threading.Thread(target=run_email_check, args=(fh.name, bool(body.get("ai"))), daemon=True).start()
+            return self._send(200, {"ok": True, "items": len(items)})
         if self.path == "/loom/uploads":
             import loom_upload
             return self._send(200, {"uploads": loom_upload._uploads()})

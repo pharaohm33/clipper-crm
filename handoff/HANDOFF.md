@@ -55,6 +55,13 @@ By hand, once per computer: in the CRM press "Connect Loom" and log in (the help
 - Every upload's link is saved in tools/loom_uploads.json (git-ignored) as soon as it shows in the library, and a retry reuses it (no second upload, even if the local file is gone). A failure after the upload still returns the link. A new press of the main button retries leads whose Loom step failed.
 - The Instagram story card is collapsible (closed by default) like the templates.
 
+## Meta Ads tab: numbered workflow, email eligibility, approving videos
+- The Start card is now "Loom outreach, step by step": 1 Connect (Loom, HALCRUS, email), 2 Make the videos (template buttons, videos per press, the big button, live status), 3 Check the videos (list with per-video "I watched it, approve", "approve all", "Upload to Loom + save drafts now"), 4 Review the emails (Unibox button and the drafts to review), 5 Send (approved emails, scheduled sends table). "Automatic mode and settings" is a collapsed section under it. Email templates, the campaign list, the Google AI prompt, the Instagram card and "Manual Loom tools" are collapsed below.
+- A video you approve by hand (per video or approve all) counts as watched; nothing is sent from an approved video until step 5 unless automatic mode is on.
+- Microsoft-hosted recipients: the Loom template (meta-loom, skip_providers: []) is exempt from the provider skip; Strategy 1 still skips them.
+- HALCRUS leads are "trusted" (payload trusted_source): they ignore the provider skip as long as the address passes email_check.classify (valid mail server, not a role/junk pattern). Before any video is made, startOutreach checks each new HALCRUS lead (checkLeadEmails -> /emails/check, optionally asks Google AI via tools/email_ai_check.py in the ~/.clipper_chrome_profile browser, about 45 s each) and asks the engine whether the Loom email would actually be sent (loomEligible -> /email/preview), so no video is made for someone who would not be emailed. Ineligible leads are marked lead.ineligible and left out of the pool.
+- Settings (Automatic mode and settings): "Trust HALCRUS emails" (S.settings.trustHalcrus, default on) and "Also check each new HALCRUS email with Google AI" (S.settings.aiEmailCheck, default on). Turn the AI check off once it stops being useful; HALCRUS likely cleans its emails.
+
 ## Photo
 tools/assets/narrator.jpg is cropped with the face centered in the circle bubble.
 

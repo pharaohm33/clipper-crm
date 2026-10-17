@@ -456,7 +456,17 @@ def plan(leads, template, mode="preview", limit=20, ignore_window=False, step=0)
             yield {**base, "status": "skip", "why": "already saved as a draft"}
             continue
         provider = mx_provider(to.split("@", 1)[1]) if step == 0 else ((first_mail_for(log, to) or {}).get("provider") or "unknown")
-        if step == 0 and provider in (template.get("skip_providers") if "skip_providers" in template else cfg.get("skip_providers", ["microsoft"])):
+        # a template can override the skip list (the Loom email is allowed to Microsoft-hosted mailboxes; the plain first email is not)
+        skip_prov = pre["skip_providers"] if (pre and "skip_providers" in pre) else (template.get("skip_providers") if "skip_providers" in template else cfg.get("skip_providers", ["microsoft"]))
+        if ld.get("trusted_source"):  # e.g. HALCRUS: the portal's emails are trusted, so any mailbox provider is fine, but the address must still be valid
+            skip_prov = []
+            if step == 0:
+                import email_check
+                chk = email_check.classify(to)
+                if chk["level"] == "bad":
+                    yield {**base, "status": "skip", "why": "not a valid email address (" + chk["why"] + ")"}
+                    continue
+        if step == 0 and provider in skip_prov:
             yield {**base, "status": "skip", "why": f"mailbox is hosted by {provider.title()} (skipped for now)"}
             continue
         chosen = pick_template(template, ld) if step == 0 else None
