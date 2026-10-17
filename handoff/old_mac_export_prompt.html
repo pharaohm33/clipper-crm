@@ -1,0 +1,47 @@
+<title>Old Mac Export Prompt</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+:root{--bg:#f5f6f4;--card:#ffffff;--fg:#1c2421;--mut:#5d6a64;--line:#d9ded9;--acc:#0f766e;--accfg:#ffffff;--code:#eef1ee}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f1513;--card:#17201d;--fg:#e4ebe7;--mut:#93a39b;--line:#2a3833;--acc:#2dd4bf;--accfg:#06201c;--code:#0d1311;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#0f1513;--card:#17201d;--fg:#e4ebe7;--mut:#93a39b;--line:#2a3833;--acc:#2dd4bf;--accfg:#06201c;--code:#0d1311;color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font:16px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif;padding-block:28px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+main{max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+h1{font-size:1.5rem;line-height:1.25;margin:0;text-wrap:balance}
+p{margin:0}.mut{color:var(--mut)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px;display:flex;flex-direction:column;gap:12px;min-width:0}
+h2{font-size:.78rem;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin:0;font-weight:600}
+pre{margin:0;background:var(--code);border:1px solid var(--line);border-radius:8px;padding:12px;white-space:pre-wrap;word-break:break-word;font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;user-select:all}
+button{align-self:flex-start;font:inherit;font-weight:600;background:var(--acc);color:var(--accfg);border:0;border-radius:8px;padding:9px 16px;cursor:pointer}
+button:focus-visible{outline:2px solid var(--fg);outline-offset:2px}
+ol{margin:0;padding-left:1.2rem;display:flex;flex-direction:column;gap:6px}
+</style>
+<main>
+  <h1>Export the email setup from the old Mac</h1>
+  <p class="mut">Paste the prompt below into Claude on the old computer. It zips the five files the new Mac needs, without reading them out.</p>
+
+  <section class="card">
+    <h2>Prompt for the old Mac</h2>
+    <pre id="prompt">In ~/clipper-crm/tools, create a zip at ~/Desktop/email_setup.zip containing exactly these files, skipping any that don't exist: email_accounts.json, email_log.jsonl, suppression.txt, .env, campaign_pause.json.
+
+These files contain passwords, so do not print or read out their contents, and do not commit, upload or email anything. When it's done, tell me which files went into the zip with their sizes, how many lines email_log.jsonl has, and then reveal the zip in Finder so I can AirDrop it to my new Mac.</pre>
+    <button id="copy" type="button">Copy prompt</button>
+  </section>
+
+  <section class="card">
+    <h2>Then</h2>
+    <ol>
+      <li>AirDrop <b>email_setup.zip</b> from the old Mac to the new one. It lands in Downloads.</li>
+      <li>On the new Mac, run this in Terminal:
+        <pre id="unzip">unzip -o ~/Downloads/email_setup.zip -d ~/clipper-crm/tools/</pre>
+        <button id="copy2" type="button">Copy command</button>
+      </li>
+      <li>Tell Claude on the new Mac the files are in place. It checks the config and inbox logins without sending anything.</li>
+      <li>Delete the zip from Downloads and the Desktop. It holds inbox passwords.</li>
+    </ol>
+  </section>
+</main>
+<script>
+function wire(btn,src){var b=document.getElementById(btn),t=document.getElementById(src);b.onclick=function(){var txt=t.innerText;function sel(){var r=document.createRange();r.selectNodeContents(t);var s=getSelection();s.removeAllRanges();s.addRange(r);b.textContent='Selected, press Cmd+C'}
+ try{navigator.clipboard.writeText(txt).then(function(){b.textContent='Copied'},sel)}catch(e){sel()}}}
+wire('copy','prompt');wire('copy2','unzip');
+</script>
