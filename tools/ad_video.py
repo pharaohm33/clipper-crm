@@ -18,6 +18,7 @@ For each lead:
 The script never claims anything it did not read off the page, and it says "I took a look at", never "I'm looking right now".
 """
 import asyncio
+import difflib
 import json
 import math
 import random
@@ -30,13 +31,22 @@ import urllib.parse
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+if not shutil.which("ffmpeg"):  # no system ffmpeg: use the one the static-ffmpeg package carries (tools/.venv)
+    try:
+        import static_ffmpeg
+        static_ffmpeg.add_paths()
+    except Exception:
+        pass
 OUT = HERE / "ad_videos"
 FREE_MAIL = {"gmail.com", "yahoo.com", "outlook.com", "hotmail.com", "icloud.com", "aol.com", "live.com", "msn.com", "me.com", "protonmail.com", "ymail.com",
              "comcast.net", "att.net", "sbcglobal.net", "verizon.net", "bellsouth.net", "googlemail.com"}
 LIB = "https://www.facebook.com/ads/library/"
 VIEWPORT = {"width": 1280, "height": 720}
 KOKORO_URL = "http://localhost:3000/api/v1/audio/speech"
-DEFAULT_VOICE = "kokoro:af_heart"          # the most natural free voice (needs the Kokoro server: docker compose up -d in the video generator)
+DIA_URL = "http://127.0.0.1:8766"               # tools/dia_server.py, run by the Dia venv; started on demand
+DIA_PY = HERE / ".dia_venv" / "bin" / "python"
+DEFAULT_VOICE = "kokoro:am_michael"        # runs locally from tools/.kokoro_venv (about 9x faster than real time); "dia" is the slower, cloned-voice alternative
+KOKORO_PY = HERE / ".kokoro_venv" / "bin" / "python"
 FALLBACK_VOICE = "edge:en-US-AndrewMultilingualNeural"
 SIGNUP_LINK = "https://portal.aiadsoptimization.com/signup"
 LINK_SECONDS = 20  # (no longer used to start the link early: it appears only at the call to action)
@@ -212,16 +222,20 @@ def say(n):
 # ------------------------------------------------------------------------------------------------ the voice
 
 def parse_voice(voice):
-    """'kokoro:af_heart' | 'edge:en-US-AndrewMultilingualNeural' | a bare Edge voice name -> (engine, id)."""
+    """'kokoro:af_heart' | 'dia' | 'edge:en-US-AndrewMultilingualNeural' | a bare Edge voice name -> (engine, id)."""
     v = str(voice or DEFAULT_VOICE)
+    if v == "dia":
+        return "dia", "ref"
     if ":" in v:
         e, i = v.split(":", 1)
-        return (e if e in ("kokoro", "edge") else "edge"), i
+        return (e if e in ("kokoro", "dia", "edge") else "edge"), i
     return "edge", v
 
 
 def voice_gender(voice):
     e, i = parse_voice(voice)
+    if e == "dia":
+        return "m"  # the saved reference voice (tools/assets/dia_ref.wav) is a man's voice, about 104 Hz
     if e == "kokoro":
         return "f" if i[:2] in ("af", "bf") else "m"
     return "f" if re.search(r"Ava|Emma|Aria|Jenny|Michelle|Ana|Sonia|Libby|Nancy|Jane|Sara|Amber|Ashley|Cora|Elizabeth|Monica|Clara", i) else "m"
@@ -286,6 +300,24 @@ def _speak_edge(text, voice_id, mp3):
     return secs, words
 
 
+def _speak_kokoro_local(text, voice_id, mp3, log):
+    """Kokoro from tools/.kokoro_venv in one call (about 6 s for a whole script); returns Kokoro's own word times lined up with the caption text."""
+    tmp = Path(tempfile.mkdtemp(prefix="kokl_"))
+    try:
+        wav = tmp / "say.wav"
+        r = subprocess.run([str(KOKORO_PY), "-I", str(HERE / "kokoro_say.py")], input=json.dumps({"text": _spoken(text), "voice": voice_id, "out": str(wav)}),
+                           capture_output=True, text=True, timeout=600)
+        if r.returncode != 0 or not wav.exists():
+            raise RuntimeError("local Kokoro failed: " + (r.stderr.strip().splitlines() or ["no output"])[-1][:120])
+        out = json.loads(r.stdout.strip().splitlines()[-1])
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(wav), "-ar", "44100", "-ac", "1", "-c:a", "libmp3lame", "-q:a", "3", str(mp3)], check=True)
+        secs = _duration(mp3)
+        toks = text.split()
+        return secs, (_align(toks, out["words"], secs) or _spread(toks, 0, secs))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def _speak_kokoro(text, voice_id, mp3, log):
     import requests
     sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text.strip()) if s.strip()]
@@ -316,11 +348,158 @@ def _speak_kokoro(text, voice_id, mp3, log):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-SPEED = 1.25  # every video is spoken at this tempo
+def _dia_up():
+    import requests
+    try:
+        return requests.get(DIA_URL + "/health", timeout=3).status_code == 200
+    except Exception:
+        return False
+
+
+def _dia_start(log):
+    """Starts the Dia server (model loads in about 80 s, then stays loaded) unless it is already answering."""
+    if _dia_up():
+        return
+    if not DIA_PY.exists():
+        raise RuntimeError("Dia is not installed (tools/.dia_venv is missing)")
+    log("  (starting the Dia voice server, the first load takes about 80 seconds...)")
+    subprocess.Popen([str(DIA_PY), str(HERE / "dia_server.py")], stdout=open(HERE / ".dia_server.log", "ab"), stderr=subprocess.STDOUT, start_new_session=True)
+    import time
+    for _ in range(150):
+        time.sleep(2)
+        if _dia_up():
+            return
+    raise RuntimeError("the Dia server did not come up in 5 minutes (see tools/.dia_server.log)")
+
+
+_ONES = "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen".split()
+_TENS = "_ _ twenty thirty forty fifty sixty seventy eighty ninety".split()
+
+
+def _num_words(n):
+    if n < 20:
+        return _ONES[n]
+    if n < 100:
+        return _TENS[n // 10] + (f" {_ONES[n % 10]}" if n % 10 else "")
+    if n < 1000:
+        return f"{_ONES[n // 100]} hundred" + (f" {_num_words(n % 100)}" if n % 100 else "")
+    if n < 1000000:
+        return f"{_num_words(n // 1000)} thousand" + (f" {_num_words(n % 1000)}" if n % 1000 else "")
+    return str(n)
+
+
+def _spoken(text):
+    """Numbers as words for Dia ('1,200' -> 'twelve hundred' is avoided: it says 'one thousand two hundred')."""
+    return re.sub(r"\d[\d,]*", lambda m: _num_words(int(m.group().replace(",", ""))), text)
+
+
+DIA_ONE_SHOT_WORDS = 125  # Dia holds about 35 s per generation, the reference clip included: this many words fit in one take
+
+
+def _dia_parts(text, limit=DIA_ONE_SHOT_WORDS):
+    """The whole script in one piece when it fits; otherwise the fewest balanced pieces, cut at sentence ends."""
+    sents = [x.strip() for x in re.split(r"(?<=[.!?])\s+", text.strip()) if x.strip()]
+    total = sum(len(x.split()) for x in sents)
+    n = max(1, -(-total // limit))
+    parts, cur, size = [], [], 0
+    for x in sents:
+        w = len(x.split())
+        if cur and len(parts) < n - 1 and size + w / 2 > total / n * (len(parts) + 1):
+            parts.append(" ".join(cur))
+            cur = []
+        cur.append(x)
+        size += w
+    parts.append(" ".join(cur))
+    return parts
+
+
+def _norm_word(w):
+    return re.sub(r"[^a-z0-9']", "", w.lower())
+
+
+def _align(tokens, heard, dur):
+    """Real word times for the caption tokens from the words Dia's take was transcribed into ([[start, end, word], ...]).
+    Returns [(start, end, token)], or None if too little of the text lines up."""
+    spoken, owner = [], []
+    for i, tok in enumerate(tokens):
+        for w in (_spoken(tok).split() or [tok]):
+            spoken.append(_norm_word(w))
+            owner.append(i)
+    if not spoken or not heard:
+        return None
+    st, en = [None] * len(spoken), [None] * len(spoken)
+    for i, j, n in difflib.SequenceMatcher(None, spoken, [_norm_word(h[2]) for h in heard], autojunk=False).get_matching_blocks():
+        for k in range(n):
+            st[i + k], en[i + k] = heard[j + k][0], heard[j + k][1]
+    known = [i for i, v in enumerate(st) if v is not None]
+    if len(known) < 0.6 * len(spoken):
+        return None
+    prev_end, i = 0.0, 0
+    while i < len(spoken):  # words the transcript missed or spelled differently ("20" for "twenty") share the gap around them
+        if st[i] is not None:
+            prev_end, i = en[i], i + 1
+            continue
+        j = i
+        while j < len(spoken) and st[j] is None:
+            j += 1
+        nxt = st[j] if j < len(spoken) else max(dur, prev_end)
+        step = max(nxt - prev_end, 0) / (j - i)
+        for k in range(i, j):
+            st[k], en[k] = prev_end + step * (k - i), prev_end + step * (k - i + 1)
+        i = j
+    out, last = [], 0.0
+    for ti, tok in enumerate(tokens):
+        idx = [k for k, o in enumerate(owner) if o == ti]
+        a = max(st[idx[0]], last)
+        e = max(en[idx[-1]], a + 0.02)
+        out.append((a, e, tok))
+        last = e
+    return out
+
+
+def _speak_dia(text, mp3, log):
+    """The whole script in one take in the saved reference voice (several pieces only if it is too long for one); no second speaker is ever generated."""
+    import requests
+    _dia_start(log)
+    parts = _dia_parts(text)
+    tmp = Path(tempfile.mkdtemp(prefix="dia_"))
+    try:
+        files, words, t = [], [], 0.0
+        sil = tmp / "sil.mp3"
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono", "-t", "0.15", "-q:a", "5", str(sil)], check=True)
+        for i, s in enumerate(parts):
+            log(f"  voice {i + 1}/{len(parts)} ({len(s.split())} words, one take)")
+            r = requests.post(DIA_URL + "/speak", json={"text": _spoken(s)}, timeout=3600)
+            if r.status_code != 200 or len(r.content) < 2000:
+                raise RuntimeError(f"Dia answered {r.status_code}: {r.text[:120]}")
+            log(f"    words match {r.headers.get('X-Match')}, voice match {r.headers.get('X-Voice')}")
+            wav = tmp / f"r{i}.wav"
+            wav.write_bytes(r.content)
+            f = tmp / f"s{i}.mp3"
+            subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(wav), "-ar", "44100", "-ac", "1", "-c:a", "libmp3lame", "-q:a", "3", str(f)], check=True)
+            d = _duration(f)
+            toks = s.split()
+            al = _align(toks, json.loads(r.headers.get("X-Words") or "[]"), d)
+            if al is None:
+                al = _spread(toks, 0, d)
+            words += [(a + t, e + t, w) for a, e, w in al]
+            files += [f, sil]
+            t += d + 0.15
+        lst = tmp / "list.txt"
+        lst.write_text("".join(f"file '{p}'\n" for p in files[:-1]), encoding="utf-8")
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", str(lst), "-c:a", "libmp3lame", "-q:a", "3", str(mp3)], check=True)
+        return _duration(mp3), words
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+SPEED = 1.25  # every video is spoken at this tempo (1.0 = the voice's own speed)
 
 
 def _speed_up(mp3, words):
     """Plays the voice SPEED times faster and moves every word time with it."""
+    if SPEED == 1.0:
+        return _duration(mp3), words
     tmp = Path(str(mp3) + ".fast.mp3")
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(mp3), "-af", f"atempo={SPEED}", "-c:a", "libmp3lame", "-q:a", "3", str(tmp)], check=True)
     tmp.replace(mp3)
@@ -328,10 +507,25 @@ def _speed_up(mp3, words):
 
 
 def speak(text, voice, mp3, log):
-    """Returns (seconds, [(start, end, word_with_punctuation), ...], voice_used). Falls back to the Microsoft HD voice if Kokoro is not running."""
+    """Returns (seconds, [(start, end, word_with_punctuation), ...], voice_used). Falls back to the Microsoft HD voice if Dia or Kokoro is not running."""
     engine, vid = parse_voice(voice)
+    if engine == "dia":
+        try:
+            secs, words = _speak_dia(text, mp3, log)
+            secs, words = _speed_up(mp3, words)
+            return secs, words, "dia:ref"
+        except Exception as e:
+            log(f"  (Dia is not available: {str(e)[:120]}. Using the HD fallback voice.)")
+            engine, vid = parse_voice(FALLBACK_VOICE)
     if engine == "kokoro":
         try:
+            if KOKORO_PY.exists():
+                try:
+                    secs, words = _speak_kokoro_local(text, vid, mp3, log)
+                    secs, words = _speed_up(mp3, words)
+                    return secs, words, f"kokoro:{vid}"
+                except Exception as e:
+                    log(f"  ({str(e)[:140]}; trying the Kokoro server instead)")
             secs, words = _speak_kokoro(text, vid, mp3, log)
             secs, words = _speed_up(mp3, words)
             return secs, words, f"kokoro:{vid}"
