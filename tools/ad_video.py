@@ -537,6 +537,39 @@ def speak(text, voice, mp3, log):
     return secs, words, f"edge:{vid}"
 
 
+def qa(res):
+    """Automatic check of a finished video, so it can be approved without watching: what is spoken matches the script (transcribed back), the ending is there,
+    the length is sane, and the sign up link comes on screen before the end. Returns {"ok": bool, "match": float, "reason": str}."""
+    try:
+        from faster_whisper import WhisperModel
+    except Exception:
+        return {"ok": False, "match": 0, "reason": "no transcriber installed, so it needs a human check"}
+    tmp = Path(tempfile.mkdtemp(prefix="qa_"))
+    try:
+        wav = tmp / "a.wav"
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(res["file"]), "-vn", "-ac", "1", "-ar", "16000", str(wav)], check=True)
+        segs, _ = WhisperModel("base.en", device="cpu", compute_type="int8").transcribe(str(wav), language="en")
+        heard = " ".join(x.text for x in segs)
+        norm = lambda t: re.sub(r"[^a-z0-9' ]", " ", _spoken(t).lower().replace("%", " percent")).split()
+        want, said = norm(res.get("script", "")), norm(heard)
+        match = difflib.SequenceMatcher(None, want, said).ratio()
+        secs, link_from = res.get("seconds") or 0, res.get("link_from")
+        why = []
+        if match < 0.93:
+            why.append(f"spoken words match the script only {match:.0%}")
+        if want[-3:] != said[-3:] and want[-2:] != said[-3:-1]:
+            why.append("the ending is missing")
+        if not 12 <= secs <= 120:
+            why.append(f"odd length ({secs}s)")
+        if link_from is None or not 0 < link_from < secs - 1:
+            why.append("the sign up link is not on screen before the end")
+        return {"ok": not why, "match": round(match, 3), "reason": "; ".join(why)}
+    except Exception as e:
+        return {"ok": False, "match": 0, "reason": "check failed: " + str(e)[:100]}
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def caption_chunks(words):
     """Short caption lines that follow the speech: [(start, end, text)]."""
     chunks, cur = [], []

@@ -642,7 +642,10 @@ def run_ad_video(items, voice, product, link=None, host="loom", narrator=None):
             except Exception as e:
                 res = {"ok": False, "reason": "error: " + str(e)[:160]}
             share = ""
+            qa = ad_video.qa(res) if res.get("ok") else {"ok": False, "match": 0, "reason": res.get("reason", "")}
             if res.get("ok"):
+                log(f"   automatic check: {'passed' if qa['ok'] else 'needs a human look: ' + qa['reason']} (words {qa['match']:.0%})")
+            if res.get("ok") and host == "drive":  # only the Drive hosting mode needs a share link from the clipper app; Loom videos are uploaded from the file
                 slug = "adv_" + re.sub(r"[^A-Za-z0-9_-]", "", str(it.get("id")))[:40]
                 dest = REPO / "opencut-exports" / f"{slug}.mp4"
                 try:
@@ -655,7 +658,7 @@ def run_ad_video(items, voice, product, link=None, host="loom", narrator=None):
                 except Exception as e:
                     log("   (could not share the video: " + str(e)[:100] + ")")
             log("ADVIDEO " + json.dumps({"id": it.get("id"), "ok": bool(res.get("ok")), "reason": res.get("reason", ""), "link": share, "file": res.get("file", ""),
-                                         "facts": res.get("facts", {}), "script": res.get("script", ""), "seconds": res.get("seconds", 0), "display_name": res.get("display_name", ""), "voice": res.get("voice", ""), "ad_clicks": res.get("ad_clicks", 0)}))
+                                         "facts": res.get("facts", {}), "script": res.get("script", ""), "seconds": res.get("seconds", 0), "display_name": res.get("display_name", ""), "voice": res.get("voice", ""), "ad_clicks": res.get("ad_clicks", 0), "qa": qa}))
             if n < len(items) - 1:
                 time.sleep(random.uniform(4, 8))
         log("[runner] video maker finished.")
