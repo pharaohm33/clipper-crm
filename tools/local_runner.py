@@ -92,11 +92,11 @@ def run_fit(path):
         STATE["running"] = False
 
 
-def run_email_check(path, ai):
+def run_email_check(path, ai, jitbit=True):
     """Checks lead emails (tools/email_ai_check.py) and streams its 'EMAILCHECK {json}' lines to the page."""
     env = {**os.environ, "PYTHONUNBUFFERED": "1"}
     try:
-        proc = subprocess.Popen([sys.executable, "-u", str(HERE / "email_ai_check.py"), path] + ([] if ai else ["--no-ai"]), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        proc = subprocess.Popen([sys.executable, "-u", str(HERE / "email_ai_check.py"), path] + ([] if ai else ["--no-ai"]) + ([] if jitbit else ["--no-jitbit"]), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 text=True, env=env, cwd=str(HERE))
         STATE["proc"] = proc
         for line in proc.stdout:
@@ -1294,8 +1294,8 @@ class H(BaseHTTPRequestHandler):
             with LOCK:
                 if STATE["running"]:
                     return self._send(409, {"error": "a run is already in progress"})
-                STATE.update(running=True, log=[f"[runner] checking {len(items)} email(s)" + (" with Google AI" if body.get("ai") else "")])
-                threading.Thread(target=run_email_check, args=(fh.name, bool(body.get("ai"))), daemon=True).start()
+                STATE.update(running=True, log=[f"[runner] checking {len(items)} email(s)" + (" with Google AI" if body.get("ai") else "") + (" and Jitbit List Cleaner" if body.get("jitbit", True) else "")])
+                threading.Thread(target=run_email_check, args=(fh.name, bool(body.get("ai")), body.get("jitbit", True) is not False), daemon=True).start()
             return self._send(200, {"ok": True, "items": len(items)})
         if self.path == "/loom/uploads":
             import loom_upload

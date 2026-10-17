@@ -85,6 +85,11 @@ By hand, once per computer: in the CRM press "Connect Loom" and log in (the help
 - The LaunchAgent opens the CRM page at every login, so there is usually the login tab plus the one you use. Both share one saved copy (localStorage clipperCRM). Before, adoptNewer() replaced the whole state object when the other tab saved, so a round in progress kept writing into thrown-away lead objects (videos recorded, progress lost, runs ending early). adoptNewer() now merges IN PLACE (leads, ad leads, settings keep their identity); removed advertisers are remembered in S.adGone so they do not come back.
 - Only one tab runs the automatic top-up and the 2-minute upload/draft/schedule pass (isLeader(): localStorage clipperLead, renewed every 20 s, taken over after 150 s). The other tab shows "Another CRM tab is running the automatic top-up". Buttons you press work in any tab.
 
+## Bounces and the Jitbit check (Oct 17)
+- First live results: 18 first emails sent, 15 delivered, 3 hard bounces ("the address is bad": a named person at regmovies.com (Microsoft host), sales@jonessportsco.com and a named person at lenox.com (both behind Barracuda)). These are mailboxes that do not exist on domains that do have mail servers, so no free check can catch them: direct SMTP probing is blocked (outbound port 25 times out on this network), and Jitbit's List Cleaner runs in the browser (format, typos, duplicates, gibberish, disposable, MX only; it kept all 3 bounced addresses). Only a paid verifier that probes from its own servers (MillionVerifier, ZeroBounce, NeverBounce...) would catch them.
+- tools/email_ai_check.py now first runs every new lead's address through https://www.jitbit.com/listcleaner/ (Playwright, headless, addresses are typed into the page and processed in the browser), after the quick built-in check, before any video. Page setting S.settings.jitbitCheck (default on); every new lead is checked, not only HALCRUS ones. It caught qweqwe@gmail.com that the built-in check kept.
+- The page showed "Automatic top-up: Ad Library not answering... (7 h ago), last checked 7 h ago": the top-up loop only runs while the CRM tab is awake; Chrome had stopped the tab. Idea: move the automatic top-up into the helper.
+
 ## Photo
 tools/assets/narrator.jpg is cropped with the face centered in the circle bubble.
 

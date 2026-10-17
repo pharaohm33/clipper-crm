@@ -55,6 +55,35 @@ def verdict(o):
     return True if v == "true" else False if v == "false" else None
 
 
+JITBIT = "https://www.jitbit.com/listcleaner/"
+
+
+def jitbit_clean(addresses, log=print):
+    """Runs the addresses through Jitbit's free Email List Cleaner (its checks run inside the page: malformed, typos, duplicates, gibberish like asdf, disposable
+    mailboxes, domains with no mail server). Returns the set of addresses it KEPT, or None when the page did not answer. It cannot tell whether a mailbox exists."""
+    from playwright.sync_api import sync_playwright
+    addresses = [a for a in addresses if a]
+    if not addresses:
+        return set()
+    try:
+        with sync_playwright() as p:
+            b = p.chromium.launch(channel="chrome", headless=True)
+            try:
+                pg = b.new_context(viewport={"width": 1200, "height": 900}).new_page()
+                pg.goto(JITBIT, wait_until="domcontentloaded", timeout=30000)
+                box = pg.locator("textarea").first
+                box.fill("\n".join(addresses))
+                pg.get_by_role("button", name=re.compile(r"clean the list", re.I)).first.click()
+                pg.wait_for_function("() => /Done\\. The textbox has only valid emails now/.test(document.body.innerText)", timeout=120000)
+                kept = {x.strip().lower() for x in box.input_value().splitlines() if x.strip()}
+                return kept
+            finally:
+                b.close()
+    except Exception as e:
+        log("  (Jitbit List Cleaner could not be used: " + str(e).splitlines()[0][:100] + ")")
+        return None
+
+
 def emit(r):
     print("EMAILCHECK " + json.dumps(r), flush=True)
 
@@ -69,6 +98,15 @@ def main():
         r = {"id": it["id"], "email": it.get("email"), "valid": bool(c["ok"]), "level": c["level"], "why": c["why"], "ai": False, "reason": ""}
         out.append(r)
         emit(r)  # the quick check is final for a bad address and is reported at once, so nothing is lost if the AI part is cut short
+    if "--no-jitbit" not in sys.argv:
+        cand = [r for r in out if r["valid"]]
+        print(f"[jitbit] cleaning {len(cand)} address(es) with Jitbit List Cleaner ...", flush=True)
+        kept = jitbit_clean([str(r["email"]).strip().lower() for r in cand], log=lambda m: print(m, flush=True))
+        if kept is not None:
+            for r in cand:
+                if str(r["email"]).strip().lower() not in kept:
+                    r["valid"], r["level"], r["why"] = False, "bad", "Jitbit List Cleaner removed it (typo, gibberish, disposable or no mail server)"
+                    emit(r)
     todo = [r for r in out if r["valid"]]
     if use_ai and todo:
         try:

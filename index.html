@@ -924,9 +924,9 @@ document.addEventListener('click',async e=>{if(e.target&&e.target.id==='run-stop
 const secOpen=k=>(S.settings.secOpen||{})[k]?'open':'';
 document.addEventListener('toggle',e=>{const d=e.target;if(d&&d.dataset&&d.dataset.sec){S.settings.secOpen=S.settings.secOpen||{};S.settings.secOpen[d.dataset.sec]=d.open;save()}},true);
 /* Before a video is made: a HALCRUS lead's email is checked (format, mail server, optionally Google AI), then the helper says whether the Loom email could actually be sent to it */
-async function checkLeadEmails(leads){const fresh=leads.filter(l=>l.source==='halcrus'&&S.settings.trustHalcrus!==false&&!(l.emailCheck&&l.emailCheck.at));if(!fresh.length)return;
+async function checkLeadEmails(leads){const fresh=leads.filter(l=>l.email&&!(l.emailCheck&&l.emailCheck.at)).slice(0,40);if(!fresh.length)return;
  const ai=S.settings.aiEmailCheck===true;
- await helperJob('/emails/check',{ai,items:fresh.map(l=>({id:l.id,email:l.email,company:l.brandName||l.company,web:l.web||''}))},t=>{const r=parseTag(t,'EMAILCHECK');if(!r)return;const l=(S.adLeads||[]).find(x=>String(x.id)===String(r.id));if(!l)return;
+ await helperJob('/emails/check',{ai,jitbit:S.settings.jitbitCheck!==false,items:fresh.map(l=>({id:l.id,email:l.email,company:l.brandName||l.company,web:l.web||''}))},t=>{const r=parseTag(t,'EMAILCHECK');if(!r)return;const l=(S.adLeads||[]).find(x=>String(x.id)===String(r.id));if(!l)return;
   l.emailCheck={valid:r.valid,level:r.level,why:r.why,ai:r.ai,reason:r.reason,at:Date.now()};if(r.valid===false)l.ineligible={why:'email: '+r.why,at:Date.now()}});save()}
 async function loomEligible(leads){if(!leads.length)return {ok:[],no:[]};let r;
  try{r=await metaApi('/email/preview',{step:0,limit:Math.max(60,leads.length),template:metaTemplateObj(),leads:leads.map(l=>{const p=metaPayload(l);return {...p,tplId:'meta-loom',vars:{...p.vars,loom_link:'https://www.loom.com/share/preview'}}})})}catch(e){return {ok:leads,no:[]}}
@@ -959,7 +959,7 @@ async function startOutreach(count){if(SO.busy||LM.pipeBusy||ES.busy)return {bus
     if(got===0)noHc=true;
     pool=startPool()}
    if(pool.length){const probe=pool.slice(0,Math.max(8,(target-made)*3));
-    if(probe.some(l=>l.source==='halcrus'&&!(l.emailCheck&&l.emailCheck.at))&&S.settings.trustHalcrus!==false){say(S.settings.aiEmailCheck===true?`Checking ${probe.length} email(s) with Google AI before making any video…`:`Checking ${probe.length} email(s) before making any video…`);await checkLeadEmails(probe);pool=startPool()}
+    if(probe.some(l=>l.email&&!(l.emailCheck&&l.emailCheck.at))){say(S.settings.aiEmailCheck===true?`Checking ${probe.length} email(s) with Jitbit and Google AI before making any video…`:S.settings.jitbitCheck!==false?`Checking ${probe.length} email(s) with Jitbit List Cleaner before making any video…`:`Checking ${probe.length} email(s) before making any video…`);await checkLeadEmails(probe);pool=startPool()}
     const probe2=pool.slice(0,Math.max(8,(target-made)*3)),fresh=probe2.filter(l=>!(l.eligOk&&Date.now()-l.eligOk<864e5));
     if(fresh.length){say(`Making sure ${fresh.length} lead(s) can be emailed before spending time on their videos…`);
      const el=await loomEligible(fresh);el.ok.forEach(l=>{l.eligOk=Date.now()});el.no.forEach(({l,why})=>{l.ineligible={why,at:Date.now()};rejected.push({company:l.company,reason:'not emailed: '+why})});save();
@@ -1035,6 +1035,7 @@ function startCard(){const st=ES.status||{},w=st.window||SQ.win||{start_hour:9,e
    <div class="row" style="margin-top:4px"><label><input type="checkbox" id="so-fu" ${S.settings.autoFollowUps!==false?'checked':''}> Send follow-ups by itself: follow up 1 after 3 days, follow up 2 after 7, never to anyone who replied, asked to stop or bounced</label></div>
    <div class="row" style="margin-top:4px"><label><input type="checkbox" id="so-sendchk" ${S.settings.loomSendChecked?'checked':''}> Schedule videos that passed the automatic check even if I did not watch them. Off means those emails are saved as drafts and wait until you press "I watched them all, approve" in step 3.</label></div>
    <div class="row" style="margin-top:4px"><label><input type="checkbox" id="so-trust" ${S.settings.trustHalcrus!==false?'checked':''}> Trust HALCRUS emails: send to them on any mailbox provider (Microsoft too) as long as the address is valid</label></div>
+   <div class="row" style="margin-top:4px"><label><input type="checkbox" id="so-jitbit" ${S.settings.jitbitCheck!==false?'checked':''}> Run every new email through Jitbit's free List Cleaner before making its video (typos, gibberish, disposable and dead domains). It cannot tell whether the mailbox itself exists, so some bounces still happen.</label></div>
    <div class="row" style="margin-top:4px"><label><input type="checkbox" id="so-aicheck" ${S.settings.aiEmailCheck===true?'checked':''}> Also ask Google AI whether each new HALCRUS email is real before making its video. Slow (about 10 emails take 5 minutes) and HALCRUS likely cleaned the emails already, so it is off. The quick built-in check (valid address, has a mail server) always runs.</label></div>
    <div class=mut style="margin-top:6px">${(()=>{const A=S.settings.apprStats||{ok:0,edited:0,removed:0},t=A.ok+A.edited+A.removed;return `Your approvals so far: ${A.ok} as written, ${A.edited} edited, ${A.removed} removed${t?` (${Math.round(100*A.ok/t)}% as written)`:''}. ${t>=20&&A.ok/t>=.9?'That looks consistent. When you are ready, untick "I press Send myself" to run it all day, then add more inboxes.':'Once this stays high, switch to automatic and add more inboxes.'}`})()}</div>
   </details></div>`}
@@ -1082,6 +1083,7 @@ function loomWire(){const g=id=>document.getElementById(id),by=id=>(S.adLeads||[
   g('so-ready').onchange=e=>{S.settings.notifyReady=Math.max(1,Math.min(60,+e.target.value||10));S.settings.readyNotified=0;save();readyCheck()};
   g('so-send').onclick=()=>sendReadyNow();
   g('so-sendchk').onchange=e=>{if(e.target.checked&&!confirm('Videos that pass the automatic check will be SENT in your sending hours even if you never watched them. The check reads the finished video back and compares it with the script, but it cannot judge how it looks. Turn it on?')){e.target.checked=false;return}S.settings.loomSendChecked=e.target.checked;save();adsV();if(e.target.checked&&S.settings.loomAuto)setTimeout(()=>loomPipeline(true),600)};
+  g('so-jitbit').onchange=e=>{S.settings.jitbitCheck=e.target.checked;save()};
   g('so-trust').onchange=e=>{S.settings.trustHalcrus=e.target.checked;save()};g('so-aicheck').onchange=e=>{S.settings.aiEmailCheck=e.target.checked;save()};
   g('so-approve-all').onclick=()=>{const ls=unwatchedVideos();if(!ls.length)return;if(!confirm(`Approve ${ls.length} video${ls.length==1?'':'s'} as watched by you?`))return;ls.forEach(approveVideo);save();adsV();if(S.settings.loomAuto)setTimeout(()=>loomPipeline(true),600)};
   g('so-finish').onclick=async()=>{if(RUN.state==='working'||SO.busy||LM.pipeBusy||ES.busy)return;runBegin('Upload to Loom and save drafts');runStep('Uploading approved videos to Loom and saving their drafts…');await loomPipeline(false);const m=LM.pipeMsg||'Done.';runEnd(/not connected|could not|Not scheduled|failed/i.test(m)?'warn':'ok',m)};
