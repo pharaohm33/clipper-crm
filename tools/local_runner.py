@@ -700,6 +700,8 @@ def run_loom_upload(items, show, keep_local=False):
     """Uploads each approved video to Loom, posts the link comment near the end, and streams 'LOOM {json}' lines with the share link."""
     try:
         import loom_upload
+        loom_upload.CANCEL.clear()
+        PIPE["stop"] = False
         root = (HERE / "ad_videos").resolve()
         for n, it in enumerate(items):
             if PIPE["stop"]:
@@ -1034,6 +1036,12 @@ class H(BaseHTTPRequestHandler):
             p = STATE.get("proc")
             if p and STATE["running"]:
                 p.terminate()
+            PIPE["stop"] = True
+            try:
+                import loom_upload
+                loom_upload.CANCEL.set()   # in-process Loom upload: it checks this between its waits
+            except Exception:
+                pass
             return self._send(200, {"ok": True})
         if self.path == "/reveal":
             p = str(body.get("path", ""))

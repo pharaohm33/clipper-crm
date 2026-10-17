@@ -15,6 +15,7 @@ You log in to Loom once in that window ("Connect Loom" in the CRM); Loom remembe
     python3 tools/loom_upload.py upload <video.mp4> "<title>" "<comment text>" [--show]
 """
 import json
+import threading
 import re
 import sys
 import time
@@ -98,6 +99,14 @@ def _find_card_link(page, token):
       for(const a of links){const card=a.closest('div[class]')||a;let n=a,txt='';for(let i=0;i<6&&n;i++){txt=(n.innerText||'');if(txt.includes(tok))return a.href.split('?')[0];n=n.parentElement}}return ''}""", token)
 
 
+def _share_links(page):
+    """Every /share/ link on the library page, newest first (Loom lists the newest video first)."""
+    return page.evaluate("""()=>[...new Set([...document.querySelectorAll('a[href*="/share/"]')].map(a=>a.href.split('?')[0]))]""")
+
+
+CANCEL = threading.Event()  # set by the helper's Stop button; the upload loop checks it
+
+
 UPLOADS = HERE / "loom_uploads.json"  # video file name -> its Loom link, so a retry never uploads the same video twice
 
 
@@ -141,17 +150,25 @@ def _link_on_page(page, url):
 
 
 def _rename(page, title, log):
-    try:
+    """Gives the video a clean title. Loom may still be processing the video and then offers an AI title, so it tries a few times, checks the title really changed, and
+    leaves Loom's own title if it never works."""
+    short = re.sub(r"\s+", " ", title).strip()
+    for attempt in range(5):
         try:
-            page.get_by_role("button", name=re.compile(r"^Rename video", re.I)).first.click(timeout=3000)
+            btn = page.get_by_role("button", name=re.compile(r"^Rename video", re.I)).first
+            btn.click(timeout=4000)
+            box = page.locator("input:focus").first
+            box.fill(title, timeout=3000)
+            page.keyboard.press("Enter")
+            page.wait_for_timeout(1500)
+            now = page.get_by_role("button", name=re.compile(r"^Rename video", re.I)).first.get_attribute("aria-label") or ""
+            if short.lower() in now.lower():
+                return True
         except Exception:
-            page.locator("h1").first.click(timeout=3000)
-        page.keyboard.press("Meta+A" if sys.platform == "darwin" else "Control+A")
-        page.keyboard.type(title)
-        page.keyboard.press("Enter")
-        page.wait_for_timeout(1200)
-    except Exception:
-        log("  (could not rename the video, left Loom's own title)")
+            pass
+        page.wait_for_timeout(4000)
+    log("  (could not rename the video, left Loom's own title)")
+    return False
 
 
 def _links_report(page, url):
@@ -271,6 +288,7 @@ def upload_and_comment(video, title, comment, show=False, log=print):
                     log("  already uploaded earlier, reusing: " + known)
                 else:
                     _open_library(page)
+                    before = set(_share_links(page))  # Loom renames uploads on its own (an AI title), so the new video is found as the card that was not there before
                     log("  opening the upload box")
                     page.get_by_role("button", name=re.compile(r"^New video$", re.I)).first.click(timeout=8000)
                     page.wait_for_timeout(600)
@@ -288,7 +306,9 @@ def upload_and_comment(video, title, comment, show=False, log=print):
                         except Exception:
                             continue
                     log("  uploading; waiting for it to appear in the library")
-                    for _ in range(80):  # up to about 6 minutes
+                    for i in range(48):  # up to about 6 minutes
+                        if CANCEL.is_set():
+                            return {"ok": False, "error": "stopped by you"}
                         page.wait_for_timeout(4500)
                         try:
                             page.goto(LIBRARY, wait_until="domcontentloaded")
@@ -296,8 +316,13 @@ def upload_and_comment(video, title, comment, show=False, log=print):
                         except Exception:
                             continue
                         link = _find_card_link(page, token)
+                        if not link:
+                            new = [l for l in _share_links(page) if l not in before]
+                            link = new[0] if new else ""
                         if link:
                             break
+                        if i == 12:
+                            _snap(page, "upload_waiting")
                     if not link:
                         _snap(page, "upload_not_found")
                         return {"ok": False, "error": "the upload did not show up in your Loom library in time (see tools/loom_debug)"}
