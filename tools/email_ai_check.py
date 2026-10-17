@@ -20,12 +20,18 @@ import time
 import email_check
 
 
-def build_prompt(it):
-    web = f", website {it['web']}" if it.get("web") else ""
-    return (f"Is the email address \"{it['email']}\" a real, working business contact address for the company \"{it.get('company')}\"{web}? Judge only from what you can find: "
-            "the company's own website, business listings and directories, and whether the domain clearly belongs to this company. A generic inbox such as info@ or support@ on the company's own domain is fine. "
-            "Do not guess: say unknown when you cannot tell. End your answer with exactly one line of JSON with these keys: "
-            "email (the exact address you are answering about), valid (true, false or \"unknown\"), reason (one short sentence).")
+BATCH = 5  # addresses per question to Google AI: one answer covers all of them, so ten emails take two questions instead of ten
+
+
+def build_prompt(items):
+    """One single line (a line break would be typed as Enter and cut the question off)."""
+    if isinstance(items, dict):
+        items = [items]
+    lst = "; ".join(f"{i + 1}) {it['email']} for the company \"{it.get('company')}\"{' (website ' + it['web'] + ')' if it.get('web') else ''}" for i, it in enumerate(items))
+    return (f"For each of these {len(items)} email addresses, is it a real, working business contact address for the company named next to it? {lst}. "
+            "Judge only from what you can find: the company's own website, business listings and directories, and whether the domain clearly belongs to that company. "
+            "A generic inbox such as info@ or support@ on the company's own domain is fine. Do not guess: say unknown when you cannot tell. "
+            "End your answer with one line of JSON per address, each with the keys email (the exact address), valid (true, false or \"unknown\") and reason (one short sentence).")
 
 
 def parse(text, email=""):
@@ -49,6 +55,10 @@ def verdict(o):
     return True if v == "true" else False if v == "false" else None
 
 
+def emit(r):
+    print("EMAILCHECK " + json.dumps(r), flush=True)
+
+
 def main():
     items = json.load(open(sys.argv[1], encoding="utf-8"))
     use_ai = "--no-ai" not in sys.argv
@@ -56,8 +66,10 @@ def main():
     out = []
     for it in items:
         c = email_check.classify(it.get("email"))
-        out.append({"id": it["id"], "email": it.get("email"), "valid": bool(c["ok"]), "level": c["level"], "why": c["why"], "ai": False, "reason": ""})
-    todo = [r for r, it in zip(out, items) if r["valid"]]
+        r = {"id": it["id"], "email": it.get("email"), "valid": bool(c["ok"]), "level": c["level"], "why": c["why"], "ai": False, "reason": ""}
+        out.append(r)
+        emit(r)  # the quick check is final for a bad address and is reported at once, so nothing is lost if the AI part is cut short
+    todo = [r for r in out if r["valid"]]
     if use_ai and todo:
         try:
             import ai_browser as AB
@@ -66,22 +78,26 @@ def main():
             p_ctx = sync_playwright().start()
             sess = AB.Session(p_ctx)
             by_id = {str(it["id"]): it for it in items}
-            for n, r in enumerate(todo):
-                it = by_id[str(r["id"])]
-                print(f"[{n + 1}/{len(todo)}] asking Google AI about {it['email']} ...", flush=True)
+            groups = [todo[i:i + BATCH] for i in range(0, len(todo), BATCH)]
+            for n, grp in enumerate(groups):
+                its = [by_id[str(r["id"])] for r in grp]
+                print(f"[{n + 1}/{len(groups)}] asking Google AI about {len(its)} address(es) ...", flush=True)
                 try:
-                    data = sess.ask(G.ask_google_ai, build_prompt(it))
-                    o = parse((data or {}).get("text", ""), it["email"])
+                    data = sess.ask(G.ask_google_ai, build_prompt(its))
+                    text = (data or {}).get("text", "")
                 except Exception as e:
                     print("  (Google AI could not be asked: " + str(e)[:100] + ")", flush=True)
-                    o = None
-                v = verdict(o)
-                r["ai"] = o is not None
-                if o is not None:
-                    r["reason"] = str(o.get("reason", ""))[:160]
-                if v is False:
-                    r["valid"], r["why"] = False, "Google AI says it is not a working address: " + (r["reason"] or "no reason given")
-                if n < len(todo) - 1:
+                    text = ""
+                for r, it in zip(grp, its):
+                    o = parse(text, it["email"])
+                    v = verdict(o)
+                    r["ai"] = o is not None
+                    if o is not None:
+                        r["reason"] = str(o.get("reason", ""))[:160]
+                    if v is False:
+                        r["valid"], r["why"] = False, "Google AI says it is not a working address: " + (r["reason"] or "no reason given")
+                    emit(r)
+                if n < len(groups) - 1:
                     time.sleep(random.uniform(8, 16))
         except Exception as e:
             print("  (the Google AI check was skipped: " + str(e)[:120] + ")", flush=True)
@@ -93,8 +109,6 @@ def main():
                     p_ctx.stop()
             except Exception:
                 pass
-    for r in out:
-        print("EMAILCHECK " + json.dumps(r), flush=True)
     print("Done.", flush=True)
 
 

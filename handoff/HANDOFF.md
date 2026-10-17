@@ -62,6 +62,13 @@ By hand, once per computer: in the CRM press "Connect Loom" and log in (the help
 - HALCRUS leads are "trusted" (payload trusted_source): they ignore the provider skip as long as the address passes email_check.classify (valid mail server, not a role/junk pattern). Before any video is made, startOutreach checks each new HALCRUS lead (checkLeadEmails -> /emails/check, optionally asks Google AI via tools/email_ai_check.py in the ~/.clipper_chrome_profile browser, about 45 s each) and asks the engine whether the Loom email would actually be sent (loomEligible -> /email/preview), so no video is made for someone who would not be emailed. Ineligible leads are marked lead.ineligible and left out of the pool.
 - Settings (Automatic mode and settings): "Trust HALCRUS emails" (S.settings.trustHalcrus, default on) and "Also check each new HALCRUS email with Google AI" (S.settings.aiEmailCheck, default on). Turn the AI check off once it stops being useful; HALCRUS likely cleans its emails.
 
+## Faster runs: stock goal, bigger rounds (Oct 17)
+- One-time page migration (S.settings.fastMig): 10 videos per press, auto-schedule (sendMode auto: approved emails are scheduled by themselves), keep 2 days of emails saved, Google AI email check OFF. The quick built-in email check always runs.
+- "Emails saved" = Loom leads with a draft saved or scheduled and not sent. Goal = keepDays (default 2) x what the enabled inboxes may send today (dailyCap, from the helper's inbox caps). The automatic top-up (autoKeep) runs startOutreach(min(10, goal - saved)) and, while it makes progress and is below the goal, goes again after 20 s; with no progress it waits 3 h.
+- startOutreach: up to 14 rounds of 5 videos, keeps a buffer of 2x the leads it needs (asks HALCRUS for at least 20 at a time), remembers which leads were already confirmed emailable (lead.eligOk, 24 h) and which had no video (lead.video.reason, never retried). Leads that fail the Ad Library / brand check are the main loss (about 60% in the last run).
+- tools/email_ai_check.py: reports the quick check per lead at once, then asks Google AI 5 addresses per (single-line) question and reports each lead as it is answered, so a cut-short run keeps what it learned. Turn it on in "Automatic mode and settings".
+- Loom upload: finds the new video as the library card that was not there before (Loom auto-renames uploads), retries the rename, and Stop cancels it.
+
 ## Photo
 tools/assets/narrator.jpg is cropped with the face centered in the circle bubble.
 

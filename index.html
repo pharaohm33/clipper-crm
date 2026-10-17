@@ -676,7 +676,7 @@ function metaWire(){const g=id=>document.getElementById(id);
   try{runStep('Reading the drafts in your inboxes…');await loadDrafts();
    if(MC.msg==='Helper not running.')return runEnd('fail','The helper is not running, so nothing could be done. It starts at login. If it is not running, open Terminal and run tools/start_outreach.command.');
    let res;if(loom){res=await startOutreach()}else{runStep('Writing first-email drafts for fresh leads…');res=await proposalDrafts()}
-   runStep('Reloading the drafts…');await loadDrafts();runFinishFrom(res)}
+   runStep('Reloading the drafts…');await loadDrafts();runFinishFrom(res);if(loom&&S.settings.autoStart){S.settings.autoStartAfter=0;setTimeout(autoKeep,15000)}}
   catch(e){runEnd('fail','Something went wrong: '+(e&&e.message||e))}};
  const sendBtn=g('md-send');if(sendBtn)sendBtn.onclick=async()=>{const ok=MC.drafts.filter(d=>d.ok&&shownDraft(d));if(!ok.length)return;if(!confirm(`Send ${ok.length} approved email(s) for real? They go out one at a time, inside your sending hours.`))return;
   const leads=ok.map(d=>(S.adLeads||[]).find(l=>String(l.email||'').toLowerCase()===String(d.to||'').toLowerCase())).filter(Boolean);
@@ -805,6 +805,7 @@ const loomToDraft=()=>(S.adLeads||[]).filter(l=>l.videoAuto&&l.videoApproved&&l.
 const queued=l=>['scheduled','sending','sent','canceled','failed','bounced','skipped'].includes(l.queueStatus);
 const loomToSendBase=manual=>(S.adLeads||[]).filter(l=>l.videoAuto&&l.videoApproved&&(manual||!l.videoAutoApproved||S.settings.loomSendChecked)&&l.loomLink&&l.draftedAt&&!l.emailedAt&&!l.dnc&&!queued(l));
 const loomToSend=()=>loomToSendBase(false);
+(()=>{const g=S.settings;if(!g.fastMig){g.fastMig=1;g.startTarget=10;g.sendMode='auto';g.keepDays=2;g.aiEmailCheck=false;g.autoStartAfter=0}})();   // one time: 10 videos per press, auto-schedule, keep 2 days of emails saved, no slow one-by-one AI check
 const sendAuto=()=>S.settings.sendMode==='auto';   // default: you press Send yourself and get a notification when enough are ready
 const loomTitle=l=>`A quick look at ${l.brandName||(l.greet&&l.greet.business)||l.company}'s Meta ads`;
 async function loomUploadApproved(){const todo=loomToUpload().slice(0,3);if(!todo.length)return 0;let n=0;
@@ -913,20 +914,23 @@ const secOpen=k=>(S.settings.secOpen||{})[k]?'open':'';
 document.addEventListener('toggle',e=>{const d=e.target;if(d&&d.dataset&&d.dataset.sec){S.settings.secOpen=S.settings.secOpen||{};S.settings.secOpen[d.dataset.sec]=d.open;save()}},true);
 /* Before a video is made: a HALCRUS lead's email is checked (format, mail server, optionally Google AI), then the helper says whether the Loom email could actually be sent to it */
 async function checkLeadEmails(leads){const fresh=leads.filter(l=>l.source==='halcrus'&&S.settings.trustHalcrus!==false&&!(l.emailCheck&&l.emailCheck.at));if(!fresh.length)return;
- const ai=S.settings.aiEmailCheck!==false;
+ const ai=S.settings.aiEmailCheck===true;
  await helperJob('/emails/check',{ai,items:fresh.map(l=>({id:l.id,email:l.email,company:l.brandName||l.company,web:l.web||''}))},t=>{const r=parseTag(t,'EMAILCHECK');if(!r)return;const l=(S.adLeads||[]).find(x=>String(x.id)===String(r.id));if(!l)return;
   l.emailCheck={valid:r.valid,level:r.level,why:r.why,ai:r.ai,reason:r.reason,at:Date.now()};if(r.valid===false)l.ineligible={why:'email: '+r.why,at:Date.now()}});save()}
 async function loomEligible(leads){if(!leads.length)return {ok:[],no:[]};let r;
  try{r=await metaApi('/email/preview',{step:0,limit:Math.max(60,leads.length),template:metaTemplateObj(),leads:leads.map(l=>{const p=metaPayload(l);return {...p,tplId:'meta-loom',vars:{...p.vars,loom_link:'https://www.loom.com/share/preview'}}})})}catch(e){return {ok:leads,no:[]}}
  if(!r||!r.items)return {ok:leads,no:[]};const by={};r.items.forEach(it=>by[String(it.id)]=it);const ok=[],no=[];
  leads.forEach(l=>{const it=by[String(l.id)];if(!it||it.status==='ready')ok.push(l);else no.push({l,why:it.why||'it would be skipped'})});return {ok,no}}
+const dailyCap=()=>Math.max(10,((ES.status&&ES.status.inboxes)||[]).filter(i=>!i.paused).reduce((a,i)=>a+(+i.cap||0),0));   /* what the inboxes may send today */
+const stockNow=()=>(S.adLeads||[]).filter(l=>stratOf(l)==='loom'&&(l.draftedAt||queued(l))&&!l.emailedAt&&!l.dnc&&!l.removedAt&&!l.bounced&&!l.replied&&l.queueStatus!=='sent').length;   /* drafts saved + scheduled, not sent yet */
+const keepDays=()=>Math.max(1,Math.min(7,+S.settings.keepDays||2)),stockGoal=()=>keepDays()*dailyCap();
 async function startOutreach(count){if(SO.busy||LM.pipeBusy||ES.busy)return {busy:true};SO.busy=true;SO.log=[];const say=m=>{SO.msg=m;SO.log.push(new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})+'  '+m);runStep(m);if(tab=='ads')adsV()};
  try{
   if(!S.settings.startConfirmed){
    if(!confirm('Start outreach will make videos, upload them to your Loom and save the emails as approved drafts. By default NOTHING is sent until you press "Send" yourself: it notifies you when enough approved emails are ready (you choose how many in the Start card).\n\nIt keeps going by itself while this page is open (you can switch that off in the Start card). Continue?'))return {cancelled:true};
    S.settings.startConfirmed=1;S.settings.loomAuto=true;S.settings.loomAutoSend=true;S.settings.autoStart=true;if(!S.settings.sendMode)S.settings.sendMode='ask';
    S.settings.loomSendChecked=!!S.settings.loomSendChecked;save()}
-  const target=Math.max(1,Math.min(10,+count>0?+count:(+S.settings.startTarget||3)));
+  const target=Math.max(1,Math.min(10,+count>0?+count:(+S.settings.startTarget||10)));
   (S.adLeads||[]).forEach(l=>{if(l.loomFail&&!l.loomLink&&l.video&&l.video.ok&&l.video.file)delete l.loomFail});   // a new run retries videos whose Loom step failed (the helper remembers what is already uploaded, so nothing is uploaded twice)
   say('Checking the helper…');await loadEmailStatus();if(!ES.status){return {fatal:'The helper is not running, so nothing could be done. It starts at login. If it is not running, open Terminal and run tools/start_outreach.command.'}}
   if(!ES.status.ready){return {fatal:'Email is not set up yet: '+(ES.status.problems||[]).join('; ')}}
@@ -934,21 +938,23 @@ async function startOutreach(count){if(SO.busy||LM.pipeBusy||ES.busy)return {bus
   const snap=()=>({loom:(S.adLeads||[]).filter(l=>l.loomLink).length,drafted:(S.adLeads||[]).filter(l=>l.draftedAt||l.emailedAt).length}),s0=snap(),rejected=[],notes=[];let noLeads=false;
   if(LM.connected===false){say('Note: Loom is not connected, so videos will be made but not uploaded until you press "Connect Loom".');notes.push('Loom is not connected: press "Connect Loom" and log in so the videos can be uploaded.')}
   let made=0,tries=0,noHc=false;
-  while(made<target&&tries<5){tries++;
+  while(made<target&&tries<14){tries++;
    let pool=startPool();
-   if(pool.length<target-made&&!noHc){say(`Only ${pool.length} lead(s) ready, looking for more in HALCRUS…`);
-    const got=await halcrusMore(Math.max(10,(target-made)*3));
+   if(pool.length<(target-made)*2&&!noHc){say(`Only ${pool.length} lead(s) ready, looking for more in HALCRUS…`);
+    const got=await halcrusMore(Math.max(20,(target-made)*4));
     if(got===-1){say('HALCRUS is not connected. Press "Connect HALCRUS" and log in once. Continuing with the leads I have.');notes.push('HALCRUS is not connected, so no new leads could be found: press "Connect HALCRUS" and log in.');noHc=true}
     else if(got===-2){say('Could not read HALCRUS right now. Continuing with the leads I have.');notes.push('HALCRUS could not be read just now.');noHc=true}
     else say(got?`Added ${got} new lead(s) from HALCRUS.`:(HC.lastFound?`HALCRUS returned ${HC.lastFound} lead(s) but every one is already in your CRM.`:'HALCRUS had no new matching leads on the pages it looked at.'));
     if(got===0)noHc=true;
     pool=startPool()}
-   if(pool.length){const probe=pool.slice(0,Math.max(6,(target-made)*3));
-    if(probe.some(l=>l.source==='halcrus'&&!(l.emailCheck&&l.emailCheck.at))&&S.settings.trustHalcrus!==false){say(S.settings.aiEmailCheck!==false?`Checking ${probe.length} email(s) with Google AI before making any video…`:`Checking ${probe.length} email(s) before making any video…`);await checkLeadEmails(probe);pool=startPool()}
-    const probe2=pool.slice(0,Math.max(6,(target-made)*3));say(`Making sure ${probe2.length} lead(s) can be emailed before spending time on their videos…`);
-    const el=await loomEligible(probe2);el.no.forEach(({l,why})=>{l.ineligible={why,at:Date.now()};rejected.push({company:l.company,reason:'not emailed: '+why})});
-    if(el.no.length)say(`${el.no.length} lead(s) skipped before making a video (${[...new Set(el.no.map(x=>x.why))].slice(0,2).join('; ')}).`);pool=startPool()}
-   const batch=pool.slice(0,Math.min(3,target-made));if(!batch.length){say(made?'No more leads to make videos for.':'There are no leads to make videos for.');if(!made)noLeads=true;break}
+   if(pool.length){const probe=pool.slice(0,Math.max(8,(target-made)*3));
+    if(probe.some(l=>l.source==='halcrus'&&!(l.emailCheck&&l.emailCheck.at))&&S.settings.trustHalcrus!==false){say(S.settings.aiEmailCheck===true?`Checking ${probe.length} email(s) with Google AI before making any video…`:`Checking ${probe.length} email(s) before making any video…`);await checkLeadEmails(probe);pool=startPool()}
+    const probe2=pool.slice(0,Math.max(8,(target-made)*3)),fresh=probe2.filter(l=>!(l.eligOk&&Date.now()-l.eligOk<864e5));
+    if(fresh.length){say(`Making sure ${fresh.length} lead(s) can be emailed before spending time on their videos…`);
+     const el=await loomEligible(fresh);el.ok.forEach(l=>{l.eligOk=Date.now()});el.no.forEach(({l,why})=>{l.ineligible={why,at:Date.now()};rejected.push({company:l.company,reason:'not emailed: '+why})});save();
+     if(el.no.length)say(`${el.no.length} lead(s) skipped before making a video (${[...new Set(el.no.map(x=>x.why))].slice(0,2).join('; ')}).`)}
+    pool=startPool()}
+   const batch=pool.slice(0,Math.min(5,target-made));if(!batch.length){say(made?'No more leads to make videos for.':'There are no leads to make videos for.');if(!made)noLeads=true;break}
    say(`Making ${batch.length} video(s): ${batch.map(l=>l.company).join(', ')}…`);await metaGreet(batch);
    const ok=await makeAdVideos(batch);made+=ok;
    const bad=batch.filter(l=>!(l.video&&l.video.ok));bad.forEach(l=>rejected.push({company:l.company,reason:(l.video&&l.video.reason)||'it failed'}));say(`${ok} of ${batch.length} made${bad.length?`; skipped ${bad.map(l=>l.company+' ('+((l.video&&l.video.reason)||'failed')+')').join(', ')}`:''}.`)}
@@ -998,8 +1004,9 @@ function startCard(){const st=ES.status||{},w=st.window||SQ.win||{start_hour:9,e
    <span class=mut>Email: ${emailChip}</span></div>
   ${step(2,'Make the videos','finds leads in HALCRUS if you are running low, checks each can be emailed, makes the videos, uploads them to Loom and saves the email drafts')}
   <div class="row" style="margin-top:6px"><span class=mut>Template:</span><button class="b ${runStrat()==='loom'?'p':''}" id="md-s2" title="Strategy 2: a video of their ads, the Loom email and the Loom follow-ups">2 · The Loom</button><button class="b ${runStrat()==='proposal'?'p':''}" id="md-s1" title="Strategy 1: the plain first email and its follow-ups">1 · First email</button>
-   <label>Videos per press <input type="number" id="so-n" min="1" max="10" value="${+S.settings.startTarget||3}" style="width:56px"></label></div>
+   <label>Videos per press <input type="number" id="so-n" min="1" max="10" value="${+S.settings.startTarget||10}" style="width:56px"></label></div>
   <div class="row" style="margin-top:6px"><button class="b p" id="md-load" ${MC.busy||ES.busy||SO.busy||LM.pipeBusy||RUN.state==='working'?'disabled':''} title="${runStrat()==='loom'?'Loads your drafts, finds leads if you are running low, makes the videos, uploads them to Loom and saves the emails as drafts, then reloads the list':'Loads your drafts, writes first-email drafts for fresh leads, then reloads the list'}">${RUN.state==='working'?'⏳ Working… (see below)':runStrat()==='loom'?'▶ Load my Meta drafts + make the Loom videos':'▶ Load my Meta drafts + write first emails'}</button></div>
+  <div class="mut" style="margin-top:4px">Emails saved so far: <b>${stockNow()}</b> of ${stockGoal()} (${keepDays()} day${keepDays()==1?'':'s'} of sending). ${S.settings.autoStart?'It keeps going by itself after each round until it gets there.':'Turn on "Keep going by itself" below to let it run until it gets there.'}</div>
   <div class="run-panel">${runPanelHTML()}</div>
   ${step(3,'Check the videos','watch each one in Loom, then approve it')}
   <div class="row" style="margin-top:6px"><button class="b" id="so-approve-all" ${nWatch&&!busy?'':'disabled'} title="Marks every video in the list as watched and approved by you">✓ I watched them all, approve (${nWatch})</button><button class="b" id="so-finish" ${nFin&&!busy?'':'disabled'} title="Uploads approved videos to Loom and saves their email drafts right now">⬆ Upload to Loom + save drafts now (${nFin})</button></div>
@@ -1011,11 +1018,11 @@ function startCard(){const st=ES.status||{},w=st.window||SQ.win||{start_hour:9,e
   <div class="row" style="margin-top:6px"><button class="b p" id="so-send" ${busy||!nReady?'disabled':''}>Send ${nReady} approved email${nReady==1?'':'s'}</button><span class=mut>${nReady?'Starts them now if you are inside your sending hours, otherwise from the next opening. You can cancel any below.':'Nothing is approved and ready yet.'}</span></div>
   ${sqTable()}
   <details data-sec="auto" ${secOpen('auto')} style="margin-top:18px;padding-top:10px;border-top:1px solid var(--bd,#2a3344)"><summary><b>Automatic mode and settings</b> <span class=mut>run it all day, follow-ups, how HALCRUS emails are treated. Click to open or close.</span></summary>
-   <div class="row" style="margin-top:6px"><label><input type="checkbox" id="so-auto" ${S.settings.autoStart?'checked':''}> Keep going by itself while this page is open: whenever fewer than <input type="number" id="so-keep" min="1" max="60" value="${+S.settings.keepScheduled||15}" style="width:56px"> emails are scheduled or on their way, find leads, make videos and schedule more</label></div>
+   <div class="row" style="margin-top:6px"><label><input type="checkbox" id="so-auto" ${S.settings.autoStart?'checked':''}> Keep going by itself while this page is open until about <input type="number" id="so-keep" min="1" max="7" value="${keepDays()}" style="width:48px"> days of emails are saved (drafts waiting plus scheduled; one day is what your inboxes may send today, ${dailyCap()}). Saved now: ${stockNow()} of ${stockGoal()}. It finds leads, makes videos and schedules more until it gets there.</label></div>
    <div class="row" style="margin-top:4px"><label><input type="checkbox" id="so-ask" ${sendAuto()?'':'checked'}> I press Send myself (step 5). Notify me when</label> <input type="number" id="so-ready" min="1" max="60" value="${+S.settings.notifyReady||10}" style="width:56px"> <span>approved emails are ready. Untick to send automatically.</span></div>
    <div class="row" style="margin-top:4px"><label><input type="checkbox" id="so-fu" ${S.settings.autoFollowUps!==false?'checked':''}> Send follow-ups by itself: follow up 1 after 3 days, follow up 2 after 7, never to anyone who replied, asked to stop or bounced</label></div>
    <div class="row" style="margin-top:4px"><label><input type="checkbox" id="so-trust" ${S.settings.trustHalcrus!==false?'checked':''}> Trust HALCRUS emails: send to them on any mailbox provider (Microsoft too) as long as the address is valid</label></div>
-   <div class="row" style="margin-top:4px"><label><input type="checkbox" id="so-aicheck" ${S.settings.aiEmailCheck!==false?'checked':''}> Also check each new HALCRUS email with Google AI before making its video. Turn this off when it is not useful: HALCRUS likely cleaned the emails already.</label></div>
+   <div class="row" style="margin-top:4px"><label><input type="checkbox" id="so-aicheck" ${S.settings.aiEmailCheck===true?'checked':''}> Also ask Google AI whether each new HALCRUS email is real before making its video. Slow (about 10 emails take 5 minutes) and HALCRUS likely cleaned the emails already, so it is off. The quick built-in check (valid address, has a mail server) always runs.</label></div>
    <div class=mut style="margin-top:6px">${(()=>{const A=S.settings.apprStats||{ok:0,edited:0,removed:0},t=A.ok+A.edited+A.removed;return `Your approvals so far: ${A.ok} as written, ${A.edited} edited, ${A.removed} removed${t?` (${Math.round(100*A.ok/t)}% as written)`:''}. ${t>=20&&A.ok/t>=.9?'That looks consistent. When you are ready, untick "I press Send myself" to run it all day, then add more inboxes.':'Once this stays high, switch to automatic and add more inboxes.'}`})()}</div>
   </details></div>`}
 document.addEventListener('click',async e=>{const b=e.target.closest('[data-sq]');if(!b)return;const id=b.dataset.id;b.disabled=true;
@@ -1034,19 +1041,20 @@ async function autoKeep(){const g=S.settings;if(!g.autoStart||!g.startConfirmed|
   const act=(SQ.items||[]).filter(x=>(x.status==='scheduled'||x.status==='sending')&&!String(x.id).includes('#fu')).length,
    flight=(S.adLeads||[]).filter(l=>l.videoAuto&&l.videoApproved&&!l.emailedAt&&!l.dnc&&!l.loomFail&&!queued(l)).length,
    look=(S.adLeads||[]).filter(l=>l.videoAuto&&!l.videoApproved&&!l.emailedAt&&!l.dnc&&!l.loomLink&&l.video&&l.video.ok).length,
-   keep=Math.max(1,Math.min(60,+g.keepScheduled||15)),need=keep-act-flight;
+   stock0=stockNow(),need=stockGoal()-stock0;
   if(need<=0)return;
   if(look>=5){notifyNeeds('Videos need a look',`${look} videos did not pass the automatic check and are waiting for you in the CRM (Meta Ads tab). Nothing new is being made until you review them.`,'look');return later(1)}
   await loomStatus();if(LM.connected===false){notifyNeeds('Loom needs you','Loom is not connected, so new videos cannot be uploaded. Open the CRM, Meta Ads tab, and press Connect Loom.','loom-login');return later(1,'Waiting for you to connect Loom.')}
   runBegin('Automatic top-up');const rr=await startOutreach(Math.min(10,need));runFinishFrom(rr);await queueSync();
-  const after=(SQ.items||[]).filter(x=>(x.status==='scheduled'||x.status==='sending')&&!String(x.id).includes('#fu')).length;
-  if(after<=act){if(HC.connected===false)notifyNeeds('HALCRUS needs you','HALCRUS is not connected, so no new leads can be found. Open the CRM, Meta Ads tab, and press Connect HALCRUS.','hc-login');later(3)}
+  const stock1=stockNow();
+  if(stock1<=stock0){if(HC.connected===false)notifyNeeds('HALCRUS needs you','HALCRUS is not connected, so no new leads can be found. Open the CRM, Meta Ads tab, and press Connect HALCRUS.','hc-login');later(3)}
+  else if(stock1<stockGoal())setTimeout(autoKeep,20000)   /* progress was made and there is still room: go again right away */
  }catch(e){}}
 setInterval(autoKeep,600000);setTimeout(autoKeep,30000);
 function loomWire(){const g=id=>document.getElementById(id),by=id=>(S.adLeads||[]).find(x=>x.id==id),sync=()=>{if(tab=='ads')adsV()};
- if(g('so-n')){g('so-lm').onclick=()=>{const b=g('lp-connect');if(b)b.click()};g('so-hc').onclick=()=>hcConnect();g('so-n').onchange=e=>{S.settings.startTarget=Math.max(1,Math.min(10,+e.target.value||3));save()};
+ if(g('so-n')){g('so-lm').onclick=()=>{const b=g('lp-connect');if(b)b.click()};g('so-hc').onclick=()=>hcConnect();g('so-n').onchange=e=>{S.settings.startTarget=Math.max(1,Math.min(10,+e.target.value||10));save()};
   g('so-auto').onchange=e=>{S.settings.autoStart=e.target.checked;if(e.target.checked&&!S.settings.startConfirmed){e.target.checked=false;S.settings.autoStart=false;alert('Press Start outreach once first; it asks the questions that decide what may be sent.');return}S.settings.autoStartAfter=0;save();if(e.target.checked)setTimeout(autoKeep,500)};
-  g('so-keep').onchange=e=>{S.settings.keepScheduled=Math.max(1,Math.min(60,+e.target.value||15));save()};
+  g('so-keep').onchange=e=>{S.settings.keepDays=Math.max(1,Math.min(7,+e.target.value||2));S.settings.autoStartAfter=0;save();sync();if(S.settings.autoStart)setTimeout(autoKeep,500)};
   g('so-fu').onchange=e=>{S.settings.autoFollowUps=e.target.checked;save()};
   g('so-ready').onchange=e=>{S.settings.notifyReady=Math.max(1,Math.min(60,+e.target.value||10));S.settings.readyNotified=0;save();readyCheck()};
   g('so-send').onclick=()=>sendReadyNow();
