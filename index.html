@@ -776,11 +776,13 @@ async function loomStatus(){try{const r=await metaApi('/loom/status',{});LM.conn
 const loomToUpload=()=>(S.adLeads||[]).filter(l=>l.video&&l.video.ok&&l.video.file&&l.videoApproved&&!l.loomLink&&!l.loomFail&&!l.dnc&&!l.emailedAt);
 const loomToDraft=()=>(S.adLeads||[]).filter(l=>l.videoAuto&&l.videoApproved&&l.loomLink&&!l.draftedAt&&!l.emailedAt&&!l.dnc&&!l.loomSentAt);
 const queued=l=>['scheduled','sending','sent','canceled','failed','bounced','skipped'].includes(l.queueStatus);
-const loomToSend=()=>(S.adLeads||[]).filter(l=>l.videoAuto&&l.videoApproved&&(!l.videoAutoApproved||S.settings.loomSendChecked)&&l.loomLink&&l.draftedAt&&!l.emailedAt&&!l.dnc&&!queued(l));
+const loomToSendBase=manual=>(S.adLeads||[]).filter(l=>l.videoAuto&&l.videoApproved&&(manual||!l.videoAutoApproved||S.settings.loomSendChecked)&&l.loomLink&&l.draftedAt&&!l.emailedAt&&!l.dnc&&!queued(l));
+const loomToSend=()=>loomToSendBase(false);
+const sendAuto=()=>S.settings.sendMode==='auto';   // default: you press Send yourself and get a notification when enough are ready
 const loomTitle=l=>`A quick look at ${l.brandName||(l.greet&&l.greet.business)||l.company}'s Meta ads`;
 async function loomUploadApproved(){const todo=loomToUpload().slice(0,3);if(!todo.length)return 0;let n=0;
- await helperJob('/loom/upload',{items:todo.map(l=>({id:l.id,file:l.video.file,title:loomTitle(l),comment:meta().link})),show:!!S.settings.loomShow},t=>{const r=parseTag(t,'LOOM');if(!r)return;const l=(S.adLeads||[]).find(x=>x.id==r.id);if(!l)return;
-  if(r.ok&&r.link){l.loomLink=r.link;l.loomUploadedAt=Date.now();delete l.loomFail;n++}else{l.loomFail=r.error||'upload failed';if(r.link&&!r.ok){l.loomPartial=r.link}if(r.needs_login)LM.connected=false}});
+ await helperJob('/loom/upload',{items:todo.map(l=>({id:l.id,file:l.video.file,title:loomTitle(l),comment:meta().link})),show:!!S.settings.loomShow,keep_local:!!S.settings.keepLocalVideos},t=>{const r=parseTag(t,'LOOM');if(!r)return;const l=(S.adLeads||[]).find(x=>x.id==r.id);if(!l)return;
+  if(r.ok&&r.link){l.loomLink=r.link;l.loomUploadedAt=Date.now();delete l.loomFail;if(r.deleted&&l.video){l.video.file='';l.video.inLoomOnly=1}n++}else{l.loomFail=r.error||'upload failed';if(r.link&&!r.ok){l.loomPartial=r.link}if(r.needs_login)LM.connected=false}});
  save();return n}
 async function loomMakeDrafts(){const todo=loomToDraft().slice(0,10);if(!todo.length)return 0;await metaGreet(todo);
  await helperJob('/email/run',{campaign:'meta',mode:'drafts',leads:todo.map(metaPayload),template:metaTemplateObj(),limit:10,step:0},t=>{const r=parseTag(t,'EMAIL');if(!r)return;const l=(S.adLeads||[]).find(x=>x.id==r.id);if(!l)return;if(r.status==='drafted')l.draftedAt=Date.now();else if(r.status==='skip'){l.skipWhy=r.why;if(/Microsoft/i.test(r.why||''))l.msSkip=Date.now()}});
@@ -798,7 +800,8 @@ async function loomPipeline(auto){if(LM.pipeBusy||ES.busy)return;LM.pipeBusy=tru
   let u=0,d=0,s=0;
   if(up){say(`Uploading ${Math.min(up,3)} approved video(s) to Loom…`);u=await loomUploadApproved()}
   if(loomToDraft().length){say('Saving the emails as drafts…');d=await loomMakeDrafts()}
-  if(auto&&S.settings.loomAutoSend&&loomToSend().length){say('Scheduling the approved emails…');s=await loomQueueApproved()}
+  if(auto&&sendAuto()&&S.settings.loomAutoSend&&loomToSend().length){say('Scheduling the approved emails…');s=await loomQueueApproved()}
+  else await readyCheck()
   if(u||d||s)say(`Uploaded ${u}, saved ${d} draft(s)${auto&&S.settings.loomAutoSend?`, scheduled ${s} to send`:''}.`);else if(!up&&!loomToDraft().length&&!(auto&&loomToSend().length))say('Nothing waiting.')
  }finally{LM.pipeBusy=false;save();if(tab=='ads')adsV()}}
 setInterval(()=>{if(S.settings.loomAuto&&!LM.pipeBusy&&!ES.busy)loomPipeline(true)},120000);
@@ -824,7 +827,7 @@ async function loomQueueFollowups(){const due=(S.adLeads||[]).map(l=>[l,fuDue(l)
   if(!r||r.error)continue;
   for(const x of r.items||[]){const l=(S.adLeads||[]).find(y=>String(y.id)===String(x.id).split('#fu')[0]);if(l&&(x.status==='scheduled'||x.why==='already in the queue')){l.fuQueued=st;n++}}}
  save();return n}
-async function loomQueueApproved(){const todo=loomToSend().slice(0,60);if(!todo.length)return 0;await metaGreet(todo);let r;
+async function loomQueueApproved(manual){const todo=loomToSendBase(!!manual).slice(0,60);if(!todo.length)return 0;await metaGreet(todo);let r;
  try{r=await metaApi('/queue/add',{confirm:true,campaign:'meta',template:metaTemplateObj(),items:todo.map(l=>({id:l.id,to:l.email,company:l.brandName||l.company,lead:metaPayload(l)}))})}catch(e){LM.pipeMsg='Helper not running, nothing was scheduled.';return 0}
  if(!r||r.error){LM.pipeMsg='Not scheduled: '+((r&&r.error)||'no answer');return 0}
  let n=0;for(const x of r.items||[]){const l=(S.adLeads||[]).find(y=>String(y.id)===String(x.id));if(!l)continue;if(x.status==='scheduled'){l.queueStatus='scheduled';l.sendDue=x.due_at;n++}else if(x.status==='skipped')l.skipWhy=x.why}
@@ -847,9 +850,9 @@ async function makeAdVideos(todo){const by=id=>(S.adLeads||[]).find(x=>x.id==id)
 async function startOutreach(count){if(SO.busy||LM.pipeBusy||ES.busy)return;SO.busy=true;SO.log=[];const say=m=>{SO.msg=m;SO.log.push(new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})+'  '+m);if(tab=='ads')adsV()};
  try{
   if(!S.settings.startConfirmed){
-   if(!confirm('Start outreach will make videos, upload them to your Loom, save the emails and SCHEDULE them to send in your sending hours (the helper sends them even if this page is closed; you can cancel any of them in the table). Videos you tick yourself are always sent.\n\nIt will then keep going by itself while this page is open (you can switch that off in the Start card). Continue?'))return;
-   S.settings.startConfirmed=1;S.settings.loomAuto=true;S.settings.loomAutoSend=true;S.settings.autoStart=true;
-   S.settings.loomSendChecked=confirm('Also send the videos that pass the automatic check without you watching them?\n\nOK = yes, they are scheduled too.\nCancel = only the ones you tick "approve" on are sent (the rest wait for you).');save()}
+   if(!confirm('Start outreach will make videos, upload them to your Loom and save the emails as approved drafts. By default NOTHING is sent until you press "Send" yourself: it notifies you when enough approved emails are ready (you choose how many in the Start card).\n\nIt keeps going by itself while this page is open (you can switch that off in the Start card). Continue?'))return;
+   S.settings.startConfirmed=1;S.settings.loomAuto=true;S.settings.loomAutoSend=true;S.settings.autoStart=true;if(!S.settings.sendMode)S.settings.sendMode='ask';
+   S.settings.loomSendChecked=!!S.settings.loomSendChecked;save()}
   const target=Math.max(1,Math.min(10,+count>0?+count:(+S.settings.startTarget||3)));
   say('Checking the helper…');await loadEmailStatus();if(!ES.status){say('The helper is not running. Start it with tools/start_outreach.command, then press Start again.');return}
   if(!ES.status.ready){say('Email is not set up yet: '+(ES.status.problems||[]).join('; '));return}
@@ -873,19 +876,30 @@ async function startOutreach(count){if(SO.busy||LM.pipeBusy||ES.busy)return;SO.b
   say(`Videos ready: ${made}.${look?` ${look} need a human look before they go on.`:''} Uploading, saving drafts and scheduling…`);
   LM.pipeBusy=false;await loomPipeline(true);await queueSync();
   const act=(SQ.items||[]).filter(x=>x.status==='scheduled'),nx=act.length?Math.min(...act.map(x=>x.due_at)):0;
-  say(act.length?`${act.length} email(s) scheduled. The first goes out ${whenText(nx)}.`:(LM.connected===false?'Videos are ready. Connect Loom, then press Start again to upload and schedule them.':'Nothing scheduled yet; anything that needs your approval is listed above.'));
+  const rdy=loomToSendBase(true).length;say(!sendAuto()&&rdy?`${rdy} approved email${rdy==1?' is':'s are'} ready. Press "Send ${rdy} approved email${rdy==1?'':'s'}" when you want ${rdy==1?'it':'them'} to go out.`:act.length?`${act.length} email(s) scheduled. The first goes out ${whenText(nx)}.`:(LM.connected===false?'Videos are ready. Connect Loom, then press Start again to upload and schedule them.':'Nothing scheduled yet; anything that needs your approval is listed above.'));
  }catch(e){say('Stopped: '+(e&&e.message||e))}finally{SO.busy=false;save();if(tab=='ads')adsV()}}
 const sqLabel={scheduled:'scheduled',sending:'sending now',sent:'sent',canceled:'canceled',failed:'failed',bounced:'bounced',skipped:'skipped'};
 function sqTable(){const q=SQ.items||[];if(!q.length)return '';const cnt=k=>q.filter(x=>x.status===k).length;
  const row=x=>{const h=(x.history||[]).slice(-1)[0],note=h?`${h.event}${h.note?': '+h.note:''}`:'',act=x.status==='scheduled'?`<button class="b" data-sq="cancel" data-id="${esc(x.id)}">Cancel</button>`:(x.status==='canceled'||x.status==='failed')?`<button class="b" data-sq="resched" data-id="${esc(x.id)}">Reschedule</button>`:'',ts=(x.status==='scheduled'||x.status==='sending')?x.due_at:x.sent_at;
   return `<tr><td><b>${esc(x.company||x.to)}</b><br><span class=mut>${esc(x.to)}</span></td><td>${sqLabel[x.status]||esc(x.status)}${x.replied?' · replied':''}</td><td>${ts?esc(whenText(ts)):''}</td><td class=mut>${esc(note)}</td><td>${act}</td></tr>`};
  return `<div class="tw" style="margin-top:8px"><b>Scheduled sends</b> <span class=mut>${cnt('scheduled')} waiting · ${cnt('sent')} sent · ${cnt('bounced')} bounced · ${cnt('canceled')+cnt('failed')} need a decision. The helper keeps this list until each email is really sent, and moves the rest up when one drops out.</span><table><tr><th>Lead</th><th>Status</th><th>When</th><th>Last note</th><th></th></tr>${q.slice(0,40).map(row).join('')}</table></div>`}
+/* "Ready to send": you press Send yourself. When X approved emails are waiting you get a notification (Mac and phone), again for every further X. */
+async function readyCheck(){if(sendAuto())return;const n=loomToSendBase(true).length,x=Math.max(1,+S.settings.notifyReady||10),k=Math.floor(n/x);
+ if(n>=x){await loadEmailStatus();if(!(ES.status&&ES.status.in_send_window))return}   /* ready ahead of time is fine: the notification comes when sending hours are open */
+ if(k>(S.settings.readyNotified||0)){S.settings.readyNotified=k;save();try{await fetch(RUNNER+'/notify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:'Ready to send',message:`Sending hours are open and ${n} approved emails are ready (videos are in Loom). Open the CRM (Meta Ads tab) and press "Send ${n} approved emails" to start.`,key:'ready-'+k+'-'+Date.now(),every:60})})}catch(e){}}
+ else if(n<x&&S.settings.readyNotified){S.settings.readyNotified=0;save()}}
+async function sendReadyNow(){if(SO.busy||LM.pipeBusy||ES.busy)return;const list=loomToSendBase(true),auto=list.filter(l=>l.videoAutoApproved).length;if(!list.length)return;
+ if(!confirm(`Start sending ${list.length} approved email${list.length==1?'':'s'}?${auto?`\n\n${auto} of them passed the automatic video check and were not watched by you.`:''}\n\nThey go out one by one in your sending hours (right away if you are inside them, otherwise from the next opening), spaced by your delay and inbox limits. You can cancel any of them in the Scheduled sends table.`))return;
+ SO.busy=true;if(tab=='ads')adsV();let n=0;try{await loomStatus();n=await loomQueueApproved(true);await queueSync();
+  const act=(SQ.items||[]).filter(x=>x.status==='scheduled'),nx=act.length?Math.min(...act.map(x=>x.due_at)):0;SO.msg=n?`${n} email(s) scheduled. The first goes out ${whenText(nx)}.`:(LM.pipeMsg||'Nothing was scheduled.');S.settings.readyNotified=0;save()}finally{SO.busy=false;if(tab=='ads')adsV()}}
 function startCard(){const st=ES.status||{},w=st.window||SQ.win||{start_hour:9,end_hour:17};
  return `<div class="card" style="border-color:var(--acc)"><b>Start outreach</b> <span class=mut>One button. It finds more leads in HALCRUS only when you are running low, makes the videos, checks them, uploads them to Loom, saves the emails and schedules each one for your sending hours (${w.start_hour}:00 to ${w.end_hour}:00). Anything approved outside those hours waits in the queue and goes out by itself when they open, even if this page is closed.</span>
   <div class="row" style="margin-top:8px"><button class="b p" id="so-go" ${SO.busy||LM.pipeBusy||ES.busy?'disabled':''}>${SO.busy?'Working…':'Start outreach'}</button>
   <label>Videos per press <input type="number" id="so-n" min="1" max="10" value="${+S.settings.startTarget||3}" style="width:56px"></label>
   <span class=mut>HALCRUS: <b style="color:${HC.connected?'#22c55e':'#e5a000'}">${HC.connected?'connected':HC.connected===false?'not connected':'checking…'}</b></span><button class="b" id="so-hc" ${SO.busy||ES.busy?'disabled':''}>${HC.connected?'Reconnect HALCRUS':'Connect HALCRUS (log in once)'}</button></div>
   <div class="row" style="margin-top:4px"><label><input type="checkbox" id="so-auto" ${S.settings.autoStart?'checked':''}> Keep going by itself while this page is open: whenever fewer than <input type="number" id="so-keep" min="1" max="60" value="${+S.settings.keepScheduled||15}" style="width:56px"> emails are scheduled or on their way, find leads, make videos and schedule more</label></div>
+  <div class="row" style="margin-top:4px"><label><input type="checkbox" id="so-ask" ${sendAuto()?'':'checked'}> I press Send myself. Notify me when</label> <input type="number" id="so-ready" min="1" max="60" value="${+S.settings.notifyReady||10}" style="width:56px"> <span>approved emails are ready</span>
+   <button class="b p" id="so-send" ${SO.busy||LM.pipeBusy||ES.busy||!loomToSendBase(true).length?'disabled':''}>Send ${loomToSendBase(true).length} approved email${loomToSendBase(true).length==1?'':'s'}</button></div>
   <div class="row" style="margin-top:4px"><label><input type="checkbox" id="so-fu" ${S.settings.autoFollowUps!==false?'checked':''}> Send follow-ups by itself: follow up 1 after 3 days, follow up 2 after 7, never to anyone who replied, asked to stop or bounced</label></div>
   <div class=mut style="margin-top:6px">${esc(SO.msg||'')}</div>${SO.log.length?`<details style="margin-top:4px"><summary class=mut>What it did</summary><div class=mut>${SO.log.slice(-14).map(esc).join('<br>')}</div></details>`:''}${sqTable()}</div>`}
 document.addEventListener('click',async e=>{const b=e.target.closest('[data-sq]');if(!b)return;const id=b.dataset.id;b.disabled=true;
@@ -917,7 +931,10 @@ function loomWire(){const g=id=>document.getElementById(id),by=id=>(S.adLeads||[
  if(g('so-go')){g('so-go').onclick=()=>startOutreach();g('so-hc').onclick=()=>hcConnect();g('so-n').onchange=e=>{S.settings.startTarget=Math.max(1,Math.min(10,+e.target.value||3));save()};
   g('so-auto').onchange=e=>{S.settings.autoStart=e.target.checked;if(e.target.checked&&!S.settings.startConfirmed){e.target.checked=false;S.settings.autoStart=false;alert('Press Start outreach once first; it asks the questions that decide what may be sent.');return}S.settings.autoStartAfter=0;save();if(e.target.checked)setTimeout(autoKeep,500)};
   g('so-keep').onchange=e=>{S.settings.keepScheduled=Math.max(1,Math.min(60,+e.target.value||15));save()};
-  g('so-fu').onchange=e=>{S.settings.autoFollowUps=e.target.checked;save()}}
+  g('so-fu').onchange=e=>{S.settings.autoFollowUps=e.target.checked;save()};
+  g('so-ready').onchange=e=>{S.settings.notifyReady=Math.max(1,Math.min(60,+e.target.value||10));S.settings.readyNotified=0;save();readyCheck()};
+  g('so-send').onclick=()=>sendReadyNow();
+  g('so-ask').onchange=e=>{if(!e.target.checked&&!confirm('Automatic mode schedules every approved email to send by itself in your sending hours, with no further question. Turn it on?')){e.target.checked=true;return}S.settings.sendMode=e.target.checked?'ask':'auto';save();sync()}}
  document.querySelectorAll('[data-lm-sel]').forEach(c=>c.onchange=()=>{LM.sel[c.dataset.lmSel]=c.checked;const n=loomCandidates().filter(l=>LM.sel[l.id]&&!l.loomLink).length,b=g('lm-make');if(b){b.textContent=`Make the videos for ticked leads (${Math.min(n,3)} of ${n}, 3 at a time)`;b.disabled=LM.busy||ES.busy||!n}});
 
  g('lp-show').onchange=e=>{S.settings.loomShow=e.target.checked;save()};

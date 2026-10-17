@@ -677,7 +677,7 @@ def run_loom_login():
         STATE["running"] = False
 
 
-def run_loom_upload(items, show):
+def run_loom_upload(items, show, keep_local=False):
     """Uploads each approved video to Loom, posts the link comment near the end, and streams 'LOOM {json}' lines with the share link."""
     try:
         import loom_upload
@@ -692,6 +692,13 @@ def run_loom_upload(items, show):
                 res = {"ok": False, "error": "only the videos made by the video maker can be uploaded"}
             else:
                 res = loom_upload.upload_and_comment(f, it.get("title") or "A quick look at your Meta ads", it.get("comment") or "", show=show, log=log)
+            if res.get("ok") and res.get("link") and not (keep_local or os.getenv("KEEP_LOCAL_VIDEOS") == "1"):
+                try:  # the video lives in Loom now: do not let finished videos pile up on this disk
+                    f.unlink()
+                    res["deleted"] = True
+                    log("   (removed the local copy, it is in Loom now)")
+                except Exception:
+                    pass
             log("LOOM " + json.dumps({"id": it.get("id"), **res}))
             if res.get("needs_login"):
                 phone_notify("Loom needs you", "Loom asked for a login again, so videos are waiting. Open the CRM, Meta Ads tab, and press Connect Loom.", key="loom-login", every=6 * 3600)
@@ -1267,7 +1274,7 @@ class H(BaseHTTPRequestHandler):
                     return self._send(409, {"error": "a run is already in progress"})
                 STATE.update(running=True, log=[f"[runner] uploading {len(items)} approved video(s) to Loom"])
                 PIPE["stop"] = False
-                threading.Thread(target=run_loom_upload, args=(items, bool(body.get("show"))), daemon=True).start()
+                threading.Thread(target=run_loom_upload, args=(items, bool(body.get("show")), bool(body.get("keep_local"))), daemon=True).start()
             return self._send(200, {"ok": True, "items": len(items)})
         if self.path == "/ads/video":
             items = [{k: str(b.get(k) or "")[:300] for k in ("id", "company", "email", "web", "first", "business")} for b in (body.get("items") or [])][:5]
