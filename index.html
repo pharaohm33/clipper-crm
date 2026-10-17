@@ -633,7 +633,7 @@ function metaCards(){const m=meta(),fresh=metaFresh().length,drafted=(S.adLeads|
  const ta=([k,lab])=>`<label>${esc(lab)}</label><textarea data-mk="${k}" rows="${k==='subject'||k==='loomSubject'?1:/^(fu|loomFu)/.test(k)?6:9}" style="width:100%">${esc(m[k])}</textarea>`;
  const pv=MC.preview;
  const dr=MC.drafts;
- return `<div class="card"><b>Emails for this campaign</b> <span class=mut>${fresh} ready for a first email · ${drafted} saved as drafts · ${sent} sent. These are separate from the podcast clips emails and never use that wording. Fill-ins: {first_name} {business} {product} {link} {sender}. Your name, postal address and an opt out line are added automatically.</span>
+ return `<details class="card" data-sec="tpl" ${secOpen('tpl')}><summary><b>Email templates</b> <span class=mut>Strategy 1 and Strategy 2 wording, preview and first-email drafts. Click to open or close.</span></summary><span class=mut>${fresh} ready for a first email · ${drafted} saved as drafts · ${sent} sent. These are separate from the podcast clips emails and never use that wording. Fill-ins: {first_name} {business} {product} {link} {sender}. Your name, postal address and an opt out line are added automatically.</span>
   <div class="grid"><div><label>Product name</label><input data-mk="product" value="${esc(m.product)}"></div><div><label>Sign up link</label><input data-mk="link" value="${esc(m.link)}"></div></div>
   ${META_LABELS.map(ta).join('')}
   <div class="row" style="margin-top:6px"><button class="b" id="mt-reset">Reset all to the defaults</button></div>
@@ -643,10 +643,9 @@ function metaCards(){const m=meta(),fresh=metaFresh().length,drafted=(S.adLeads|
   <div class="mut" id="mt-msg" style="margin-top:6px;white-space:pre-wrap">${esc(MC.msg)}</div>
   ${pv?`<div style="border:1px solid var(--bd,#444);border-radius:6px;padding:8px;margin-top:6px"><b>Preview for ${esc(pv.company)}</b> <span class=mut>(not saved or sent)</span><div><b>Subject:</b> ${esc(pv.subject)}</div><div style="white-space:pre-wrap" class=mut>${esc(pv.body)}</div></div>`:''}
   ${MC.replies.length?`<div style="margin-top:8px"><b>Replies found</b>${MC.replies.map(r=>`<div class=mut>${esc(r.email)}: ${esc(r.intent||r.kind)} ${r.confidence!=null?'('+Math.round(r.confidence*100)+'%)':''} · ${esc(r.summary||'')} → <b>${esc(r.auto||'')}</b></div>`).join('')}</div>`:''}
- </div>
+ </details>
  <div class="card"><b>Drafts to review</b> <span class=mut>Read them, tick the ones you approve, then send. Sends go one at a time from your rotating inboxes, inside your sending hours and daily limits. To change the wording, edit the templates above and save the drafts again.</span>
-  <div class="row" style="margin-top:6px"><button class="b" id="md-ub" title="Read, edit and approve every draft and reply from all your inboxes">📥 Open Unibox</button><span class=mut>Template:</span><button class="b ${runStrat()==='loom'?'p':''}" id="md-s2" title="Strategy 2: a video of their ads, the Loom email and the Loom follow-ups">2 · The Loom</button><button class="b ${runStrat()==='proposal'?'p':''}" id="md-s1" title="Strategy 1: the plain first email and its follow-ups">1 · First email</button>
-  <button class="b p" id="md-load" ${MC.busy||ES.busy||SO.busy||LM.pipeBusy?'disabled':''} title="${runStrat()==='loom'?'Loads your drafts, finds leads if you are running low, makes the videos, uploads them to Loom and saves the emails as drafts, then reloads the list':'Loads your drafts, writes first-email drafts for fresh leads, then reloads the list'}">${runStrat()==='loom'?'↻ Load my Meta drafts + make the Loom videos':'↻ Load my Meta drafts + write first emails'}</button><button class="b p" id="md-send" ${dr&&dr.some(d=>d.ok&&shownDraft(d))?'':'disabled'}>Send the approved drafts</button><button class="b" id="md-all" ${dr&&dr.length?'':'disabled'}>Tick all</button></div>
+  <div class="row" style="margin-top:6px"><button class="b" id="md-reload" ${MC.busy?'disabled':''} title="Only re-read the drafts in your inboxes">↻ Reload drafts</button></button><button class="b p" id="md-send" ${dr&&dr.some(d=>d.ok&&shownDraft(d))?'':'disabled'}>Send the approved drafts</button><button class="b" id="md-all" ${dr&&dr.length?'':'disabled'}>Tick all</button></div>
   ${dr?(()=>{const sh=dr.map((d,i)=>[d,i]).filter(([d])=>shownDraft(d)),hid=dr.length-sh.length;return (hid||MC.showAll?`<div class=mut style="margin-top:6px">${MC.showAll?'Showing every Meta draft.':`${hid} draft${hid==1?' is':'s are'} from the other template (${runStrat()==='loom'?'Strategy 1 first emails':'Strategy 2 Loom emails'}) and hidden.`} <button class="b" id="md-showall">${MC.showAll?'Show only this template':'Show them'}</button></div>`:'')+(sh.length?sh.map(([d,i])=>`<div style="border:1px solid var(--bd,#444);border-radius:6px;padding:8px;margin-top:6px"><label style="display:flex;gap:6px;align-items:center"><input type="checkbox" data-ok="${i}" ${d.ok?'checked':''}> <b>${esc(d.to)}</b> <span class=mut>from ${esc(d.inbox||'')}</span> <button class="b" data-dx="${i}" style="margin-left:auto">Discard</button></label><div><b>${esc(d.subject||'')}</b></div><div class=mut style="white-space:pre-wrap">${esc((d.body||'').slice(0,700))}</div></div>`).join(''):`<div class=mut style="margin-top:6px">No ${runStrat()==='loom'?'Loom':'first-email'} drafts waiting.</div>`)})():''}
  </div>`}
 function metaWire(){const g=id=>document.getElementById(id);
@@ -655,10 +654,10 @@ function metaWire(){const g=id=>document.getElementById(id);
  g('mt-reset').onclick=()=>{if(confirm('Replace every Meta email and reply template with the defaults?')){S.settings.meta={};save();adsV()}};
  g('mt-prev').onclick=async()=>{const l=metaFresh()[0]||(S.adLeads||[]).find(x=>x.email);if(!l){MC.msg='No lead with an email to preview.';return sync()}
   await metaGreet([l]);try{const r=await metaApi('/email/preview',{leads:[metaPayload(l)],template:metaTemplateObj(),limit:1,step:0});const it=(r.items||[])[0];MC.preview=it&&it.status==='ready'?{company:l.company,subject:it.subject,body:it.body}:null;MC.msg=it&&it.status!=='ready'?'Preview skipped: '+it.why:'';}catch(e){MC.msg='Helper not running.'}sync()};
- const proposalDrafts=async()=>{const todo=metaFresh().slice(0,10);if(!todo.length)return;MC.busy=true;MC.msg='Working out who each email says Hey to…';sync();await metaGreet(todo);MC.msg=`Saving ${todo.length} first emails as drafts in your sending inboxes…`;sync();
+ const proposalDrafts=async()=>{const todo=metaFresh().slice(0,10);if(!todo.length)return {proposal:true,none:true,saved:0,skipped:[]};MC.busy=true;MC.msg='Working out who each email says Hey to…';sync();await metaGreet(todo);MC.msg=`Saving ${todo.length} first emails as drafts in your sending inboxes…`;sync();
   const ok=await helperJob('/email/run',{campaign:'meta',mode:'drafts',leads:todo.map(metaPayload),template:metaTemplateObj(),limit:10,step:0},t=>{const r=parseTag(t,'EMAIL');if(!r)return;const l=(S.adLeads||[]).find(x=>x.id==r.id);if(!l)return;
    if(r.status==='drafted'){l.draftedAt=Date.now();if(!l.strategy)l.strategy='proposal'}else if(r.status==='skip'&&/Microsoft/i.test(r.why||''))l.msSkip=Date.now();else if(r.status==='skip')l.skipWhy=r.why});
-  MC.busy=false;MC.msg=ok?`Done. ${todo.filter(l=>l.draftedAt).length} drafts saved, ${todo.filter(l=>l.msSkip).length} skipped because their mailbox is hosted by Microsoft.`:(ES.msg||'It did not run.');save();sync()};
+  MC.busy=false;MC.msg=ok?`Done. ${todo.filter(l=>l.draftedAt).length} drafts saved, ${todo.filter(l=>l.msSkip).length} skipped because their mailbox is hosted by Microsoft.`:(ES.msg||'It did not run.');save();sync();return {proposal:true,ok:!!ok,saved:todo.filter(l=>l.draftedAt).length,skipped:todo.filter(l=>!l.draftedAt).map(l=>({company:l.company,reason:l.skipWhy||(l.msSkip?'its mailbox is hosted by Microsoft':'it was skipped')}))}};
  g('mt-draft').onclick=proposalDrafts;
  g('mt-fu').onclick=async()=>{const todo=(S.adLeads||[]).filter(l=>l.emailedAt&&!l.replied&&!l.dnc);const step=1;if(!todo.length)return;if(!confirm('Send the follow ups that are due (follow up 1 after 3 days, follow up 2 after 7 days) for real? Anyone not due yet, or who already replied, is skipped automatically.'))return;
   MC.busy=true;MC.msg='Sending the follow ups that are due…';sync();await metaGreet(todo);let sent=0,skipped=0;
@@ -671,9 +670,13 @@ function metaWire(){const g=id=>document.getElementById(id);
   MC.busy=false;save();sync()};
  const loadDrafts=async()=>{MC.busy=true;MC.msg='Reading the Drafts folders of your sending inboxes…';sync();try{const r=await metaApi('/unibox/drafts',{campaign:'meta'});MC.drafts=(r.drafts||[]).map(d=>({...d,ok:false}));MC.msg=(r.errors&&r.errors.length)?'Some inboxes could not be read: '+r.errors[0]:''}catch(e){MC.msg='Helper not running.'}MC.busy=false;sync()};
  g('md-ub').onclick=()=>{tab='unibox';render();ubLoad()};g('md-s1').onclick=()=>{S.settings.runStrategy='proposal';save();sync()};g('md-s2').onclick=()=>{S.settings.runStrategy='loom';save();sync()};
- g('md-load').onclick=async()=>{await loadDrafts();if(MC.msg==='Helper not running.')return;
-  if(runStrat()==='loom')await startOutreach();else await proposalDrafts();
-  await loadDrafts()};
+ g('md-reload').onclick=loadDrafts;
+ g('md-load').onclick=async()=>{if(RUN.state==='working'||MC.busy||SO.busy||LM.pipeBusy||ES.busy)return;const loom=runStrat()==='loom';runBegin(loom?'Loom videos':'First emails');
+  try{runStep('Reading the drafts in your inboxes…');await loadDrafts();
+   if(MC.msg==='Helper not running.')return runEnd('fail','The helper is not running, so nothing could be done. It starts at login. If it is not running, open Terminal and run tools/start_outreach.command.');
+   let res;if(loom){res=await startOutreach()}else{runStep('Writing first-email drafts for fresh leads…');res=await proposalDrafts()}
+   runStep('Reloading the drafts…');await loadDrafts();runFinishFrom(res)}
+  catch(e){runEnd('fail','Something went wrong: '+(e&&e.message||e))}};
  const sendBtn=g('md-send');if(sendBtn)sendBtn.onclick=async()=>{const ok=MC.drafts.filter(d=>d.ok&&shownDraft(d));if(!ok.length)return;if(!confirm(`Send ${ok.length} approved email(s) for real? They go out one at a time, inside your sending hours.`))return;
   const leads=ok.map(d=>(S.adLeads||[]).find(l=>String(l.email||'').toLowerCase()===String(d.to||'').toLowerCase())).filter(Boolean);
   MC.busy=true;MC.msg='Sending…';sync();await metaGreet(leads);let n=0;
@@ -776,7 +779,7 @@ function loomCard(){const m=meta(),cands=loomCandidates(),gm=loomGmail(),ready=c
  const gmRow=l=>{const d=l.contactedAt?Math.floor((Date.now()-l.contactedAt)/864e5):null,which=d===null?'':d>=7?'loomFu2':d>=3?'loomFu1':'';
   return `<tr><td><b>${esc(l.company)}</b><br><span class=mut>${esc(l.contacted)}</span></td><td><input type="date" data-lm-date="${esc(l.id)}" value="${l.contactedAt?new Date(l.contactedAt).toISOString().slice(0,10):''}"></td>
   <td>${d===null?'<span class=mut>enter the date you emailed them</span>':which?`<button class="b p" data-lm-copy="${esc(l.id)}|${which}">Copy ${which==='loomFu2'?'follow up 2':'follow up 1'}</button> <span class=mut>${d} days since your email</span>`:`<span class=mut>${d} day${d==1?'':'s'} since your email, follow up 1 is due on day 3</span>`}</td></tr>`};
- return `${startCard()}<div class="card" style="border-color:#0ea5e9"><b>Loom video outreach</b> <span class=mut>You record a short video of what you found in their Meta ads, and the email just carries the link. It can be the first email, or a second touch for someone emailed 3+ days ago who has not replied. The same person never gets the video email twice, and never right after another email.</span>
+ return `<div class="card" style="border-color:#0ea5e9"><b>Loom video outreach</b> <span class=mut>You record a short video of what you found in their Meta ads, and the email just carries the link. It is its own strategy: a lead gets the Loom email and its follow-ups, never mixed with the plain first email. The same person never gets the video email twice, and never right after another email.</span>
   <div class="row" style="margin-top:8px"><button class="b p" id="lm-draft" ${LM.busy||ES.busy||!ready?'disabled':''}>Save the Loom emails as drafts (${ready} ready)</button><button class="b p" id="lm-make" ${LM.busy||ES.busy||!ticked?'disabled':''} title="Reads their ads in the Meta Ad Library, checks the brand matches the email domain, records the page scrolling, adds a free voice, and shares the video as a link. About 2 minutes each.">Make the videos for ticked leads (${Math.min(ticked,3)} of ${ticked}, 3 at a time)</button><select id="lm-host" title="Where you will post the video. This changes what the voice says about the link."><option value="loom" ${(S.settings.videoHost||'loom')==='loom'?'selected':''}>Post on Loom (link in the comments)</option><option value="drive" ${S.settings.videoHost==='drive'?'selected':''}>Use the Drive link</option></select><select id="lm-voice" title="Free voice">${VOICES.map(([v,t])=>`<option value="${v}" ${voiceSel()===v?'selected':''}>${t}</option>`).join('')}</select><input id="lm-name" value="${esc(narratorName())}" placeholder="name said in the video (blank = none)" title="The name the voice says, as in 'it's Emmanuel'. Leave it blank to say no name. It should be the person the email is signed by." style="width:200px"><button class="b" id="lm-prev">Preview for the first ticked lead</button><span class=mut>${esc(LM.msg)}</span></div>
   <div style="border:1px solid var(--bd,#444);border-radius:8px;padding:8px;margin-top:8px"><b>Approved video to Loom to sent email</b> <span class=mut>When you tick "I watched it, approve", the video is uploaded to your Loom, gets a comment with your sign up link near the end (Loom turns it into its own clickable link on the video), and its Loom link goes into the email.</span>
    <div class="row" style="margin-top:6px"><span class=mut>Loom: <b style="color:${LM.connected?'#22c55e':'#e5a000'}">${LM.connected?'connected':LM.connected===false?'not connected':'checking…'}</b></span><button class="b" id="lp-connect" ${LM.pipeBusy||ES.busy?'disabled':''}>${LM.connected?'Reconnect Loom':'Connect Loom (log in once)'}</button>
@@ -870,37 +873,72 @@ async function makeAdVideos(todo){const by=id=>(S.adLeads||[]).find(x=>x.id==id)
   if(r.ok){l.strategy='loom';l.video.file=r.file;if(r.facts&&r.facts.active)l.adsCount=r.facts.active;l.videoAuto=1;l.videoQa=r.qa||null;l.videoApproved=(r.qa&&r.qa.ok&&S.settings.videoAutoApprove!==false)?Date.now():0;l.videoAutoApproved=l.videoApproved?1:0;l.video.host=S.settings.videoHost||'loom';if(r.link&&l.video.host==='drive')l.loomLink=r.link}
   save()});
  return todo.filter(l=>l.video&&l.video.ok).length}
-async function startOutreach(count){if(SO.busy||LM.pipeBusy||ES.busy)return;SO.busy=true;SO.log=[];const say=m=>{SO.msg=m;SO.log.push(new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})+'  '+m);if(tab=='ads')adsV()};
+/* ---------- Live status of the one-button run: working, maybe stuck, done, needs attention, failed ---------- */
+const RUN={state:'idle',label:'',step:'',startedAt:0,endedAt:0,stepAt:0,lastRaw:'',lastLen:0,lastLine:'',lastLineAt:0,steps:[],summary:'',details:[],stopAsked:false};
+const runMin=s=>s>=60?Math.floor(s/60)+' min '+(s%60)+' s':s+' s';
+function runRender(){document.querySelectorAll('.run-panel').forEach(el=>{el.innerHTML=runPanelHTML()})}
+function runBegin(label){Object.assign(RUN,{state:'working',label,step:'Starting…',startedAt:Date.now(),endedAt:0,stepAt:Date.now(),lastLineAt:0,steps:[],summary:'',details:[],stopAsked:false});if(tab=='ads')adsV();else runRender()}
+function runStep(m){if(RUN.state!=='working')return;RUN.step=m;RUN.stepAt=Date.now();RUN.steps.push(new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit',second:'2-digit'})+'  '+m);runRender()}
+function runEnd(state,summary,details){RUN.state=state;RUN.summary=summary;RUN.details=details||[];RUN.endedAt=Date.now();if(tab=='ads')adsV();else runRender()}
+const runPretty=t=>{t=String(t||'');const m=t.match(/^(ADVIDEO|LOOM|EMAIL|HALCRUSEND|HALCRUS) /);if(!m)return t.slice(0,140);return {ADVIDEO:'a video finished',LOOM:'a video was uploaded to Loom',EMAIL:'an email draft was handled',HALCRUS:'a new lead was found',HALCRUSEND:'finished reading HALCRUS'}[m[1]]};
+function runTick(){if(RUN.state!=='working')return;const L=ES.lines||[],last=L[L.length-1];if(last!==RUN.lastRaw||L.length!==RUN.lastLen){RUN.lastRaw=last;RUN.lastLen=L.length;RUN.lastLine=runPretty(last);RUN.lastLineAt=Date.now()}runRender()}
+setInterval(runTick,3000);
+function runPanelHTML(){const r=RUN;if(r.state==='idle')return '';const end=r.endedAt||Date.now(),el=Math.round((end-r.startedAt)/1000);
+ const log=r.steps.length?`<details style="margin-top:4px"><summary class=mut>What happened</summary><div class=mut style="white-space:pre-wrap">${r.steps.slice(-30).map(esc).join('\n')}</div></details>`:'';
+ if(r.state==='working'){const idle=Math.round((Date.now()-Math.max(r.stepAt,r.lastLineAt||0))/1000),stuck=idle>240;
+  return `<div style="border:2px solid ${stuck?'#e5a000':'#2f6fed'};border-radius:8px;padding:8px;margin-top:8px"><b>${stuck?'⚠ Maybe stuck':'⏳ Working'}</b> <span class=mut>${esc(r.label)} · running for ${runMin(el)}</span><div style="margin-top:2px">${esc(r.step)}</div>${r.lastLine?`<div class=mut>Latest from the helper: ${esc(r.lastLine)} (${runMin(Math.max(0,Math.round((Date.now()-(r.lastLineAt||r.stepAt))/1000)))} ago)</div>`:''}
+   ${stuck?`<div style="color:#e5a000;margin-top:4px">Nothing has happened for ${runMin(idle)}. Videos can take a few minutes each, but this looks stuck. <button class="b" id="run-stop">${r.stopAsked?'Stop requested…':'Stop it'}</button><div class=mut>If stopping does not help, restart the helper: <code>launchctl kickstart -k gui/$(id -u)/com.clipper.helper</code></div></div>`:''}${log}</div>`}
+ const col=r.state==='ok'?'#22c55e':r.state==='warn'?'#e5a000':'#e5484d',head=r.state==='ok'?'✓ Done':r.state==='warn'?'⚠ Finished, but check this':'✗ Failed';
+ return `<div style="border:2px solid ${col};border-radius:8px;padding:8px;margin-top:8px"><b style="color:${col}">${head}</b> <span class=mut>${esc(r.label)} · took ${runMin(el)}</span><div style="margin-top:2px">${esc(r.summary)}</div>${(r.details||[]).length?`<div class=mut style="margin-top:4px">${r.details.map(esc).join('<br>')}</div>`:''}${log}</div>`}
+function runFinishFrom(res){const d=[];
+ if(!res||res.busy)return runEnd('warn','Another job was already running, so nothing new was started. Wait for it to finish, then try again.');
+ if(res.cancelled)return runEnd('warn','Cancelled: you chose not to start.');
+ if(res.fatal)return runEnd('fail',res.fatal);
+ if(res.proposal){const n=res.saved||0,sk=res.skipped||[];sk.slice(0,6).forEach(x=>d.push(`${x.company}: skipped (${x.reason})`));
+  if(res.none)return runEnd('warn','No fresh leads to write first emails for: every lead with an email already has a draft, was emailed, or is in the Loom flow. Import or find more leads.');
+  return runEnd(n?'ok':'warn',n?`${n} first-email draft${n==1?'':'s'} saved${sk.length?`, ${sk.length} skipped`:''}. Review them in the list below or in the Unibox.`:`No drafts were saved${sk.length?`: ${sk.length} skipped`:''}.`,d)}
+ (res.rejected||[]).forEach(x=>d.push(`${x.company}: no video (${x.reason})`));(res.notes||[]).forEach(n=>d.push(n));
+ const parts=[];if(res.made)parts.push(`${res.made} video${res.made==1?'':'s'} made`);if(res.uploaded)parts.push(`${res.uploaded} uploaded to Loom`);if(res.drafted)parts.push(`${res.drafted} draft${res.drafted==1?'':'s'} saved`);
+ const tail=res.ready?` ${res.ready} approved email${res.ready==1?' is':'s are'} ready to send.`:'';
+ if(res.made&&res.loomDown)return runEnd('warn',`${res.made} video${res.made==1?'':'s'} made but NOT uploaded: Loom is not connected. Press "Connect Loom" and log in, then run it again.`,d);
+ if(parts.length||res.ready)return runEnd('ok',(parts.join(', ')||'Nothing new was made')+'.'+tail,d);
+ return runEnd('warn',(res.rejected&&res.rejected.length)?'No videos could be made: every lead that was tried was skipped (details below), and there were no more leads to try. Import more leads, or connect HALCRUS so it can find more.':res.noLeads?'No leads to make videos for. Import leads, or connect HALCRUS so it can find more.':'Nothing new to do right now.',d)}
+document.addEventListener('click',async e=>{if(e.target&&e.target.id==='run-stop'){RUN.stopAsked=true;runRender();try{await fetch(RUNNER+'/stop',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})}catch(_){}}});
+const secOpen=k=>(S.settings.secOpen||{})[k]?'open':'';
+document.addEventListener('toggle',e=>{const d=e.target;if(d&&d.dataset&&d.dataset.sec){S.settings.secOpen=S.settings.secOpen||{};S.settings.secOpen[d.dataset.sec]=d.open;save()}},true);
+async function startOutreach(count){if(SO.busy||LM.pipeBusy||ES.busy)return {busy:true};SO.busy=true;SO.log=[];const say=m=>{SO.msg=m;SO.log.push(new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})+'  '+m);runStep(m);if(tab=='ads')adsV()};
  try{
   if(!S.settings.startConfirmed){
-   if(!confirm('Start outreach will make videos, upload them to your Loom and save the emails as approved drafts. By default NOTHING is sent until you press "Send" yourself: it notifies you when enough approved emails are ready (you choose how many in the Start card).\n\nIt keeps going by itself while this page is open (you can switch that off in the Start card). Continue?'))return;
+   if(!confirm('Start outreach will make videos, upload them to your Loom and save the emails as approved drafts. By default NOTHING is sent until you press "Send" yourself: it notifies you when enough approved emails are ready (you choose how many in the Start card).\n\nIt keeps going by itself while this page is open (you can switch that off in the Start card). Continue?'))return {cancelled:true};
    S.settings.startConfirmed=1;S.settings.loomAuto=true;S.settings.loomAutoSend=true;S.settings.autoStart=true;if(!S.settings.sendMode)S.settings.sendMode='ask';
    S.settings.loomSendChecked=!!S.settings.loomSendChecked;save()}
   const target=Math.max(1,Math.min(10,+count>0?+count:(+S.settings.startTarget||3)));
-  say('Checking the helper…');await loadEmailStatus();if(!ES.status){say('The helper is not running. Start it with tools/start_outreach.command, then press Start again.');return}
-  if(!ES.status.ready){say('Email is not set up yet: '+(ES.status.problems||[]).join('; '));return}
+  say('Checking the helper…');await loadEmailStatus();if(!ES.status){return {fatal:'The helper is not running, so nothing could be done. It starts at login. If it is not running, open Terminal and run tools/start_outreach.command.'}}
+  if(!ES.status.ready){return {fatal:'Email is not set up yet: '+(ES.status.problems||[]).join('; ')}}
   await queueSync();await loomStatus();
-  if(LM.connected===false)say('Note: Loom is not connected, so videos will be made but not uploaded until you press "Connect Loom".');
+  const snap=()=>({loom:(S.adLeads||[]).filter(l=>l.loomLink).length,drafted:(S.adLeads||[]).filter(l=>l.draftedAt||l.emailedAt).length}),s0=snap(),rejected=[],notes=[];let noLeads=false;
+  if(LM.connected===false){say('Note: Loom is not connected, so videos will be made but not uploaded until you press "Connect Loom".');notes.push('Loom is not connected: press "Connect Loom" and log in so the videos can be uploaded.')}
   let made=0,tries=0,noHc=false;
   while(made<target&&tries<5){tries++;
    let pool=startPool();
    if(pool.length<target-made&&!noHc){say(`Only ${pool.length} lead(s) ready, looking for more in HALCRUS…`);
     const got=await halcrusMore(Math.max(10,(target-made)*3));
-    if(got===-1){say('HALCRUS is not connected. Press "Connect HALCRUS" and log in once. Continuing with the leads I have.');noHc=true}
-    else if(got===-2){say('Could not read HALCRUS right now. Continuing with the leads I have.');noHc=true}
+    if(got===-1){say('HALCRUS is not connected. Press "Connect HALCRUS" and log in once. Continuing with the leads I have.');notes.push('HALCRUS is not connected, so no new leads could be found: press "Connect HALCRUS" and log in.');noHc=true}
+    else if(got===-2){say('Could not read HALCRUS right now. Continuing with the leads I have.');notes.push('HALCRUS could not be read just now.');noHc=true}
     else say(got?`Added ${got} new lead(s) from HALCRUS.`:'HALCRUS had no new matching leads on the pages it looked at.');
     if(got===0)noHc=true;
     pool=startPool()}
-   const batch=pool.slice(0,Math.min(3,target-made));if(!batch.length){say(made?'No more leads to make videos for.':'There are no leads to make videos for.');break}
+   const batch=pool.slice(0,Math.min(3,target-made));if(!batch.length){say(made?'No more leads to make videos for.':'There are no leads to make videos for.');if(!made)noLeads=true;break}
    say(`Making ${batch.length} video(s): ${batch.map(l=>l.company).join(', ')}…`);await metaGreet(batch);
    const ok=await makeAdVideos(batch);made+=ok;
-   const bad=batch.filter(l=>!(l.video&&l.video.ok));say(`${ok} of ${batch.length} made${bad.length?`; skipped ${bad.map(l=>l.company+' ('+((l.video&&l.video.reason)||'failed')+')').join(', ')}`:''}.`)}
+   const bad=batch.filter(l=>!(l.video&&l.video.ok));bad.forEach(l=>rejected.push({company:l.company,reason:(l.video&&l.video.reason)||'it failed'}));say(`${ok} of ${batch.length} made${bad.length?`; skipped ${bad.map(l=>l.company+' ('+((l.video&&l.video.reason)||'failed')+')').join(', ')}`:''}.`)}
   const auto=(S.adLeads||[]).filter(l=>l.videoAuto&&l.videoAutoApproved&&!l.emailedAt&&!queued(l)).length,look=(S.adLeads||[]).filter(l=>l.videoAuto&&!l.videoApproved&&!l.emailedAt&&!l.loomLink).length;
   say(`Videos ready: ${made}.${look?` ${look} need a human look before they go on.`:''} Uploading, saving drafts and scheduling…`);
   LM.pipeBusy=false;await loomPipeline(true);await queueSync();
   const act=(SQ.items||[]).filter(x=>x.status==='scheduled'),nx=act.length?Math.min(...act.map(x=>x.due_at)):0;
   const rdy=loomToSendBase(true).length;say(!sendAuto()&&rdy?`${rdy} approved email${rdy==1?' is':'s are'} ready. Press "Send ${rdy} approved email${rdy==1?'':'s'}" when you want ${rdy==1?'it':'them'} to go out.`:act.length?`${act.length} email(s) scheduled. The first goes out ${whenText(nx)}.`:(LM.connected===false?'Videos are ready. Connect Loom, then press Start again to upload and schedule them.':'Nothing scheduled yet; anything that needs your approval is listed above.'));
- }catch(e){say('Stopped: '+(e&&e.message||e))}finally{SO.busy=false;save();if(tab=='ads')adsV()}}
+  const s1=snap();return {made,rejected,notes,noLeads,uploaded:Math.max(0,s1.loom-s0.loom),drafted:Math.max(0,s1.drafted-s0.drafted),ready:rdy,loomDown:LM.connected===false};
+ }catch(e){say('Stopped: '+(e&&e.message||e));return {fatal:'Stopped by an error: '+(e&&e.message||e)}}finally{SO.busy=false;save();if(tab=='ads')adsV()}}
 const sqLabel={scheduled:'scheduled',sending:'sending now',sent:'sent',canceled:'canceled',failed:'failed',bounced:'bounced',skipped:'skipped'};
 function sqTable(){const q=SQ.items||[];if(!q.length)return '';const cnt=k=>q.filter(x=>x.status===k).length;
  const row=x=>{const h=(x.history||[]).slice(-1)[0],note=h?`${h.event}${h.note?': '+h.note:''}`:'',act=x.status==='scheduled'?`<button class="b" data-sq="cancel" data-id="${esc(x.id)}">Cancel</button>`:(x.status==='canceled'||x.status==='failed')?`<button class="b" data-sq="resched" data-id="${esc(x.id)}">Reschedule</button>`:'',ts=(x.status==='scheduled'||x.status==='sending')?x.due_at:x.sent_at;
@@ -916,9 +954,12 @@ async function sendReadyNow(){if(SO.busy||LM.pipeBusy||ES.busy)return;const list
  SO.busy=true;if(tab=='ads')adsV();let n=0;try{await loomStatus();n=await loomQueueApproved(true);await queueSync();
   const act=(SQ.items||[]).filter(x=>x.status==='scheduled'),nx=act.length?Math.min(...act.map(x=>x.due_at)):0;SO.msg=n?`${n} email(s) scheduled. The first goes out ${whenText(nx)}.`:(LM.pipeMsg||'Nothing was scheduled.');S.settings.readyNotified=0;save()}finally{SO.busy=false;if(tab=='ads')adsV()}}
 function startCard(){const st=ES.status||{},w=st.window||SQ.win||{start_hour:9,end_hour:17};
- return `<div class="card" style="border-color:var(--acc)"><b>Start outreach</b> <span class=mut>One button. It finds more leads in HALCRUS only when you are running low, makes the videos, checks them, uploads them to Loom, saves the emails and schedules each one for your sending hours (${w.start_hour}:00 to ${w.end_hour}:00). Anything approved outside those hours waits in the queue and goes out by itself when they open, even if this page is closed.</span>
-  <div class="row" style="margin-top:8px"><button class="b p" id="so-go" ${SO.busy||LM.pipeBusy||ES.busy?'disabled':''}>${SO.busy?'Working…':'Start outreach'}</button>
-  <label>Videos per press <input type="number" id="so-n" min="1" max="10" value="${+S.settings.startTarget||3}" style="width:56px"></label>
+ return `<div class="card" style="border-color:var(--acc)"><b>Start outreach</b> <span class=mut>Pick a template, then press the big button. For the Loom it reads your drafts, finds more leads in HALCRUS only when you are running low, makes the videos, checks them, uploads them to Loom and saves the emails as drafts. Nothing is sent until you press Send (or switch to automatic). Sending hours: ${w.start_hour}:00 to ${w.end_hour}:00. Progress and the result show right here.</span>
+  <div class="row" style="margin-top:8px"><span class=mut>Template:</span><button class="b ${runStrat()==='loom'?'p':''}" id="md-s2" title="Strategy 2: a video of their ads, the Loom email and the Loom follow-ups">2 · The Loom</button><button class="b ${runStrat()==='proposal'?'p':''}" id="md-s1" title="Strategy 1: the plain first email and its follow-ups">1 · First email</button>
+  <button class="b p" id="md-load" ${MC.busy||ES.busy||SO.busy||LM.pipeBusy||RUN.state==='working'?'disabled':''} title="${runStrat()==='loom'?'Loads your drafts, finds leads if you are running low, makes the videos, uploads them to Loom and saves the emails as drafts, then reloads the list':'Loads your drafts, writes first-email drafts for fresh leads, then reloads the list'}">${RUN.state==='working'?'⏳ Working… (see below)':runStrat()==='loom'?'▶ Load my Meta drafts + make the Loom videos':'▶ Load my Meta drafts + write first emails'}</button><button class="b" id="md-ub" title="Read, edit and approve every draft and reply from all your inboxes">📥 Open Unibox</button></div>
+  <div class="run-panel">${runPanelHTML()}</div>
+  <div class="row" style="margin-top:8px"><label>Videos per press <input type="number" id="so-n" min="1" max="10" value="${+S.settings.startTarget||3}" style="width:56px"></label>
+  <span class=mut>Loom: <b style="color:${LM.connected?'#22c55e':'#e5a000'}">${LM.connected?'connected':LM.connected===false?'not connected':'checking…'}</b></span><button class="b" id="so-lm" ${SO.busy||ES.busy||LM.pipeBusy?'disabled':''}>${LM.connected?'Reconnect Loom':'Connect Loom (log in once)'}</button>
   <span class=mut>HALCRUS: <b style="color:${HC.connected?'#22c55e':'#e5a000'}">${HC.connected?'connected':HC.connected===false?'not connected':'checking…'}</b></span><button class="b" id="so-hc" ${SO.busy||ES.busy?'disabled':''}>${HC.connected?'Reconnect HALCRUS':'Connect HALCRUS (log in once)'}</button></div>
   <div class="row" style="margin-top:4px"><label><input type="checkbox" id="so-auto" ${S.settings.autoStart?'checked':''}> Keep going by itself while this page is open: whenever fewer than <input type="number" id="so-keep" min="1" max="60" value="${+S.settings.keepScheduled||15}" style="width:56px"> emails are scheduled or on their way, find leads, make videos and schedule more</label></div>
   <div class="row" style="margin-top:4px"><label><input type="checkbox" id="so-ask" ${sendAuto()?'':'checked'}> I press Send myself. Notify me when</label> <input type="number" id="so-ready" min="1" max="60" value="${+S.settings.notifyReady||10}" style="width:56px"> <span>approved emails are ready</span>
@@ -930,7 +971,7 @@ document.addEventListener('click',async e=>{const b=e.target.closest('[data-sq]'
  try{if(b.dataset.sq==='cancel')await metaApi('/queue/cancel',{id});else await metaApi('/queue/reschedule',{id})}catch(_){}
  await queueSync();if(tab=='ads')adsV()});
 setInterval(()=>{queueSync().then(()=>{if(tab=='ads'&&!SO.busy&&!LM.pipeBusy&&!ES.busy)adsV()})},60000);
-setTimeout(()=>{queueSync();hcStatus()},3000);
+setTimeout(()=>{queueSync();hcStatus();loomStatus()},3000);
 /* ---------- Keep going by itself: no button press. Every 10 minutes (and when the page opens) it tops the pipeline up, with guards ---------- */
 async function notifyNeeds(title,message,key){try{await fetch(RUNNER+'/notify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,message,key,every:21600})})}catch(e){}}
 async function autoKeep(){const g=S.settings;if(!g.autoStart||!g.startConfirmed||SO.busy||LM.pipeBusy||ES.busy)return;if(Date.now()<(g.autoStartAfter||0))return;
@@ -946,13 +987,13 @@ async function autoKeep(){const g=S.settings;if(!g.autoStart||!g.startConfirmed|
   if(need<=0)return;
   if(look>=5){notifyNeeds('Videos need a look',`${look} videos did not pass the automatic check and are waiting for you in the CRM (Meta Ads tab). Nothing new is being made until you review them.`,'look');return later(1)}
   await loomStatus();if(LM.connected===false){notifyNeeds('Loom needs you','Loom is not connected, so new videos cannot be uploaded. Open the CRM, Meta Ads tab, and press Connect Loom.','loom-login');return later(1,'Waiting for you to connect Loom.')}
-  await startOutreach(Math.min(10,need));await queueSync();
+  runBegin('Automatic top-up');const rr=await startOutreach(Math.min(10,need));runFinishFrom(rr);await queueSync();
   const after=(SQ.items||[]).filter(x=>(x.status==='scheduled'||x.status==='sending')&&!String(x.id).includes('#fu')).length;
   if(after<=act){if(HC.connected===false)notifyNeeds('HALCRUS needs you','HALCRUS is not connected, so no new leads can be found. Open the CRM, Meta Ads tab, and press Connect HALCRUS.','hc-login');later(3)}
  }catch(e){}}
 setInterval(autoKeep,600000);setTimeout(autoKeep,30000);
 function loomWire(){const g=id=>document.getElementById(id),by=id=>(S.adLeads||[]).find(x=>x.id==id),sync=()=>{if(tab=='ads')adsV()};
- if(g('so-go')){g('so-go').onclick=()=>startOutreach();g('so-hc').onclick=()=>hcConnect();g('so-n').onchange=e=>{S.settings.startTarget=Math.max(1,Math.min(10,+e.target.value||3));save()};
+ if(g('so-n')){g('so-lm').onclick=()=>{const b=g('lp-connect');if(b)b.click()};g('so-hc').onclick=()=>hcConnect();g('so-n').onchange=e=>{S.settings.startTarget=Math.max(1,Math.min(10,+e.target.value||3));save()};
   g('so-auto').onchange=e=>{S.settings.autoStart=e.target.checked;if(e.target.checked&&!S.settings.startConfirmed){e.target.checked=false;S.settings.autoStart=false;alert('Press Start outreach once first; it asks the questions that decide what may be sent.');return}S.settings.autoStartAfter=0;save();if(e.target.checked)setTimeout(autoKeep,500)};
   g('so-keep').onchange=e=>{S.settings.keepScheduled=Math.max(1,Math.min(60,+e.target.value||15));save()};
   g('so-fu').onchange=e=>{S.settings.autoFollowUps=e.target.checked;save()};
@@ -994,11 +1035,11 @@ function adsV(){const L=(S.adLeads||[]).slice().sort((a,b)=>(!!a.contacted-!!b.c
   <td>${l.email?`${esc(l.email)} <button class="b" data-cp="${esc(l.email)}">Copy</button>`:'<span class=mut>-</span>'}${(l.siteEmails||[]).filter(e=>e!==l.email).map(e=>'<br><span class=mut>'+esc(e)+'</span>').join('')}</td>
   <td>${(l.phones||[]).length?l.phones.map(p=>`<a href="tel:+1${digits10(p)}">${esc(p)}</a>`).join('<br>'):'<span class=mut>-</span>'}</td>
   <td><button class="b" data-star2="${esc(l.id)}" title="${l.top?'Top prospect: click to remove':'Make this a top prospect for the Instagram story outreach'}">${l.top?'★':'☆'}</button> <button class="b" data-adx="${esc(l.id)}" title="Remove this advertiser">✕</button></td></tr>`;
- $('#main').innerHTML=`<div class="card"><b>Meta ads campaign</b> <span class=mut>Advertisers from the Meta Ad Library who likely spend $5,000+ a month. This list is separate from your podcast leads and is stored only in this browser. Nothing is sent from this tab yet.</span>
+ $('#main').innerHTML=`${startCard()}<div class="card"><b>Meta ads campaign</b> <span class=mut>Advertisers from the Meta Ad Library who likely spend $5,000+ a month. This list is separate from your podcast leads and is stored only in this browser. Nothing is sent from this tab yet.</span>
   <div class="row" style="margin-top:8px"><button class="b p" id="ad-go" ${AD.busy||ES.busy||!waiting?'disabled':''}>Find decision makers, emails and phones (${waiting} waiting, 10 at a time)</button><span class=mut>${esc(AD.msg)}</span></div>
   <div class="row" style="margin-top:6px"><label class="mut">Import a CSV (company, website, facebook_page columns; email, phone, decision_maker, title, linkedin optional). Your files: tools/ad_leads.csv (Ad Library) and tools/ad_leads_portal.csv (HALCRUS portal, 271 leads).</label><input type="file" id="ad-file" accept=".csv"></div></div>
-  <div class="card"><b>Google AI prompt</b> <span class=mut>Edit it any time; it is used on the next lookup. Fill-ins: {company} {website} {facebook}. If you remove the JSON answer instructions they are added back automatically. Answers are checked before they are saved: an email must be on the company's own domain, and a phone must look like a real number.</span>
-  <textarea id="ad-prompt" rows="7" style="width:100%;margin-top:6px">${esc(g.adPrompt||DEF_AD_PROMPT)}</textarea><div class="row"><button class="b" id="ad-reset">Reset to the default prompt</button></div></div>
+  <details class="card" data-sec="gai" ${secOpen('gai')}><summary><b>Google AI prompt</b> <span class=mut>Used when finding contacts. Click to open or close.</span></summary><span class=mut>Edit it any time; it is used on the next lookup. Fill-ins: {company} {website} {facebook}. If you remove the JSON answer instructions they are added back automatically. Answers are checked before they are saved: an email must be on the company's own domain, and a phone must look like a real number.</span>
+  <textarea id="ad-prompt" rows="7" style="width:100%;margin-top:6px">${esc(g.adPrompt||DEF_AD_PROMPT)}</textarea><div class="row"><button class="b" id="ad-reset">Reset to the default prompt</button></div></details>
   ${metaCards()}
   ${igCard()}
   ${loomCard()}
