@@ -241,20 +241,27 @@ def voice_gender(voice):
     return "f" if re.search(r"Ava|Emma|Aria|Jenny|Michelle|Ana|Sonia|Libby|Nancy|Jane|Sara|Amber|Ashley|Cora|Elizabeth|Monica|Clara", i) else "m"
 
 
-def build_script(facts, first, business, narrator, product, price="20 percent", host="loom"):
-    """Only what was read off the page. `narrator` is the name said in the video: the sender's own name, or empty to say no name at all."""
-    a, t, sc = facts["active"], facts["total"], facts["shared_creative_ads"]
+def build_script(facts, first, business, narrator, product="", price="", host="loom"):
+    """Strategy 2, the Loom: the Loom script from the client acquisition system, spoken as a recorded video. The only fact it states is the active ad count read off the page.
+    `narrator` is the name said in the video: the sender's own name, or empty to say no name at all. (`product` and `price` are not used: this script names neither,
+    and Strategy 1's pricing line is never mixed into it.)"""
+    a = facts["active"]
     poss = business + ("'" if business.lower().endswith("s") else "'s")
-    lines = [f"Hey {first}, it's {narrator}." if narrator else f"Hey {first}.", f"I took a look at {poss} ads in the Meta Ad Library."]
-    lines.append(f"I can see {say(a)} active ad{'s' if a != 1 else ''} right now" + (f", out of about {say(t)} in the library." if t > a else "."))
-    if sc >= 2 and facts.get("looked", 0) >= sc:
-        lines.append(f"{sc} of the first {facts['looked']} ads I looked at share the same creative and text, which is often worth checking for overlap and wasted spend.")
-    lines.append(f"{product} connects to your Meta ads account, monitors your campaigns around the clock, and automatically cuts wasted ad spend.")
-    lines.append(f"There's no setup fee, and we only take {price} of the money we actually save you. If we don't save you anything, you don't pay anything.")
+    running = f"{say(a)} different ad{'s' if a != 1 else ''}"
+    given = "given how many ads you're running" if a >= 3 else "given the ads you're running"
     if host == "loom":  # on Loom the link is clickable in the comments and the link area under the video
-        lines.append("If that sounds worth a look, you can visit our website with the link in the comments and the link area under this video. It's on your screen now too. Or just reply to my email.")
+        cta = "If you want to take a look at our website, I've linked it below this video. It's on your screen now too."
     else:
-        lines.append("If that sounds worth a look, the sign up link is on your screen now. Or just reply to my email.")
+        cta = "If you want to take a look at our website, the link is on your screen now."
+    lines = [f"Hey {first}, it's {narrator} here." if narrator else f"Hey {first}.",
+             f"I took a look at {poss} Facebook ads.",  # the Loom template says "looking right now"; this video is recorded, so it says what is true
+             f"And I noticed you're currently running {running}. I can almost guarantee some of these here are wasting your ad budget, that don't need to be, and that's money that can be right back in your pocket.",
+             "We've actually got an AI software that monitors Meta ad accounts 24/7 and automatically cuts wasted ad spend.",
+             f"And {given}, I'm extremely confident that it can help save on your ad spend.",
+             "And I believe in my product so much that we don't charge anything up front. We prove that it can get results for you before we ask you to pay us anything.",
+             cta,
+             "I think there's definitely potential we can help you out.",
+             "If you're open to trying it out or have any questions, just reply to my email and I'm happy to help."]
     return " ".join(lines)
 
 
@@ -589,13 +596,13 @@ def caption_chunks(words):
 
 
 def link_start(words, seconds):
-    """When the sign up link goes on screen: only at the call to action ("If that sounds worth a look"), which is spoken AFTER the performance-based pricing,
-    so nobody sees a sign up link before they have heard the pitch. If the wording is not found, it waits for the last sentence."""
+    """When the sign up link goes on screen: only at the call to action ("If you want to take a look at our website"), which is spoken after the pitch,
+    so nobody sees a sign up link before they have heard it. If the wording is not found, it waits for the last sentences."""
     toks = [norm(w[2]) for w in words]
-    for i in range(len(toks) - 1):
-        if toks[i] == "sounds" and toks[i + 1] == "worth" and i >= 2:
-            return words[i - 2][0]
-    return max(0.0, seconds - 8)
+    for i in range(len(toks) - 2):
+        if toks[i] == "take" and toks[i + 1] == "a" and toks[i + 2] == "look" and i >= 4 and toks[i - 2] == "want":
+            return words[i - 4][0]  # the "If" of "If you want to take a look"
+    return max(0.0, seconds - 10)
 
 
 # ------------------------------------------------------------------------------------------------ the recording

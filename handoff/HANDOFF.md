@@ -38,6 +38,12 @@ By hand, once per computer: in the CRM press "Connect Loom" and log in (the help
 - "Growth guide" tab in the CRM: the plan for growing the sending side (rules, Workspace direct, Primeforge with the Gmail API, sending with the Mac off, what runs by itself), with sources. PrivateEmail has no confirmed server-side scheduled send, so the queue sends from the helper; for Mac-off sending see that tab (wake schedule with pmset, or an always-on machine).
 - tools/install_autostart.sh (installed on this Mac): starts the helper at every login and restarts it if it stops; --open-crm also opens the CRM page at login (the keep-going loop runs in that page); --remove undoes it; --print shows what it writes.
 
+## The two strategies (never mixed)
+- Strategy 1 (plain first email, follow-ups 3 and 7 days) and Strategy 2 (the Loom: video, "Weird find in your ads" email with only the Loom link, Loom follow-ups 3 and 7 days) are separate. A lead is tagged (l.strategy: 'proposal' or 'loom'; stratOf() infers it for older leads) and the two lead pools exclude each other. The Loom template is no longer a "second touch" after another email; cold_email.plan refuses a first email of either kind within 90 days of any earlier first email, and a follow-up always uses the template of the first email actually sent.
+- The Loom email, follow-ups and the manual Loom script are the Strategy 2 text from the client acquisition document (defaults in index.html; a saved copy of the OLD defaults is replaced, edited ones are kept). The automated video script (ad_video.build_script) is the same script, spoken as a recording; no pricing percentage, and the sign-up banner starts at "If you want to take a look at our website".
+- Changed for accuracy: "I took a look at" instead of "I'm actually looking ... right now" in the recorded video; follow-up 2 no longer claims the video expires in 48 hours or that there is nothing being sold.
+- Not loaded: the "We spoke already" wording of Strategy 1 (claims a conversation that did not happen).
+
 ## Photo
 tools/assets/narrator.jpg is cropped with the face centered in the circle bubble.
 
