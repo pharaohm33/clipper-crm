@@ -44,6 +44,11 @@ By hand, once per computer: in the CRM press "Connect Loom" and log in (the help
 - Changed for accuracy: "I took a look at" instead of "I'm actually looking ... right now" in the recorded video; follow-up 2 no longer claims the video expires in 48 hours or that there is nothing being sold; it says there is no cost to take a look or start saving money on ads.
 - Not loaded: the "We spoke already" wording of Strategy 1 (claims a conversation that did not happen).
 
+## One button, the Unibox, and moving to automatic (Meta Ads tab)
+- "↻ Load my Meta drafts + ..." is one button. Pick the template with the two buttons beside it: "2 · The Loom" (loads your drafts, finds leads if you are running low, makes the videos, uploads to Loom, saves the drafts, reloads the list) or "1 · First email" (loads your drafts, writes first-email drafts for fresh leads that are not in the Loom flow, reloads the list). "📥 Open Unibox" is next to it.
+- The Unibox tab now exists in both campaigns. In Meta mode it reads the Meta drafts and replies (campaign sent to the helper), uses the Meta leads, and "Schedule the approved" puts the approved emails in the send queue (same rules as everything else). Edits you save in the Unibox are what is sent (body_override / subject_override in the lead payload). Removing a draft removes the lead from all lead pools (removedAt). Marking a reply Interested or Not Interested stops follow-ups (replied).
+- The Start card counts how your approvals go (as written, edited, removed). When about 20 or more are 90% as written it suggests unticking "I press Send myself" to run it all day (automatic mode). Add inboxes after that (Growth guide).
+
 ## Photo
 tools/assets/narrator.jpg is cropped with the face centered in the circle bubble.
 
