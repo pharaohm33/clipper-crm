@@ -1008,7 +1008,7 @@ function startCard(){const st=ES.status||{},w=st.window||SQ.win||{start_hour:9,e
   <div class="row" style="margin-top:6px"><span class=mut>Template:</span><button class="b ${runStrat()==='loom'?'p':''}" id="md-s2" title="Strategy 2: a video of their ads, the Loom email and the Loom follow-ups">2 · The Loom</button><button class="b ${runStrat()==='proposal'?'p':''}" id="md-s1" title="Strategy 1: the plain first email and its follow-ups">1 · First email</button>
    <label>Videos per press <input type="number" id="so-n" min="1" max="10" value="${+S.settings.startTarget||10}" style="width:56px"></label></div>
   <div class="row" style="margin-top:6px"><button class="b p" id="md-load" ${MC.busy||ES.busy||SO.busy||LM.pipeBusy||RUN.state==='working'?'disabled':''} title="${runStrat()==='loom'?'Loads your drafts, finds leads if you are running low, makes the videos, uploads them to Loom and saves the emails as drafts, then reloads the list':'Loads your drafts, writes first-email drafts for fresh leads, then reloads the list'}">${RUN.state==='working'?'⏳ Working… (see below)':runStrat()==='loom'?'▶ Load my Meta drafts + make the Loom videos':'▶ Load my Meta drafts + write first emails'}</button></div>
-  <div class="mut" style="margin-top:4px">Emails saved so far: <b>${stockNow()}</b> of ${stockGoal()} (${keepDays()} day${keepDays()==1?'':'s'} of sending). ${S.settings.autoStart?'It keeps going by itself after each round until it gets there.':'Turn on "Keep going by itself" below to let it run until it gets there.'}</div>
+  <div class="mut" style="margin-top:4px">Emails saved so far: <b>${stockNow()}</b> of ${stockGoal()} (${keepDays()} day${keepDays()==1?'':'s'} of sending). ${S.settings.autoStart?'It keeps going by itself after each round until it gets there.':'Turn on "Keep going by itself" below to let it run until it gets there.'}</div>${autoStatusLine()}
   <div class="run-panel">${runPanelHTML()}</div>
   ${step(3,'Check the videos','watch each one in Loom, then approve it')}
   <div class="row" style="margin-top:6px"><button class="b" id="so-approve-all" ${nWatch&&!busy?'':'disabled'} title="Marks every video in the list as watched and approved by you">✓ I watched them all, approve (${nWatch})</button><button class="b" id="so-finish" ${nFin&&!busy?'':'disabled'} title="Uploads approved videos to Loom and saves their email drafts right now">⬆ Upload to Loom + save drafts now (${nFin})</button></div>
@@ -1034,25 +1034,34 @@ setInterval(()=>{queueSync().then(()=>{if(tab=='ads'&&!SO.busy&&!LM.pipeBusy&&!E
 setTimeout(()=>{loomClean();loomSyncUploads();queueSync();hcStatus();loomStatus()},3000);
 /* ---------- Keep going by itself: no button press. Every 10 minutes (and when the page opens) it tops the pipeline up, with guards ---------- */
 async function notifyNeeds(title,message,key){try{await fetch(RUNNER+'/notify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,message,key,every:21600})})}catch(e){}}
-async function autoKeep(){const g=S.settings;if(!g.autoStart||!g.startConfirmed||SO.busy||LM.pipeBusy||ES.busy)return;if(Date.now()<(g.autoStartAfter||0))return;
- const later=(h,why)=>{g.autoStartAfter=Date.now()+h*3600e3;save();if(why)SO.msg=why;if(tab=='ads')adsV()};
- try{await loadEmailStatus();if(!ES.status||!ES.status.ready)return;
-  if(ES.status.paused&&ES.status.paused.meta)return;
+function autoStatusLine(){const g=S.settings;if(!g.autoStart||!g.startConfirmed)return '';const w=g.autoWhy,beat=g.autoBeat||0,ago=t=>{const m=Math.round((Date.now()-t)/60000);return m<1?'just now':m<60?m+' min ago':Math.round(m/60)+' h ago'};
+ const stale=beat&&Date.now()-beat>25*60000&&!SO.busy&&Date.now()>(g.autoStartAfter||0);
+ const tm=t=>new Date(t).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
+ return `<div class="mut" style="margin-top:4px">Automatic top-up: ${w?`<b>${esc(w.why)}</b>${w.until&&w.until>Date.now()?` Next try about ${tm(w.until)}.`:''} <span>(${ago(w.at)})</span>`:'no check yet.'} ${beat?`<span>Last checked ${ago(beat)}.</span>`:''}${stale?` <b style="color:#e5a000">This page has not checked for a while. Keep this tab open and in front now and then; Chrome can put background tabs to sleep (Settings, Performance, Memory Saver: add this site to the always-active list).</b>`:''}</div>`}
+async function autoKeep(){const g=S.settings;if(!g.autoStart||!g.startConfirmed||SO.busy||LM.pipeBusy||ES.busy)return;
+ g.autoBeat=Date.now();   /* proof that this page is alive and checking */
+ const why=(m,h)=>{g.autoWhy={at:Date.now(),why:m,until:h?Date.now()+h*3600e3:0};save();const ae=document.activeElement;if(tab=='ads'&&!(ae&&/^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName)))adsV()};
+ if(Date.now()<(g.autoStartAfter||0))return;
+ const later=(h,m)=>{g.autoStartAfter=Date.now()+h*3600e3;if(m)SO.msg=m;why(m||'Waiting.',h)};
+ try{await loadEmailStatus();if(!ES.status||!ES.status.ready)return why('Email is not set up or the helper is not answering.');
+  if(ES.status.paused&&ES.status.paused.meta)return why('The Meta campaign is paused (Settings).');
   await queueSync();
   if(g.autoFollowUps!==false){const f=await loomQueueFollowups();if(f)await queueSync()}
-  const act=(SQ.items||[]).filter(x=>(x.status==='scheduled'||x.status==='sending')&&!String(x.id).includes('#fu')).length,
-   flight=(S.adLeads||[]).filter(l=>l.videoAuto&&l.videoApproved&&!l.emailedAt&&!l.dnc&&!l.loomFail&&!queued(l)).length,
-   look=(S.adLeads||[]).filter(l=>l.videoAuto&&!l.videoApproved&&!l.emailedAt&&!l.dnc&&!l.loomLink&&l.video&&l.video.ok).length,
+  const look=(S.adLeads||[]).filter(l=>l.videoAuto&&!l.videoApproved&&!l.emailedAt&&!l.dnc&&!l.loomLink&&l.video&&l.video.ok).length,
    stock0=stockNow(),need=stockGoal()-stock0;
-  if(need<=0)return;
-  if(look>=5){notifyNeeds('Videos need a look',`${look} videos did not pass the automatic check and are waiting for you in the CRM (Meta Ads tab). Nothing new is being made until you review them.`,'look');return later(1)}
-  await loomStatus();if(LM.connected===false){notifyNeeds('Loom needs you','Loom is not connected, so new videos cannot be uploaded. Open the CRM, Meta Ads tab, and press Connect Loom.','loom-login');return later(1,'Waiting for you to connect Loom.')}
+  if(need<=0)return why(`Goal reached: ${stock0} emails saved (${keepDays()} day${keepDays()==1?'':'s'}). It starts again when it drops below ${stockGoal()}.`);
+  if(look>=5){notifyNeeds('Videos need a look',`${look} videos did not pass the automatic check and are waiting for you in the CRM (Meta Ads tab). Nothing new is being made until you review them.`,'look');return later(1,`${look} videos need your look (step 3). Nothing new is made until you approve or remove them.`)}
+  await loomStatus();if(LM.connected===false){notifyNeeds('Loom needs you','Loom is not connected, so new videos cannot be uploaded. Open the CRM, Meta Ads tab, and press Connect Loom.','loom-login');return later(1,'Loom is not connected. Press Connect Loom (step 1).')}
+  why(`Working: ${stock0} of ${stockGoal()} emails saved, making more.`);
   runBegin('Automatic top-up');const rr=await startOutreach(Math.min(10,need));runFinishFrom(rr);await queueSync();
-  if(rr&&rr.adBlocked)return later(1,'Waiting for the Meta Ad Library to answer again.');
+  if(rr&&rr.fatal)return later(1,'Stopped: '+String(rr.fatal).slice(0,140));
+  if(rr&&rr.adBlocked)return later(1,'The Meta Ad Library is not answering properly (likely rate limiting). Trying again in 1 hour.');
   const stock1=stockNow();
-  if(stock1<=stock0){if(HC.connected===false)notifyNeeds('HALCRUS needs you','HALCRUS is not connected, so no new leads can be found. Open the CRM, Meta Ads tab, and press Connect HALCRUS.','hc-login');later(3)}
-  else if(stock1<stockGoal())setTimeout(autoKeep,20000)   /* progress was made and there is still room: go again right away */
- }catch(e){}}
+  if(stock1<=stock0){if(HC.connected===false)notifyNeeds('HALCRUS needs you','HALCRUS is not connected, so no new leads can be found. Open the CRM, Meta Ads tab, and press Connect HALCRUS.','hc-login');
+   later(3,rr&&rr.noLeads?'No usable leads left: HALCRUS had nothing new'+(HC.connected===false?' (it is not connected: press Connect HALCRUS)':'')+'. Trying again in 3 hours.':`That round saved no new emails (${(rr&&rr.rejected||[]).length} leads were skipped, ${rr&&rr.made||0} videos made). Trying again in 3 hours.`)}
+  else if(stock1<stockGoal()){why(`${stock1} of ${stockGoal()} saved. Starting the next round.`);setTimeout(autoKeep,20000)}   /* progress was made and there is still room: go again right away */
+  else why(`Goal reached: ${stock1} emails saved.`)
+ }catch(e){why('Stopped by an error: '+String(e&&e.message||e).slice(0,140))}}
 setInterval(autoKeep,600000);setTimeout(autoKeep,30000);
 function loomWire(){const g=id=>document.getElementById(id),by=id=>(S.adLeads||[]).find(x=>x.id==id),sync=()=>{if(tab=='ads')adsV()};
  if(g('so-n')){g('so-lm').onclick=()=>{const b=g('lp-connect');if(b)b.click()};g('so-hc').onclick=()=>hcConnect();g('so-n').onchange=e=>{S.settings.startTarget=Math.max(1,Math.min(10,+e.target.value||10));save()};

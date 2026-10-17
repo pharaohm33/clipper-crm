@@ -78,6 +78,9 @@ By hand, once per computer: in the CRM press "Connect Loom" and log in (the help
 - ad_video.make(): "no advertiser found" now only counts when a canary search (nike) in the same session answers; otherwise the lead gets transient=true and the page leaves it alone (no video record, adRetry set) and stops the round ("Meta Ad Library is not answering properly"); autoKeep waits 1 hour. The all-countries search now only runs for country domains (.co.uk, .com.au, .ca ...).
 - One-time page migration (S.settings.advFix): old "no advertiser found" rejections that never got a draft are cleared so those leads are tried again.
 
+## Why the automatic top-up paused (Oct 17)
+- autoKeep records S.settings.autoWhy (what it is doing or why it paused, and when it will try again) and S.settings.autoBeat (last time it ran). The Meta Ads tab shows both under "Emails saved so far", with a warning when the page has not checked for 25+ minutes (Chrome Memory Saver can put a background tab to sleep; the loop only runs in an open page). A round that saves nothing waits 3 hours, an Ad Library block 1 hour, 5+ videos needing a look 1 hour.
+
 ## Photo
 tools/assets/narrator.jpg is cropped with the face centered in the circle bubble.
 
