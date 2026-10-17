@@ -917,6 +917,11 @@ def queue_loop():
             if time.time() - last > QUEUE_RECONCILE:
                 last = time.time()
                 send_queue.prune()
+                try:
+                    for r in send_queue.scan_replies("meta"):  # a prospect answered or asked to stop: tell the phone, and follow-ups to them stop
+                        phone_notify("Reply from " + r["email"] if r["kind"] == "replied" else "Asked to stop: " + r["email"], r.get("snippet") or "", key="reply-" + r["email"], every=7 * 86400)
+                except Exception as e:
+                    print("reply scan:", e)
                 n = send_queue.reconcile()
             queue_keep_awake()
             if STATE["running"] or not email_status()["ready"]:

@@ -285,6 +285,22 @@ def reconcile(bounce_check=None):
     return n
 
 
+def scan_replies(campaign="meta"):
+    """Looks in the sending inboxes for replies from everyone this campaign emailed (queued or not) who has not replied yet. Replies and opt-outs are logged
+    (opt-outs also go on the do-not-contact list), which stops further follow-ups to them. Returns only the NEW ones: [{email, kind, snippet}]."""
+    log = cold_email.read_log()
+    done = {e["to"].lower() for e in log if e.get("status") in ("replied", "optout", "bounced") and e.get("to")}
+    first = {}
+    for e in cold_email.sent_entries(log):
+        to = (e.get("to") or "").lower()
+        if cold_email.campaign_of(e) == campaign and to and to not in done and to not in first:
+            first[to] = int(e.get("ts") or time.time()) - 3600
+    if not first:
+        return []
+    res = cold_email.check_replies([{"id": to, "email": to, "since_ts": ts, "name": ""} for to, ts in first.items()], log_fn=lambda m: None, campaign=campaign)
+    return [{"email": f["email"], "kind": f["kind"], "snippet": f.get("snippet", "")} for f in res.get("found", []) if f["email"].lower() not in done]
+
+
 def prune():
     cut = time.time() - KEEP_DAYS * 86400
     with LOCK:
@@ -298,6 +314,6 @@ def listing():
     """What the CRM page shows: every email still waiting plus the recent past, without the stored email text."""
     with LOCK:
         items = _load()
-    out = [{k: i.get(k) for k in ("id", "to", "company", "status", "due_at", "attempts", "sent_at", "why", "replied", "from", "message_id")} | {"history": (i.get("history") or [])[-4:]} for i in items]
+    out = [{k: i.get(k) for k in ("id", "to", "company", "status", "due_at", "attempts", "sent_at", "why", "replied", "from", "message_id", "step")} | {"history": (i.get("history") or [])[-4:]} for i in items]
     out.sort(key=lambda i: (i["status"] not in ACTIVE, i.get("due_at") or i.get("sent_at") or 0))
     return out

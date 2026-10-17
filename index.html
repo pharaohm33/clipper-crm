@@ -88,7 +88,7 @@ const iso=d=>{const x=d||new Date();return x.getFullYear()+'-'+String(x.getMonth
 const today=()=>iso();const money=n=>'$'+Number(n||0).toLocaleString(undefined,{maximumFractionDigits:2});
 const addDays=(d,n)=>{const x=new Date(d+'T00:00');x.setDate(x.getDate()+n);return iso(x)};
 const monthKey=()=>today().slice(0,7);
-let tab='dash';const TABS=[['dash','Dashboard'],['today','Today'],['leads','Leads'],['email','Email'],['audit','Audit'],['unibox','Unibox'],['calls','Calls'],['ads','Meta Ads'],['find','Find Podcasts'],['money','Money'],['settings','Settings']];
+let tab='dash';const TABS=[['dash','Dashboard'],['today','Today'],['leads','Leads'],['email','Email'],['audit','Audit'],['unibox','Unibox'],['calls','Calls'],['ads','Meta Ads'],['find','Find Podcasts'],['money','Money'],['guide','Growth guide'],['settings','Settings']];
 const CAMPS=[['clips','Podcast clips','#e5484d'],['meta','Meta ads','#2f6fed'],['audit','Audit','#8b5cf6']];
 const TAB_CAMP={today:'clips',leads:'clips',email:'clips',unibox:'clips',calls:'clips',find:'clips',ads:'meta',audit:'audit'}; // dashboard, money and settings are shared
 const CAMP_HOME={clips:'email',meta:'ads',audit:'audit'};
@@ -116,7 +116,7 @@ function stats(){
  return{earned,owed,dl,remaining:Math.max(0,S.settings.goal-earned),sentToday:sentOn(today()),sentAll,rep,cl,
   fresh:S.leads.filter(l=>l.status=='New').length,fu:S.leads.filter(l=>l.status=='Sample Sent'&&l.follow&&l.follow<=today()).length,...mrrStats()}}
 function mrrStats(){const act=(S.retainers||[]).filter(r=>r.status=='Active'),mrr=act.reduce((a,r)=>a+(+r.fee||0),0);return{mrr,act:act.length,clipsM:act.reduce((a,r)=>a+(+r.clips||0),0),avgFee:act.length?mrr/act.length:0}}
-function render(){nav();({dash,today:todayV,leads,email:emailV,audit:auV,unibox:uniboxV,calls:callsV,ads:adsV,find,money:moneyV,settings})[tab]()}
+function render(){nav();({dash,today:todayV,leads,email:emailV,audit:auV,unibox:uniboxV,calls:callsV,ads:adsV,find,money:moneyV,guide:guideV,settings})[tab]()}
 function dash(){const s=stats(),g=S.settings;const pct=Math.min(100,s.earned/g.goal*100);
  const days=[...Array(14)].map((_,i)=>{const d=iso(new Date(Date.now()-(13-i)*864e5));return[d,sentOn(d)]});const mx=Math.max(g.daily,...days.map(x=>x[1]));
  const byInf={};S.payments.forEach(p=>{(byInf[p.who]=byInf[p.who]||{all:0,mo:0}).all+=p.amount;if(p.date.startsWith(monthKey()))byInf[p.who].mo+=p.amount});
@@ -809,10 +809,21 @@ async function hcStatus(){try{const r=await metaApi('/halcrus/status',{});HC.con
 async function hcConnect(){SO.msg='A Chrome window is opening. Log in to HALCRUS there. It closes by itself when you are in.';if(tab=='ads')adsV();try{await helperJob('/halcrus/login',{},()=>{})}catch(e){}await hcStatus();SO.msg=HC.connected?'HALCRUS is connected.':'HALCRUS was not connected. Try again.';if(tab=='ads')adsV()}
 /* What the helper's queue holds is the truth about sending: apply it to the leads (sent, bounced, cancelled...) */
 async function queueSync(){try{const r=await metaApi('/queue/list',{});if(!r||!r.items)return;SQ.items=r.items;SQ.inWin=r.in_send_window;SQ.win=r.window;
- for(const q of r.items){const l=(S.adLeads||[]).find(x=>String(x.id)===String(q.id));if(!l)continue;l.queueStatus=q.status;l.sendDue=q.due_at||0;
-  if(q.status==='sent'||q.status==='bounced'){if(!l.emailedAt){l.emailedAt=(q.sent_at||0)*1000||Date.now();l.loomSentAt=l.emailedAt}delete l.draftedAt;delete l.skipWhy;if(q.status==='bounced')l.bounced=l.bounced||Date.now()}
+ for(const q of r.items){const parts=String(q.id).split('#fu'),l=(S.adLeads||[]).find(x=>String(x.id)===parts[0]);if(!l)continue;
+  if(q.replied)l.replied=true;
+  if(parts.length>1){l.fuQueued=Math.max(l.fuQueued||0,q.step||+parts[1]||0);if(q.status==='sent')l.emailStep=Math.max(l.emailStep||0,q.step||+parts[1]||0);continue}
+  l.queueStatus=q.status;l.sendDue=q.due_at||0;
+  if(q.status==='sent'||q.status==='bounced'){if(!l.emailedAt){l.emailedAt=(q.sent_at||0)*1000||Date.now();l.loomSentAt=l.emailedAt}if(!l.firstEmailedAt)l.firstEmailedAt=l.emailedAt;delete l.draftedAt;delete l.skipWhy;if(q.status==='bounced')l.bounced=l.bounced||Date.now()}
   else if(q.status==='skipped')l.skipWhy=q.why||'skipped'}
  save()}catch(e){}}
+/* Follow-ups: follow up 1 three days after the first email, follow up 2 after seven, never to anyone who replied, asked to stop, or bounced. The helper's queue sends them in the sending hours. */
+const fuDue=l=>{if(!l.emailedAt||l.replied||l.dnc||l.bounced)return 0;const d=Date.now()-(l.firstEmailedAt||l.emailedAt),st=l.emailStep||0;return st===0&&d>=3*DAY-36e5?1:st===1&&d>=7*DAY-36e5?2:0};
+async function loomQueueFollowups(){const due=(S.adLeads||[]).map(l=>[l,fuDue(l)]).filter(([l,st])=>st&&(l.fuQueued||0)<st);if(!due.length)return 0;await metaGreet(due.map(x=>x[0]));let n=0;
+ for(const st of [1,2]){const grp=due.filter(x=>x[1]===st).map(x=>x[0]);if(!grp.length)continue;let r;
+  try{r=await metaApi('/queue/add',{confirm:true,campaign:'meta',step:st,template:metaTemplateObj(),items:grp.map(l=>({id:l.id+'#fu'+st,to:l.email,company:l.brandName||l.company,lead:metaPayload(l)}))})}catch(e){return n}
+  if(!r||r.error)continue;
+  for(const x of r.items||[]){const l=(S.adLeads||[]).find(y=>String(y.id)===String(x.id).split('#fu')[0]);if(l&&(x.status==='scheduled'||x.why==='already in the queue')){l.fuQueued=st;n++}}}
+ save();return n}
 async function loomQueueApproved(){const todo=loomToSend().slice(0,60);if(!todo.length)return 0;await metaGreet(todo);let r;
  try{r=await metaApi('/queue/add',{confirm:true,campaign:'meta',template:metaTemplateObj(),items:todo.map(l=>({id:l.id,to:l.email,company:l.brandName||l.company,lead:metaPayload(l)}))})}catch(e){LM.pipeMsg='Helper not running, nothing was scheduled.';return 0}
  if(!r||r.error){LM.pipeMsg='Not scheduled: '+((r&&r.error)||'no answer');return 0}
@@ -875,6 +886,7 @@ function startCard(){const st=ES.status||{},w=st.window||SQ.win||{start_hour:9,e
   <label>Videos per press <input type="number" id="so-n" min="1" max="10" value="${+S.settings.startTarget||3}" style="width:56px"></label>
   <span class=mut>HALCRUS: <b style="color:${HC.connected?'#22c55e':'#e5a000'}">${HC.connected?'connected':HC.connected===false?'not connected':'checking…'}</b></span><button class="b" id="so-hc" ${SO.busy||ES.busy?'disabled':''}>${HC.connected?'Reconnect HALCRUS':'Connect HALCRUS (log in once)'}</button></div>
   <div class="row" style="margin-top:4px"><label><input type="checkbox" id="so-auto" ${S.settings.autoStart?'checked':''}> Keep going by itself while this page is open: whenever fewer than <input type="number" id="so-keep" min="1" max="60" value="${+S.settings.keepScheduled||15}" style="width:56px"> emails are scheduled or on their way, find leads, make videos and schedule more</label></div>
+  <div class="row" style="margin-top:4px"><label><input type="checkbox" id="so-fu" ${S.settings.autoFollowUps!==false?'checked':''}> Send follow-ups by itself: follow up 1 after 3 days, follow up 2 after 7, never to anyone who replied, asked to stop or bounced</label></div>
   <div class=mut style="margin-top:6px">${esc(SO.msg||'')}</div>${SO.log.length?`<details style="margin-top:4px"><summary class=mut>What it did</summary><div class=mut>${SO.log.slice(-14).map(esc).join('<br>')}</div></details>`:''}${sqTable()}</div>`}
 document.addEventListener('click',async e=>{const b=e.target.closest('[data-sq]');if(!b)return;const id=b.dataset.id;b.disabled=true;
  try{if(b.dataset.sq==='cancel')await metaApi('/queue/cancel',{id});else await metaApi('/queue/reschedule',{id})}catch(_){}
@@ -888,7 +900,8 @@ async function autoKeep(){const g=S.settings;if(!g.autoStart||!g.startConfirmed|
  try{await loadEmailStatus();if(!ES.status||!ES.status.ready)return;
   if(ES.status.paused&&ES.status.paused.meta)return;
   await queueSync();
-  const act=(SQ.items||[]).filter(x=>x.status==='scheduled'||x.status==='sending').length,
+  if(g.autoFollowUps!==false){const f=await loomQueueFollowups();if(f)await queueSync()}
+  const act=(SQ.items||[]).filter(x=>(x.status==='scheduled'||x.status==='sending')&&!String(x.id).includes('#fu')).length,
    flight=(S.adLeads||[]).filter(l=>l.videoAuto&&l.videoApproved&&!l.emailedAt&&!l.dnc&&!l.loomFail&&!queued(l)).length,
    look=(S.adLeads||[]).filter(l=>l.videoAuto&&!l.videoApproved&&!l.emailedAt&&!l.dnc&&!l.loomLink&&l.video&&l.video.ok).length,
    keep=Math.max(1,Math.min(60,+g.keepScheduled||15)),need=keep-act-flight;
@@ -896,14 +909,15 @@ async function autoKeep(){const g=S.settings;if(!g.autoStart||!g.startConfirmed|
   if(look>=5){notifyNeeds('Videos need a look',`${look} videos did not pass the automatic check and are waiting for you in the CRM (Meta Ads tab). Nothing new is being made until you review them.`,'look');return later(1)}
   await loomStatus();if(LM.connected===false){notifyNeeds('Loom needs you','Loom is not connected, so new videos cannot be uploaded. Open the CRM, Meta Ads tab, and press Connect Loom.','loom-login');return later(1,'Waiting for you to connect Loom.')}
   await startOutreach(Math.min(10,need));await queueSync();
-  const after=(SQ.items||[]).filter(x=>x.status==='scheduled'||x.status==='sending').length;
+  const after=(SQ.items||[]).filter(x=>(x.status==='scheduled'||x.status==='sending')&&!String(x.id).includes('#fu')).length;
   if(after<=act){if(HC.connected===false)notifyNeeds('HALCRUS needs you','HALCRUS is not connected, so no new leads can be found. Open the CRM, Meta Ads tab, and press Connect HALCRUS.','hc-login');later(3)}
  }catch(e){}}
 setInterval(autoKeep,600000);setTimeout(autoKeep,30000);
 function loomWire(){const g=id=>document.getElementById(id),by=id=>(S.adLeads||[]).find(x=>x.id==id),sync=()=>{if(tab=='ads')adsV()};
  if(g('so-go')){g('so-go').onclick=()=>startOutreach();g('so-hc').onclick=()=>hcConnect();g('so-n').onchange=e=>{S.settings.startTarget=Math.max(1,Math.min(10,+e.target.value||3));save()};
   g('so-auto').onchange=e=>{S.settings.autoStart=e.target.checked;if(e.target.checked&&!S.settings.startConfirmed){e.target.checked=false;S.settings.autoStart=false;alert('Press Start outreach once first; it asks the questions that decide what may be sent.');return}S.settings.autoStartAfter=0;save();if(e.target.checked)setTimeout(autoKeep,500)};
-  g('so-keep').onchange=e=>{S.settings.keepScheduled=Math.max(1,Math.min(60,+e.target.value||15));save()}}
+  g('so-keep').onchange=e=>{S.settings.keepScheduled=Math.max(1,Math.min(60,+e.target.value||15));save()};
+  g('so-fu').onchange=e=>{S.settings.autoFollowUps=e.target.checked;save()}}
  document.querySelectorAll('[data-lm-sel]').forEach(c=>c.onchange=()=>{LM.sel[c.dataset.lmSel]=c.checked;const n=loomCandidates().filter(l=>LM.sel[l.id]&&!l.loomLink).length,b=g('lm-make');if(b){b.textContent=`Make the videos for ticked leads (${Math.min(n,3)} of ${n}, 3 at a time)`;b.disabled=LM.busy||ES.busy||!n}});
 
  g('lp-show').onchange=e=>{S.settings.loomShow=e.target.checked;save()};
@@ -1489,6 +1503,54 @@ function moneyV(){const s=stats();const RS=S.retainers=S.retainers||[];
  $('#rlog').onclick=()=>{const m=monthKey();let n=0;for(const r of RS){if(r.status!='Active')continue;if(!S.payments.some(p=>p.who==r.who&&p.date.startsWith(m))){S.payments.push({date:today(),who:r.who,amount:+r.fee});n++}}save();alert(n?`Logged ${n} retainer payment(s) for this month.`:'Every active retainer already has a payment this month.');moneyV()};
  $('#main').onchange=e=>{if(e.target.dataset.rst!=null){RS[+e.target.dataset.rst].status=e.target.value;save();moneyV()}};
  $('#main').onclick=e=>{if(e.target.dataset.dp){S.payments.splice(e.target.dataset.dp,1);save();moneyV()}if(e.target.dataset.dt){S.team.splice(e.target.dataset.dt,1);save();moneyV()}if(e.target.dataset.rd!=null){RS.splice(+e.target.dataset.rd,1);save();moneyV()}}}
+function guideV(){const L=(u,t)=>`<a href="${u}" target="_blank" rel="noopener">${t}</a>`;
+ const sec=(t,b,open)=>`<details class="card" ${open?'open':''}><summary><b>${t}</b></summary><div style="margin-top:8px;display:flex;flex-direction:column;gap:8px">${b}</div></details>`;
+ const li=a=>`<ul style="margin:0;padding-left:1.2rem;display:flex;flex-direction:column;gap:4px">${a.map(x=>`<li>${x}</li>`).join('')}</ul>`,ol=a=>`<ol style="margin:0;padding-left:1.2rem;display:flex;flex-direction:column;gap:4px">${a.map(x=>`<li>${x}</li>`).join('')}</ol>`;
+ $('#main').innerHTML=`<div class="card" style="border-color:var(--acc)"><b>Growth guide</b> <span class=mut>How to grow the sending side of this system, in the order that makes sense. Written October 2026. Prices and limits are from the sources at the bottom and change, so check them before you buy anything.</span></div>
+ ${sec('Where you are now',li([
+  '5 PrivateEmail (Namecheap) inboxes on contentengine3 .online, .site, .space, .store and .world. About 51 emails a day of capacity while they warm up (5 a day to start, +3 a day, up to 30).',
+  'SPF, DKIM and DMARC pass on all five, and both the sending and the reading logins work. The setup check warns that spam filters distrust those domain endings.',
+  'Everything from lead to scheduled send runs by itself once Loom and HALCRUS are connected (see "What runs by itself").']),true)}
+ ${sec('Rules that protect your sending reputation',li([
+  '<b>About 25 to 30 emails a day per mailbox</b> is the safe level (Primeforge says about 30). Add mailboxes to grow, not volume per mailbox. The warm-up in the system already ramps new inboxes.',
+  '<b>Use .com domains.</b> Spam filters distrust .online, .site, .space, .store and .world (mail-tester scored them about 6 out of 10). Domains that are not your main brand, with plain honest names.',
+  'SPF, DKIM and DMARC on every domain before the first email. <code>tools/check_email_setup.py</code> checks them and the logins; <code>--send-test you@address</code> sends one real test email from each inbox to you, and <code>--read-results</code> shows inbox or spam.',
+  'Every email carries your name, postal address and a way to opt out. Replies like "no thanks" go on the do-not-contact list by themselves.',
+  'Watch bounces and spam placement. If bounces climb or mail lands in spam, stop adding volume and fix that first.']))}
+ ${sec('Step 1: now (existing PrivateEmail inboxes)',li([
+  'Keep sending from the five inboxes. Turn "Keep going by itself" on in the Meta Ads tab (Start outreach card).',
+  'Follow-ups (3 and 7 days) and reply scanning now run by themselves. A reply or an opt-out stops further follow-ups and alerts your phone.',
+  'Leave the Mac awake during sending hours, or see "Sending when the Mac is off" below.']))}
+ ${sec('Step 2: Google Workspace direct (the recommended next step)',`<div>Works with the system as it is: real SMTP and IMAP with app passwords, so no code changes. Business Starter is about <b>$7 per user per month on an annual plan, $8.40 on monthly</b> (annual plans cannot drop seats until renewal).</div>`+li([
+  '<b>Start small:</b> 2 domains (.com), one mailbox each, about 25 a day each. That is about $14 a month annual, and it matches the roughly 51 a day you send now.',
+  'Keep the PrivateEmail inboxes running while the new ones warm up (about a week to reach 25 a day), then retire them.',
+  'Aliases (one mailbox for several domains) are free but share one account reputation: if Google flags the mailbox, every alias domain stops with it. Google counts alias mail toward the same user limits. If you use them, keep each mailbox under about 25 to 30 a day in total. The system would need a small change first: one shared daily cap per login and a single reply read per login.'])+
+  `<b>Checklist</b>`+ol([
+  'Buy the two .com domains and sign up for Workspace (Business Starter). Add the second domain as a secondary domain and create one user on each.',
+  'DNS on each domain: SPF <code>v=spf1 include:_spf.google.com ~all</code>, DKIM (Admin console, Apps, Google Workspace, Gmail, Authenticate email, then Start authentication), DMARC <code>v=DMARC1; p=none; rua=mailto:you@thatdomain.com</code>, and the Google MX records.',
+  'For each user: turn on 2-Step Verification, create an app password at myaccount.google.com/apppasswords, and make sure IMAP is allowed in Admin.',
+  'Run <code>python3 tools/setup_email.py</code> and type each app password yourself (hidden). Then <code>python3 tools/check_email_setup.py</code>.',
+  'Send one test email to yourself with <code>--send-test</code> and read it with <code>--read-results</code>. Only then let the queue use the inboxes.']))}
+ ${sec('Step 3: 15+ mailboxes (Primeforge with the Gmail API)',`<div>Only worth it at scale: at 5 mailboxes the saving over Workspace direct is about $12 a month and it needs a new sending backend.</div>`+li([
+  'Primeforge mailboxes are Google Workspace (or Microsoft 365) accounts, <b>OAuth only, no SMTP or IMAP</b>. About $4.50 per mailbox per month on their page; each domain is its own separate Workspace, and you get Super Admin on it.',
+  'The clean route is a <b>Google Cloud service account with domain-wide delegation</b> (a one-time admin step per domain): no per-mailbox consent screens and no 7-day token expiry. The user-consent "Login with Google" flow in Testing mode expires its tokens after 7 days, so it is the wrong tool.',
+  'To build: a Gmail API sending backend next to the SMTP one (send, drafts, replies, bounces, setup check). Their article lists only the send and settings scopes; reading replies needs a read scope that a Super Admin can authorize, but Primeforge does not confirm it.',
+  'Caveats: the mailboxes stop working if you cancel and cannot move to direct billing. The service account key can send as every mailbox in the domains you authorize, so keep it private.',
+  '<b>Prove it first</b> with one domain and one mailbox: the delegation step, one real send, reading replies. Then build and scale.']))}
+ ${sec('Sending when the Mac is off',li([
+  'PrivateEmail and SMTP have no server-side scheduled send that I could confirm (PrivateEmail runs Open-Xchange webmail; I found no "send later" in its documentation). <b>Check once yourself:</b> open privateemail.com webmail, start a message and look for a clock or an arrow next to Send. If it has "Send later", it can be automated.',
+  'Gmail has "Schedule send" in the web page but no API for it. Microsoft 365 can hold a deferred send through its Graph API, but that needs OAuth.',
+  '<b>Today:</b> the helper keeps the Mac from idle-sleeping while any email is due in the next 13 hours, restarts by itself, and starts at login. A closed laptop lid still sleeps the Mac.',
+  '<b>Wake it before sending hours:</b> run once in Terminal (needs your password): <code>sudo pmset repeat wakeorpoweron MTWRFSU 08:55:00</code>. The Mac then wakes at 8:55 every day and the helper sends. Undo with <code>sudo pmset repeat cancel</code>.',
+  '<b>Always-on option:</b> a small always-on computer (a spare Mac, a Raspberry Pi or a cheap server) running the helper. It is the one way to send with your Mac fully off, and it can be built if you want it.']))}
+ ${sec('What runs by itself, and what is yours',`<div class="tw"><table><tr><th>Runs by itself</th><th>Needs you</th></tr><tr><td>${li(['Finding leads in HALCRUS when you run low','Making videos, checking them, approving the ones that pass','Uploading to Loom, drafting, scheduling in your sending hours','Sending, retrying, moving the queue up when one drops out','Follow-ups at 3 and 7 days','Reply and opt-out scanning, bounce handling','Phone alerts (logins, failures, bounces, replies, daily summary)','Keeping the Mac awake, restarting the helper'])}</td><td>${li(['Log in to Loom and HALCRUS once (and again if they expire)','Press Start outreach once and answer the two sending questions','Videos that fail the automatic check (it stops at 5 waiting)','Answering real replies','Keeping this page open (it opens at login)','Buying domains and mailboxes, DNS, app passwords','Moving your CRM data between computers (Backup card, Export JSON)'])}</td></tr></table></div>`)}
+ ${sec('Sources',li([
+  L('https://www.emailvendorselection.com/google-workspace-pricing/','Google Workspace pricing 2026'),
+  L('https://knowledge.workspace.google.com/admin/gmail/gmail-sending-limits-in-google-workspace','Gmail sending limits in Google Workspace'),
+  L('https://help.salesforge.ai/en/articles/10333637-primeforge-google-workspace-mailboxes-super-admin-and-gmail-api-access','Primeforge: Super Admin and Gmail API access'),
+  L('https://help.salesforge.ai/en/articles/10333601-how-to-login-to-your-primeforge-mailboxes','Primeforge: OAuth only, no SMTP or IMAP'),
+  L('https://www.unipile.com/google-oauth-refresh-token/','Google OAuth refresh token expiry (7 days in Testing)'),
+  L('https://www.primeforge.ai/','Primeforge')]))}`}
 function settings(){const g=S.settings,f=(k,l,t='number')=>`<div><label>${l}</label><input data-k="${k}" type="${t}" value="${esc(g[k])}"></div>`;
  $('#main').innerHTML=`<div class="card"><div class="grid">${f('key','YouTube API key','password')}${f('goal','Monthly goal ($)')}${f('daily','Daily outreach goal')}${f('minSubs','Min subscribers')}${f('minViews','Min median views on recent full episodes (0 = no filter)')}<div><label>Only work on likely motivated leads: Today, Find emails and Prepare clips skip the rest (1 = yes, 0 = no)</label><input data-k="onlyHot" type="number" min="0" max="1" value="${esc(g.onlyHot)}"></div>${f('hotScore','Motivation score needed (0 to 10; higher = pickier)')}${f('payMin','Signs of money needed besides a website: sponsors, sponsor reads, coaching, booking calls, running deals, hiring (0 to 5)')}<div><label>Only keep leads with a sign they can pay: sponsors, coaching, booking calls, running deals (1 = yes, 0 = no)</label><input data-k="needPay" type="number" min="0" max="1" value="${esc(g.needPay)}"></div>${f('maxSubs','Max subscribers')}${f('maxDays','Max days since last upload')}${f('followDays','Follow-up days')}${f('templates','Queries per niche (1-4)')}${f('geminiKey','Gemini API key (aistudio.google.com/apikey)','password')}${f('geminiModel','Gemini model','text')}<div><label>Skip podcasts with no contact info (1 = yes, 0 = no)</label><input data-k="skipNoContact" type="number" min="0" max="1" value="${esc(g.skipNoContact)}"></div><div><label>Use Gemini to structure pasted text (1 = yes, 0 = built in parser, free)</label><input data-k="useGeminiParse" type="number" min="0" max="1" value="${esc(g.useGeminiParse)}"></div><div><label>Max % Shorts in recent uploads (0 to 100, 100 = no filter)</label><input data-k="maxShorts" type="number" min="0" max="100" value="${esc(g.maxShorts)}"></div><div><label>Instagram only (1 = only queue leads with an Instagram, 0 = Instagram first, then X / TikTok / link)</label><input data-k="igOnly" type="number" min="0" max="1" value="${esc(g.igOnly)}"></div></div>
  <h4>Google Sheet sync (so your bot sees your numbers)</h4><div class="grid">${f('syncUrl','Web app URL (…/exec)','text')}${f('syncPw','Sync password','password')}</div>
