@@ -71,9 +71,19 @@ if(S.settings.emailBody==="{Hi|Hey|Hello} there,\n\n{I just watched|I caught|I w
 if(S.settings.emailBody==="{Hi|Hey|Hello} there,\n\n{I just watched|I caught|I watched} your recent episode on {niche} and {loved it|really enjoyed it}.\n\n{personal_line}\n\nI cut a short clip from it that I think could do well on Reels, TikTok and Shorts:\n\n{clip_link}\n\n{It is yours to post, free, no strings attached.|Feel free to post it, it is yours, no strings attached.} If you'd like a few of these each week, just reply and I'll send you more.\n\n{Thanks|Best|Cheers},\n{sender}")S.settings.emailBody=DEF.settings.emailBody;
 if(S.settings.emailBody==="{Hi|Hey|Hello} there,\n\n{I just watched|I caught|I watched} your recent episode on {niche} and {loved it|really enjoyed it}. I cut a short clip from it that I think could do well on Reels, TikTok and Shorts:\n\n{clip_link}\n\n{It is yours to post, free, no strings attached.|Feel free to post it, it is yours, no strings attached.} If you'd like a few of these each week, just reply and I'll send you more.\n\n{Thanks|Best|Cheers},\n{sender}")S.settings.emailBody=DEF.settings.emailBody;
 if(/[—–]/.test(S.settings.dm)||S.settings.dm.startsWith('Hey! Just watched your latest'))S.settings.dm=DEF.settings.dm;
+const TAB_ID=Math.random().toString(36).slice(2);
+function isLeader(){try{const L=JSON.parse(localStorage.getItem('clipperLead')||'{}'),now=Date.now();if(!L.id||L.id===TAB_ID||now-L.t>150000){localStorage.setItem('clipperLead',JSON.stringify({id:TAB_ID,t:now}));return true}return false}catch(e){return true}}
+setInterval(isLeader,20000);   /* only one open CRM tab runs the automatic top-up and uploads; the others leave it alone */
 let syncT,syncMsg='';
 function setSync(m){syncMsg=m;const e=document.getElementById('sync');if(e)e.textContent=m}
-function adoptNewer(){try{const cur=JSON.parse(localStorage.getItem('clipperCRM')||'null');if(cur&&(cur._rev||0)>(S._rev||0)){const mine=S.leads||[],have=new Set((cur.leads||[]).map(l=>l.id));const next=Object.assign({},DEF,cur);next.settings=Object.assign({},DEF.settings,cur.settings);(mine).forEach(l=>{if(!have.has(l.id))next.leads.push(l)});S=next;return true}}catch(e){}return false}
+/* Two CRM tabs (the one that opens at login plus yours) share one saved copy. When the other tab saved something newer, take it over IN PLACE: objects a running job already holds
+   (a lead, the settings) stay the live ones, so a round in progress never writes its results into a copy that was thrown away. */
+function adoptNewer(){try{const cur=JSON.parse(localStorage.getItem('clipperCRM')||'null');if(cur&&(cur._rev||0)>(S._rev||0)){
+ const merge=(mine,inc)=>{const by=new Map((mine||[]).map(o=>[o&&o.id,o])),out=[];(inc||[]).forEach(o=>{const m=by.get(o.id);if(m&&m!==o){Object.keys(m).forEach(k=>{if(!(k in o))delete m[k]});Object.assign(m,o);out.push(m);by.delete(o.id)}else out.push(o)});by.forEach(o=>{if(o)out.push(o)});return out};
+ const gone=new Set([...(cur.adGone||[]),...(S.adGone||[])]),nl=merge(S.leads,cur.leads),nad=cur.adLeads||S.adLeads?merge(S.adLeads,cur.adLeads).filter(l=>!gone.has(l.id)):undefined,sett=S.settings||{};
+ const next=Object.assign({},DEF,cur);next.leads=nl;if(nad)next.adLeads=nad;next.adGone=[...gone];
+ Object.keys(sett).forEach(k=>{if(!(k in (cur.settings||{}))&&!(k in DEF.settings))delete sett[k]});Object.assign(sett,DEF.settings,cur.settings);next.settings=sett;
+ Object.keys(S).forEach(k=>delete S[k]);Object.assign(S,next);return true}}catch(e){}return false}
 function save(){adoptNewer();S._rev=(S._rev||0)+1;localStorage.setItem('clipperCRM',JSON.stringify(S));clearTimeout(syncT);if(S.settings.syncUrl&&S.settings.syncPw)syncT=setTimeout(()=>syncCall('push'),2500)}
 async function syncCall(action){const g=S.settings;if(!g.syncUrl||!g.syncPw){setSync('Sync not set up');return null}
  setSync(action=='push'?'Syncing…':'Pulling…');
@@ -833,7 +843,7 @@ async function loomPipeline(auto){if(LM.pipeBusy||ES.busy)return;LM.pipeBusy=tru
   else await readyCheck()
   if(u||d||s)say(`Uploaded ${u}, saved ${d} draft(s)${auto&&S.settings.loomAutoSend?`, scheduled ${s} to send`:''}.`);else if(!up&&!loomToDraft().length&&!(auto&&loomToSend().length))say('Nothing waiting.')
  }finally{LM.pipeBusy=false;save();if(tab=='ads')adsV()}}
-setInterval(()=>{if(S.settings.loomAuto&&!LM.pipeBusy&&!ES.busy)loomPipeline(true)},120000);
+setInterval(()=>{if(S.settings.loomAuto&&!LM.pipeBusy&&!ES.busy&&isLeader())loomPipeline(true)},120000);
 /* ---------- Start outreach: one button. Finds more leads in HALCRUS only when the pool runs low, makes the videos, uploads, drafts, and hands the sends to the helper's own scheduled queue ---------- */
 const SO={busy:false,msg:'',log:[]},HC={connected:null},SQ={items:[],inWin:null,win:null};
 const whenText=ts=>{const d=new Date(ts*1000),n=new Date(),same=d.toDateString()===n.toDateString(),tom=d.toDateString()===new Date(n.getTime()+864e5).toDateString();return (same?'today':tom?'tomorrow':d.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'}))+' '+d.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})};
@@ -1035,11 +1045,11 @@ setInterval(()=>{queueSync().then(()=>{if(tab=='ads'&&!SO.busy&&!LM.pipeBusy&&!E
 setTimeout(()=>{loomClean();loomSyncUploads();queueSync();hcStatus();loomStatus()},3000);
 /* ---------- Keep going by itself: no button press. Every 10 minutes (and when the page opens) it tops the pipeline up, with guards ---------- */
 async function notifyNeeds(title,message,key){try{await fetch(RUNNER+'/notify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,message,key,every:21600})})}catch(e){}}
-function autoStatusLine(){const g=S.settings;if(!g.autoStart||!g.startConfirmed)return '';const w=g.autoWhy,beat=g.autoBeat||0,ago=t=>{const m=Math.round((Date.now()-t)/60000);return m<1?'just now':m<60?m+' min ago':Math.round(m/60)+' h ago'};
+function autoStatusLine(){const g=S.settings;if(!g.autoStart||!g.startConfirmed)return '';let other='';try{const L=JSON.parse(localStorage.getItem('clipperLead')||'{}');if(L.id&&L.id!==TAB_ID&&Date.now()-L.t<150000)other='<div class="mut" style="margin-top:4px;color:#e5a000">Another CRM tab is running the automatic top-up, so this tab does not. That is fine: you can use either, and your changes sync between them. Close the extra tab if you want this one to take over.</div>'}catch(e){}const w=g.autoWhy,beat=g.autoBeat||0,ago=t=>{const m=Math.round((Date.now()-t)/60000);return m<1?'just now':m<60?m+' min ago':Math.round(m/60)+' h ago'};
  const stale=beat&&Date.now()-beat>25*60000&&!SO.busy&&Date.now()>(g.autoStartAfter||0);
  const tm=t=>new Date(t).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
- return `<div class="mut" style="margin-top:4px">Automatic top-up: ${w?`<b>${esc(w.why)}</b>${w.until&&w.until>Date.now()?` Next try about ${tm(w.until)}.`:''} <span>(${ago(w.at)})</span>`:'no check yet.'} ${beat?`<span>Last checked ${ago(beat)}.</span>`:''}${stale?` <b style="color:#e5a000">This page has not checked for a while. Keep this tab open and in front now and then; Chrome can put background tabs to sleep (Settings, Performance, Memory Saver: add this site to the always-active list).</b>`:''}</div>`}
-async function autoKeep(){const g=S.settings;if(!g.autoStart||!g.startConfirmed||SO.busy||LM.pipeBusy||ES.busy)return;
+ return other+`<div class="mut" style="margin-top:4px">Automatic top-up: ${w?`<b>${esc(w.why)}</b>${w.until&&w.until>Date.now()?` Next try about ${tm(w.until)}.`:''} <span>(${ago(w.at)})</span>`:'no check yet.'} ${beat?`<span>Last checked ${ago(beat)}.</span>`:''}${stale?` <b style="color:#e5a000">This page has not checked for a while. Keep this tab open and in front now and then; Chrome can put background tabs to sleep (Settings, Performance, Memory Saver: add this site to the always-active list).</b>`:''}</div>`}
+async function autoKeep(){const g=S.settings;if(!g.autoStart||!g.startConfirmed||SO.busy||LM.pipeBusy||ES.busy)return;if(!isLeader())return;
  g.autoBeat=Date.now();   /* proof that this page is alive and checking */
  const why=(m,h)=>{g.autoWhy={at:Date.now(),why:m,until:h?Date.now()+h*3600e3:0};save();const ae=document.activeElement;if(tab=='ads'&&!(ae&&/^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName)))adsV()};
  if(Date.now()<(g.autoStartAfter||0))return;
@@ -1136,7 +1146,7 @@ function adsV(){const L=(S.adLeads||[]).slice().sort((a,b)=>(!!a.contacted-!!b.c
  $('#ad-reset').onclick=()=>{g.adPrompt='';save();adsV()};
  $('#ad-file').onchange=async e=>{const f=e.target.files[0];if(!f)return;const n=importAdCSV(await f.text());AD.msg=n<0?'Could not find a company column.':`Added ${n} advertisers.`;adsV()};
  $('#ad-go').onclick=async()=>{AD.busy=true;AD.msg='Asking Google AI, about a minute per company. The Chrome window stays minimized unless Google asks you to verify.';adsV();await findAdContacts(10);AD.busy=false;AD.msg=ES.msg||'Done.';save();adsV()};
- $('#main').onclick=e=>{const d=e.target.dataset;if(d.cp){navigator.clipboard.writeText(d.cp).catch(()=>{});e.target.textContent='Copied'}else if(d.adx){S.adLeads=(S.adLeads||[]).filter(x=>x.id!=d.adx);save();adsV()}else if(d.star2){const l=(S.adLeads||[]).find(x=>x.id==d.star2);if(l){if(l.top)delete l.top;else l.top=1;save();adsV()}}}}
+ $('#main').onclick=e=>{const d=e.target.dataset;if(d.cp){navigator.clipboard.writeText(d.cp).catch(()=>{});e.target.textContent='Copied'}else if(d.adx){S.adGone=(S.adGone||[]).concat(d.adx).slice(-500);S.adLeads=(S.adLeads||[]).filter(x=>x.id!=d.adx);save();adsV()}else if(d.star2){const l=(S.adLeads||[]).find(x=>x.id==d.star2);if(l){if(l.top)delete l.top;else l.top=1;save();adsV()}}}}
 function callsV(){const L=S.leads.filter(callable).sort((a,b)=>callRank(a)-callRank(b)).slice(0,60),td=callsToday(),noNum=S.leads.filter(l=>!l.phone&&!l.dnc&&!['Removed','Not Interested','Client'].includes(l.status)&&(isHot(l)||l.emailedAt)).length,g=S.settings;
  const why=['Replied, call them now','Emailed 3+ days ago, no reply','Emailed','Hot lead, not emailed yet','Has a number'];
  const card=l=>{const last=(l.callLog||[]).slice(-1)[0],open=CS.open==l.id,cls=l.phoneHow&&/Google AI/.test(l.phoneHow);

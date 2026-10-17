@@ -81,6 +81,10 @@ By hand, once per computer: in the CRM press "Connect Loom" and log in (the help
 ## Why the automatic top-up paused (Oct 17)
 - autoKeep records S.settings.autoWhy (what it is doing or why it paused, and when it will try again) and S.settings.autoBeat (last time it ran). The Meta Ads tab shows both under "Emails saved so far", with a warning when the page has not checked for 25+ minutes (Chrome Memory Saver can put a background tab to sleep; the loop only runs in an open page). A round that saves nothing waits 3 hours, an Ad Library block 1 hour, 5+ videos needing a look 1 hour.
 
+## Two CRM tabs (Oct 17 fix)
+- The LaunchAgent opens the CRM page at every login, so there is usually the login tab plus the one you use. Both share one saved copy (localStorage clipperCRM). Before, adoptNewer() replaced the whole state object when the other tab saved, so a round in progress kept writing into thrown-away lead objects (videos recorded, progress lost, runs ending early). adoptNewer() now merges IN PLACE (leads, ad leads, settings keep their identity); removed advertisers are remembered in S.adGone so they do not come back.
+- Only one tab runs the automatic top-up and the 2-minute upload/draft/schedule pass (isLeader(): localStorage clipperLead, renewed every 20 s, taken over after 150 s). The other tab shows "Another CRM tab is running the automatic top-up". Buttons you press work in any tab.
+
 ## Photo
 tools/assets/narrator.jpg is cropped with the face centered in the circle bubble.
 
