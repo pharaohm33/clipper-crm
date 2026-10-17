@@ -39,6 +39,8 @@ PARSE_JS = r"""() => [...document.querySelectorAll('tbody tr')].map(tr => {
           company: cells[1] || '', category: cells[2] || '', intent: cells[3] || '', why: cells[4] || ''};
 })"""
 PAGE_JS = "() => (document.body.innerText.match(/Page \\d+ of [\\d,]+/) || [''])[0]"
+# the total count plus the page count: both change when a tier filter has really been applied
+SIG_JS = "() => ((document.body.innerText.match(/[\\d,]+ leads/) || [''])[0]) + '|' + ((document.body.innerText.match(/Page \\d+ of [\\d,]+/) || [''])[0])"
 
 
 class NotLoggedIn(Exception):
@@ -84,26 +86,60 @@ def _table_ready(page, timeout_ms):
         return False
 
 
-def login(timeout=600, log=print):
-    """Opens the portal in a visible window and waits until the lead table is showing, i.e. you are logged in."""
+def _login_state(ctx, page, host):
+    """What the login window is doing: 'closed' (the window was closed), 'ready' (the lead table is showing), 'in' (signed in but on another page of the portal,
+    for example its overview), or 'wait' (still at the login page)."""
+    try:
+        if page.is_closed() or not ctx.pages:
+            return "closed"
+        if _table_ready(page, 1500):
+            return "ready"
+        url = page.url or ""
+        if host and host in url and not re.search(r"login|sign-?in|auth|register|sign-?up|forgot|reset|verify|password", url, re.I):
+            return "in"
+    except Exception:
+        return "closed"
+    return "wait"
+
+
+def login(timeout=600, log=print, url=URL, show=True):
+    """Opens the portal in a visible window and waits until you are logged in. Logged in means the lead table shows, or you landed on another page of the portal
+    (then it opens the leads page itself). It closes the window by itself; if you close it first it stops at once and says so."""
+    from urllib.parse import urlparse
     from playwright.sync_api import sync_playwright
+    host = urlparse(url).netloc
     with sync_playwright() as p:
-        ctx = _ctx(p, True)
+        ctx = _ctx(p, show)
         try:
             page = ctx.pages[0] if ctx.pages else ctx.new_page()
-            page.goto(URL, wait_until="domcontentloaded")
-            log("Log in to HALCRUS in the Chrome window that opened. It closes by itself when you are in.")
+            page.goto(url, wait_until="domcontentloaded")
+            log("Log in to HALCRUS in the Chrome window that opened. It closes by itself when you are in, so leave it open until then.")
             end = time.time() + timeout
             while time.time() < end:
-                if _table_ready(page, 3000):
+                st = _login_state(ctx, page, host)
+                if st == "closed":
+                    _mark(False)
+                    log("The window was closed before the login finished. Press Connect HALCRUS again and leave the window open until it closes by itself.")
+                    return False
+                if st == "in":
+                    try:
+                        page.goto(url, wait_until="domcontentloaded")
+                    except Exception:
+                        pass
+                    st = "ready" if _table_ready(page, 20000) else "wait"
+                if st == "ready":
                     _mark(True)
                     log("HALCRUS is connected.")
                     return True
+                time.sleep(1)
             _mark(False)
             log("Timed out waiting for the login.")
             return False
         finally:
-            ctx.close()
+            try:
+                ctx.close()
+            except Exception:
+                pass
 
 
 def _page_no(page):
@@ -148,13 +184,14 @@ def fetch(want, known_emails=(), known_companies=(), tier="Hot", log=print, url=
             _mark(True)
             if tier and tier != "All":
                 sel = page.locator("select").first
-                before = page.evaluate(PAGE_JS)
-                sel.select_option(label=tier)
-                for _ in range(60):
-                    time.sleep(0.25)
-                    if page.evaluate(PAGE_JS) != before or _page_no(page)[0] == 1:
-                        break
-                time.sleep(0.8)
+                if (sel.evaluate("e => e.selectedOptions[0].text") or "").strip() != tier:
+                    before = page.evaluate(SIG_JS)
+                    sel.select_option(label=tier)
+                    for _ in range(80):  # wait up to 20 s for the filtered list to arrive: the counts change when it has
+                        time.sleep(0.25)
+                        if page.evaluate(SIG_JS) != before:
+                            break
+                    time.sleep(0.8)
             target = int(start_page or _state().get(tier, 1))
             cur, last = _page_no(page)
             while cur < target and _next(page):  # jump to where the last run stopped
@@ -167,9 +204,11 @@ def fetch(want, known_emails=(), known_companies=(), tier="Hot", log=print, url=
                 for r in rows:
                     em, co = (r["email"] or "").lower().strip(), r["company"].strip()
                     key = re.sub(r"[^a-z0-9]", "", co.lower())
+                    t = re.search(r"Hot|Warm|Nurture", r["intent"])
+                    if tier and tier != "All" and t and t.group(0) != tier:  # safety net: only the tier that was asked for, whatever the dropdown did
+                        continue
                     if not em or not co or em in emails or key in companies or _domain(em) in domains or "weaker fit" in r["why"].lower():
                         continue
-                    t = re.search(r"Hot|Warm|Nurture", r["intent"])
                     found.append({"email": em, "name": r["name"], "others": r["others"], "company": co, "category": r["category"],
                                   "score": int((re.search(r"\d+", r["intent"]) or [0])[0] or 0) if re.search(r"\d+", r["intent"]) else 0,
                                   "tier": t.group(0) if t else "", "why": r["why"], "page": cur})
