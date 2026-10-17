@@ -806,6 +806,7 @@ const queued=l=>['scheduled','sending','sent','canceled','failed','bounced','ski
 const loomToSendBase=manual=>(S.adLeads||[]).filter(l=>l.videoAuto&&l.videoApproved&&(manual||!l.videoAutoApproved||S.settings.loomSendChecked)&&l.loomLink&&l.draftedAt&&!l.emailedAt&&!l.dnc&&!queued(l));
 const loomToSend=()=>loomToSendBase(false);
 (()=>{const g=S.settings;if(!g.fastMig){g.fastMig=1;g.startTarget=10;g.sendMode='auto';g.keepDays=2;g.aiEmailCheck=false;g.autoStartAfter=0}})();   // one time: 10 videos per press, auto-schedule, keep 2 days of emails saved, no slow one-by-one AI check
+(()=>{const g=S.settings;if(!g.advFix){g.advFix=1;(S.adLeads||[]).forEach(l=>{if(l.video&&!l.video.ok&&/^no advertiser found/i.test(l.video.reason||'')&&!l.emailedAt&&!l.draftedAt){delete l.video}})}})();   // one time: the lookups were failing, so those 'no advertiser' rejections are tried again
 const sendAuto=()=>S.settings.sendMode==='auto';   // default: you press Send yourself and get a notification when enough are ready
 const loomTitle=l=>`A quick look at ${l.brandName||(l.greet&&l.greet.business)||l.company}'s Meta ads`;
 async function loomUploadApproved(){const todo=loomToUpload().slice(0,3);if(!todo.length)return 0;let n=0;
@@ -874,7 +875,7 @@ async function halcrusMore(n){await hcStatus();if(!HC.connected)return -1;
  HC.lastFound=end?end.found||0:0;save();if(end&&end.needs_login){HC.connected=false;return -1}if(end&&end.error)return -2;return got}
 async function makeAdVideos(todo){const by=id=>(S.adLeads||[]).find(x=>x.id==id),nm=x=>String(x||'').toLowerCase().replace(/[^a-z0-9]/g,'');
  await helperJob('/ads/video',{items:todo.map(l=>({id:l.id,company:l.company,email:l.email,web:l.web||'',first:(l.greet&&l.greet.first)||l.company,business:(l.greet&&l.greet.business)||l.company})),voice:voiceSel(),narrator:narratorName(),product:meta().product,link:'https://portal.aiadsoptimization.com/signup',host:S.settings.videoHost||'loom'},t=>{
-  const r=parseTag(t,'ADVIDEO');if(!r)return;const l=by(r.id);if(!l)return;l.video={ok:r.ok,reason:r.reason,link:r.link,facts:r.facts,script:r.script,madeAt:Date.now()};
+  const r=parseTag(t,'ADVIDEO');if(!r)return;const l=by(r.id);if(!l)return;if(r.transient){AD.lookupFail=(AD.lookupFail||0)+1;l.adRetry=Date.now();delete l.video;save();return}l.video={ok:r.ok,reason:r.reason,link:r.link,facts:r.facts,script:r.script,madeAt:Date.now()};
   if(r.ok&&r.display_name&&nm(r.display_name)!==nm(l.company))l.brandName=r.display_name;
   if(r.ok){l.strategy='loom';l.video.file=r.file;if(r.facts&&r.facts.active)l.adsCount=r.facts.active;l.videoAuto=1;l.videoQa=r.qa||null;l.videoApproved=(r.qa&&r.qa.ok&&S.settings.videoAutoApprove!==false)?Date.now():0;l.videoAutoApproved=l.videoApproved?1:0;l.video.host=S.settings.videoHost||'loom';if(r.link&&l.video.host==='drive')l.loomLink=r.link}
   save()});
@@ -937,7 +938,7 @@ async function startOutreach(count){if(SO.busy||LM.pipeBusy||ES.busy)return {bus
   await queueSync();await loomStatus();
   const snap=()=>({loom:(S.adLeads||[]).filter(l=>l.loomLink).length,drafted:(S.adLeads||[]).filter(l=>l.draftedAt||l.emailedAt).length}),s0=snap(),rejected=[],notes=[];let noLeads=false;
   if(LM.connected===false){say('Note: Loom is not connected, so videos will be made but not uploaded until you press "Connect Loom".');notes.push('Loom is not connected: press "Connect Loom" and log in so the videos can be uploaded.')}
-  let made=0,tries=0,noHc=false;
+  let made=0,tries=0,noHc=false,adBlocked=false;
   while(made<target&&tries<14){tries++;
    let pool=startPool();
    if(pool.length<(target-made)*2&&!noHc){say(`Only ${pool.length} lead(s) ready, looking for more in HALCRUS…`);
@@ -955,9 +956,10 @@ async function startOutreach(count){if(SO.busy||LM.pipeBusy||ES.busy)return {bus
      if(el.no.length)say(`${el.no.length} lead(s) skipped before making a video (${[...new Set(el.no.map(x=>x.why))].slice(0,2).join('; ')}).`)}
     pool=startPool()}
    const batch=pool.slice(0,Math.min(5,target-made));if(!batch.length){say(made?'No more leads to make videos for.':'There are no leads to make videos for.');if(!made)noLeads=true;break}
-   say(`Making ${batch.length} video(s): ${batch.map(l=>l.company).join(', ')}…`);await metaGreet(batch);
+   say(`Making ${batch.length} video(s): ${batch.map(l=>l.company).join(', ')}…`);await metaGreet(batch);AD.lookupFail=0;
    const ok=await makeAdVideos(batch);made+=ok;
-   const bad=batch.filter(l=>!(l.video&&l.video.ok));bad.forEach(l=>rejected.push({company:l.company,reason:(l.video&&l.video.reason)||'it failed'}));say(`${ok} of ${batch.length} made${bad.length?`; skipped ${bad.map(l=>l.company+' ('+((l.video&&l.video.reason)||'failed')+')').join(', ')}`:''}.`)}
+   if(AD.lookupFail>=Math.max(2,batch.length-ok)&&!ok){say('The Meta Ad Library is not answering properly right now (it may be limiting requests). Stopping here and trying again later; none of these leads were marked as rejected.');notes.push('The Meta Ad Library stopped answering (likely rate limiting). Leads were not rejected; it will try again later.');adBlocked=true;break}
+   const bad=batch.filter(l=>l.video&&!l.video.ok);bad.forEach(l=>rejected.push({company:l.company,reason:(l.video&&l.video.reason)||'it failed'}));say(`${ok} of ${batch.length} made${bad.length?`; skipped ${bad.map(l=>l.company+' ('+((l.video&&l.video.reason)||'failed')+')').join(', ')}`:''}.`)}
   const auto=(S.adLeads||[]).filter(l=>l.videoAuto&&l.videoAutoApproved&&!l.emailedAt&&!queued(l)).length,look=(S.adLeads||[]).filter(l=>l.videoAuto&&!l.videoApproved&&!l.emailedAt&&!l.loomLink).length;
   say(`Videos ready: ${made}.${look?` ${look} need a human look before they go on.`:''} Uploading, saving drafts and scheduling…`);
   LM.pipeBusy=false;await loomPipeline(true);await queueSync();
@@ -966,7 +968,7 @@ async function startOutreach(count){if(SO.busy||LM.pipeBusy||ES.busy)return {bus
   const nc=(S.adLeads||[]).filter(l=>l.loomNoComment&&!l.emailedAt).length,ot=(S.adLeads||[]).filter(l=>l.loomOther&&!l.emailedAt).length;
   if(nc)notes.push(`${nc} video${nc==1?' is':'s are'} on Loom but the comment with the sign up link was not posted: add it in Loom, or run again.`);
   if(ot)notes.push(`${ot} video${ot==1?'':'s'} show other links under them in Loom. Only the sign up link is wanted: remove the others in Loom.`);
-  const s1=snap();return {made,rejected,notes,noLeads,uploaded:Math.max(0,s1.loom-s0.loom),drafted:Math.max(0,s1.drafted-s0.drafted),ready:rdy,loomDown:LM.connected===false};
+  const s1=snap();return {made,rejected,notes,noLeads,adBlocked,uploaded:Math.max(0,s1.loom-s0.loom),drafted:Math.max(0,s1.drafted-s0.drafted),ready:rdy,loomDown:LM.connected===false};
  }catch(e){say('Stopped: '+(e&&e.message||e));return {fatal:'Stopped by an error: '+(e&&e.message||e)}}finally{SO.busy=false;save();if(tab=='ads')adsV()}}
 const sqLabel={scheduled:'scheduled',sending:'sending now',sent:'sent',canceled:'canceled',failed:'failed',bounced:'bounced',skipped:'skipped'};
 function sqTable(){const q=SQ.items||[];if(!q.length)return '';const cnt=k=>q.filter(x=>x.status===k).length;
@@ -1046,6 +1048,7 @@ async function autoKeep(){const g=S.settings;if(!g.autoStart||!g.startConfirmed|
   if(look>=5){notifyNeeds('Videos need a look',`${look} videos did not pass the automatic check and are waiting for you in the CRM (Meta Ads tab). Nothing new is being made until you review them.`,'look');return later(1)}
   await loomStatus();if(LM.connected===false){notifyNeeds('Loom needs you','Loom is not connected, so new videos cannot be uploaded. Open the CRM, Meta Ads tab, and press Connect Loom.','loom-login');return later(1,'Waiting for you to connect Loom.')}
   runBegin('Automatic top-up');const rr=await startOutreach(Math.min(10,need));runFinishFrom(rr);await queueSync();
+  if(rr&&rr.adBlocked)return later(1,'Waiting for the Meta Ad Library to answer again.');
   const stock1=stockNow();
   if(stock1<=stock0){if(HC.connected===false)notifyNeeds('HALCRUS needs you','HALCRUS is not connected, so no new leads can be found. Open the CRM, Meta Ads tab, and press Connect HALCRUS.','hc-login');later(3)}
   else if(stock1<stockGoal())setTimeout(autoKeep,20000)   /* progress was made and there is still room: go again right away */
@@ -1081,7 +1084,7 @@ function loomWire(){const g=id=>document.getElementById(id),by=id=>(S.adLeads||[
  document.querySelectorAll('[data-lm-date]').forEach(i=>i.onchange=()=>{const l=by(i.dataset.lmDate);if(l){l.contactedAt=i.value?new Date(i.value+'T12:00:00').getTime():0;save();sync()}});
  document.querySelectorAll('[data-lm-copy]').forEach(b=>b.onclick=()=>{const[i,k]=b.dataset.lmCopy.split('|'),l=by(i);if(!l)return;navigator.clipboard.writeText(loomText(meta()[k],l)).catch(()=>{});b.textContent='Copied'});
  g('lm-make').onclick=async()=>{const todo=loomCandidates().filter(l=>LM.sel[l.id]&&!l.loomLink).slice(0,3);if(!todo.length)return;LM.busy=true;LM.msg='Working out who each video says Hey to…';sync();await metaGreet(todo);LM.msg=`Making ${todo.length} video(s). About 2 minutes each, in the background.`;sync();
-  await helperJob('/ads/video',{items:todo.map(l=>({id:l.id,company:l.company,email:l.email,web:l.web||'',first:(l.greet&&l.greet.first)||l.company,business:(l.greet&&l.greet.business)||l.company})),voice:voiceSel(),narrator:narratorName(),product:meta().product,link:'https://portal.aiadsoptimization.com/signup',host:S.settings.videoHost||'loom'},t=>{const r=parseTag(t,'ADVIDEO');if(!r)return;const l=by(r.id);if(!l)return;l.video={ok:r.ok,reason:r.reason,link:r.link,facts:r.facts,script:r.script,madeAt:Date.now()};if(r.ok&&r.display_name&&r.display_name.toLowerCase().replace(/[^a-z0-9]/g,'')!==String(l.company).toLowerCase().replace(/[^a-z0-9]/g,''))l.brandName=r.display_name;if(r.ok){l.strategy='loom';l.video.file=r.file;if(r.facts&&r.facts.active)l.adsCount=r.facts.active;if(r.ok){l.videoAuto=1;l.videoQa=r.qa||null;l.videoApproved=(r.qa&&r.qa.ok&&S.settings.videoAutoApprove!==false)?Date.now():0;l.videoAutoApproved=l.videoApproved?1:0;l.video.host=S.settings.videoHost||'loom';if(r.link&&l.video.host==='drive')l.loomLink=r.link}}save()});
+  await helperJob('/ads/video',{items:todo.map(l=>({id:l.id,company:l.company,email:l.email,web:l.web||'',first:(l.greet&&l.greet.first)||l.company,business:(l.greet&&l.greet.business)||l.company})),voice:voiceSel(),narrator:narratorName(),product:meta().product,link:'https://portal.aiadsoptimization.com/signup',host:S.settings.videoHost||'loom'},t=>{const r=parseTag(t,'ADVIDEO');if(!r)return;const l=by(r.id);if(!l)return;if(r.transient){AD.lookupFail=(AD.lookupFail||0)+1;l.adRetry=Date.now();delete l.video;save();return}l.video={ok:r.ok,reason:r.reason,link:r.link,facts:r.facts,script:r.script,madeAt:Date.now()};if(r.ok&&r.display_name&&r.display_name.toLowerCase().replace(/[^a-z0-9]/g,'')!==String(l.company).toLowerCase().replace(/[^a-z0-9]/g,''))l.brandName=r.display_name;if(r.ok){l.strategy='loom';l.video.file=r.file;if(r.facts&&r.facts.active)l.adsCount=r.facts.active;if(r.ok){l.videoAuto=1;l.videoQa=r.qa||null;l.videoApproved=(r.qa&&r.qa.ok&&S.settings.videoAutoApprove!==false)?Date.now():0;l.videoAutoApproved=l.videoApproved?1:0;l.video.host=S.settings.videoHost||'loom';if(r.link&&l.video.host==='drive')l.loomLink=r.link}}save()});
   const ok=todo.filter(l=>l.video&&l.video.ok).length;const auto=todo.filter(l=>l.video&&l.video.ok&&l.videoAutoApproved).length;LM.busy=false;LM.msg=`${ok} of ${todo.length} videos made${auto?`, ${auto} passed the automatic check and were approved`:''}.${ok-auto?' Watch the others and tick approve before drafting.':''} ${todo.filter(l=>l.video&&!l.video.ok).length?'Some leads were skipped, the reason is shown on the row.':''}`;LM.sel={};save();sync();if(S.settings.loomAuto)setTimeout(()=>loomPipeline(true),600)};
  g('lm-prev').onclick=async()=>{const l=(S.adLeads||[]).find(x=>LM.sel[x.id]&&x.loomLink);if(!l){LM.msg='Tick a lead that has a Loom link first.';return sync()}await metaGreet([l]);
   try{const r=await metaApi('/email/preview',{leads:[metaPayload(l)],template:metaTemplateObj(),limit:1,step:0});const it=(r.items||[])[0];LM.pv=it&&it.status==='ready'?`To: ${it.to}\nSubject: ${it.subject}\n\n${it.body}`:'Skipped: '+(it?it.why:'no result');LM.msg=''}catch(e){LM.msg='Helper not running.'}sync()};

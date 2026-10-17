@@ -73,6 +73,11 @@ By hand, once per computer: in the CRM press "Connect Loom" and log in (the help
 - ad_video.make(): US Ad Library first; if nothing there is this brand (no candidates, or the brand check fails), it looks in the all-countries Ad Library, but only at pages named like the brand (finds UK/Canadian shops such as homemadebrownie.co.uk). HALCRUS rows carry no ad data (the "why" text is the same generic scoring blurb), so nothing in them can predict who advertises.
 - Each lead in the advertisers table shows its template: Template 2 (Loom) sent / scheduled / draft saved, Template 1 sent, "Free for Template 1" (no Loom possible: no Meta ads found or ads are not this brand), Not used yet, or Do not email. Filter buttons above the table. The "1 · First email" button writes drafts for the Free leads first (metaFresh sorts them first and skips leads whose email is not usable). HALCRUS leads now also keep their category (l.category) for later learning which categories advertise.
 
+## Ad Library lookups that fail quietly (Oct 17 fix)
+- A 29 minute run rejected about 65 leads as "no advertiser found", including brands that certainly advertise (Primal Kitchen, Stussy, Tom Beckbe); re-tested a few minutes later they were found. The lookups had been failing (probably Meta limiting requests; the all-countries fallback had also quadrupled the searches per lead).
+- ad_video.make(): "no advertiser found" now only counts when a canary search (nike) in the same session answers; otherwise the lead gets transient=true and the page leaves it alone (no video record, adRetry set) and stops the round ("Meta Ad Library is not answering properly"); autoKeep waits 1 hour. The all-countries search now only runs for country domains (.co.uk, .com.au, .ca ...).
+- One-time page migration (S.settings.advFix): old "no advertiser found" rejections that never got a draft are cleared so those leads are tried again.
+
 ## Photo
 tools/assets/narrator.jpg is cropped with the face centered in the circle bubble.
 

@@ -137,6 +137,23 @@ def dest_hosts(pg):
     return pg.evaluate("""()=>[...document.querySelectorAll("a[href*='l.facebook.com/l.php']")].map(a=>{try{return new URL(new URL(a.href).searchParams.get('u')).hostname.toLowerCase()}catch(e){return ''}}).filter(Boolean)""")
 
 
+def lookup_healthy(pg, log):
+    """True when the Ad Library answers a search for a brand that certainly advertises. A 'no advertiser found' only counts when this is true: if Meta is
+    rate-limiting or not answering, an empty result says nothing about the lead."""
+    COUNTRY[0] = "US"
+    try:
+        pg.goto(lib_url(q="nike", search_type="keyword_unordered"), wait_until="domcontentloaded")
+        return settle(pg, log, 15) == "results"
+    except Exception:
+        return False
+
+
+def foreign_domain(domain):
+    """A country domain (.co.uk, .com.au, .ca ...): its ads are likelier to be outside the US."""
+    tld = str(domain).lower().rsplit(".", 1)[-1]
+    return len(tld) == 2 and tld not in ("us", "co", "io", "ai", "me", "tv", "fm", "ly", "gg")
+
+
 def candidates(pg, domain, company, log):
     """Advertiser ids from a keyword search on the domain (then on the company name), most frequent first: [(page_id, page_name)]."""
     out = []
@@ -822,7 +839,9 @@ def make(item, voice=DEFAULT_VOICE, sender="Emmanuel", product="AI Ads Optimizat
             ctx = browser.new_context(viewport=VIEWPORT, locale="en-US")
             pg = ctx.new_page()
             chosen, rejected, any_cands, seen = None, [], False, set()
-            for country in ("US", "ALL"):  # the US Ad Library first; all countries when nothing there is this brand (a UK or Canadian shop)
+            for country in ("US", "ALL"):  # the US Ad Library first; all countries when nothing there is this brand, for country domains only (a UK or Canadian shop)
+                if country == "ALL" and not foreign_domain(domain):
+                    continue
                 COUNTRY[0] = country
                 if country == "ALL":
                     log("  nothing matching in the US ads; looking in the all-countries Ad Library")
@@ -844,6 +863,9 @@ def make(item, voice=DEFAULT_VOICE, sender="Emmanuel", product="AI Ads Optimizat
                 if chosen:
                     break
             if not any_cands:
+                if not lookup_healthy(pg, log):
+                    COUNTRY[0] = "US"
+                    return {"ok": False, "transient": True, "reason": "the Ad Library did not answer properly (it may be limiting requests), so nothing was decided about this lead"}
                 COUNTRY[0] = "US"
                 return {"ok": False, "reason": f"no advertiser found in the Ad Library for {domain} or {company}"}
             if not chosen:

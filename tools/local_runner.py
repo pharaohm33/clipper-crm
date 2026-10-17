@@ -677,7 +677,7 @@ def run_ad_video(items, voice, product, link=None, host="loom", narrator=None):
                         log("   (could not make a share link: " + ((shared or {}).get("error") or ("the clipper app is not running" if code == 0 else str(code))) + ")")
                 except Exception as e:
                     log("   (could not share the video: " + str(e)[:100] + ")")
-            log("ADVIDEO " + json.dumps({"id": it.get("id"), "ok": bool(res.get("ok")), "reason": res.get("reason", ""), "link": share, "file": res.get("file", ""),
+            log("ADVIDEO " + json.dumps({"id": it.get("id"), "ok": bool(res.get("ok")), "reason": res.get("reason", ""), "transient": bool(res.get("transient")), "link": share, "file": res.get("file", ""),
                                          "facts": res.get("facts", {}), "script": res.get("script", ""), "seconds": res.get("seconds", 0), "display_name": res.get("display_name", ""), "voice": res.get("voice", ""), "ad_clicks": res.get("ad_clicks", 0), "qa": qa}))
             if n < len(items) - 1:
                 time.sleep(random.uniform(4, 8))
